@@ -237,13 +237,7 @@ try {
     .fill(join(project, 'source-skill'));
   const skillInstallForm = page.locator('.skill-install-form');
   await skillInstallForm.waitFor({ state: 'visible' });
-  await skillInstallForm.evaluate((form) => {
-    const input = form.querySelector('input');
-    if (!(input instanceof HTMLInputElement) || !input.value.trim()) {
-      throw new Error('Skill source input was not retained before confirmation');
-    }
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-  });
+  await skillInstallForm.getByRole('button', { name: 'Install skill', exact: true }).click();
   await confirm(skillInstallForm);
   card = page
     .locator('.workspace-resource-card')

@@ -65,8 +65,9 @@ export function createWorkspaceChrome({ $, state, t, codexIcon, menu, returnToWo
     if(customizeTab==='skills') {
       const form=document.createElement('form');form.className='skill-install-form';
       const label=document.createElement('label');label.textContent=t('Local skill folder');const input=document.createElement('input');input.className='settings-input';input.required=true;input.placeholder=t('Folder containing SKILL.md');input.setAttribute('aria-label',t('Local skill folder'));label.append(input);
-      const button=document.createElement('button');button.type='submit';button.className='settings-action';button.textContent=t('Install skill');form.append(label,button);
-      form.onsubmit=event=>{event.preventDefault();confirmChange(form,{kind:'skill',action:'install',source:input.value.trim()});};content.prepend(form);
+      const button=document.createElement('button');button.type='button';button.className='settings-action';button.textContent=t('Install skill');
+      const install=()=>{if(!input.reportValidity())return;confirmChange(form,{kind:'skill',action:'install',source:input.value.trim()});};
+      button.onclick=install;form.onsubmit=event=>{event.preventDefault();install();};form.append(label,button);content.prepend(form);
     }
 
   }
