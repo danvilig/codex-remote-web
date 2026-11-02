@@ -4,7 +4,7 @@ This is a prerelease, single-user developer workspace. Codex can execute command
 
 ## Reporting
 
-The intended channel is GitHub private vulnerability reporting for this project’s future public repository. No project repository or reporting endpoint has been configured or verified yet. A SECURITY.md file alone does not enable this feature. Before publication, the repository administrator must enable Private vulnerability reporting in Settings → Security and quality → Advanced Security, then verify the Report a vulnerability button on Security → Advisories and that its form targets this project. Update this paragraph only after that verification. See the [GitHub enablement instructions](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository) and [local release gates](docs/RELEASING.md). Do not publish exploit details in issues or send independent-project reports to the reference project. No maintainer contact or repository address is implied here.
+Use [GitHub private vulnerability reporting](https://github.com/danvilig/codex-remote-web/security/advisories/new) for this project. The repository setting has been enabled and verified through the GitHub API. Sign in to GitHub to submit a private report. Do not publish exploit details in issues or send independent-project reports to the reference project. See the [release process](docs/RELEASING.md) for maintainer verification steps.
 
 ## Access boundaries
 
@@ -13,7 +13,7 @@ The intended channel is GitHub private vulnerability reporting for this project�
 - Cloudflare mode requires a valid application JWT and the configured single identity on HTTP, SSE and both WebSocket entrypoints. Loopback, passwords and Basic/Bearer tokens do not bypass it.
 - Access authentication does not change Codex command approval, sandbox configuration or Linux permissions. File downloads, native config changes and browser RPCs retain their existing allowlists.
 - Live connection expiry is enforced by this application. Access revocation is not claimed to terminate established sockets immediately; see the deployment guide for connection limits and validation.
-- Browser disconnects do not stop Codex tasks while the gateway remains alive. Restarting the gateway or App Server can interrupt execution; durable restart recovery and submission idempotency are not implemented.
+- Browser disconnects do not stop Codex tasks while the gateway remains alive. UUID-bound receipts and a persistent queue coordinate submissions from this application; uncertain submissions are not automatically replayed and queues pause after a gateway restart. This does not guarantee native exactly-once execution or restore model tasks after the App Server exits.
 - Independent PTY and review writes require explicit server-side capability switches and remain disabled by default.
 
 Raw Access JWTs, credentials, private prompts and full protocol payloads must not be logged by authentication code or placed in a release artifact. Historical environment notes and extracted resources are excluded from public source snapshots and release packages. This is an independently redesigned project whose primary security boundary is Cloudflare Tunnel + Access; the private development repository retains its history, while public snapshots start with an independent initial commit and retain only the necessary reference-project/development provenance. Removing a resource from a development commit does not erase earlier history.
