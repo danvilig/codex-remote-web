@@ -1,6 +1,6 @@
 # 本地 Alpha 发布流程
 
-目标版本为 `0.2.0-alpha.2`。本流程只准备本地候选或 CI Artifact，不创建远程仓库、不推送、不打标签、不上传 GitHub Release，不重启 WebUI 或 Tunnel。
+目标版本为 `0.2.0-alpha.2`。本地脚本只准备候选或 CI Artifact，不自动推送、打标签、上传 GitHub Release 或重启服务。公开仓库为 `danvilig/codex-remote-web`，首次公开从独立快照开始，后续在其 `main` 分支正常追加提交。
 
 ## 公开源码快照
 
@@ -83,3 +83,11 @@ bun run candidate:prepare
 4. 在目标仓库实际运行 Verify 与手动 prerelease 工作流，确认 Actions 权限、浏览器和镜像构建都通过，再决定标签和正式上传。
 
 两个工作流共享 `verify:release`，均执行依赖审计、临时访问、WebKit 预检和合成性能回归；有 cloudflared 时执行离线验证。验证后调用 `candidate:prepare`，导出并扫描干净独立快照后构建。手动流程只上传候选 CI Artifact，未调用公开发布 API。Artifact 的可见性由目标仓库设置决定。
+
+## Linux GitHub Release
+
+`.github/workflows/release.yml` 独立于候选脚本。经维护者确认发布后，将版本标签（例如 `v0.2.0-alpha.2`）指向已经通过 Verify 的公开提交，再推送该标签；也可以针对已有标签手动触发工作流。工作流检查标签与 `package.json` 版本一致，并固定检出的提交，不能将未通过 Verify 的提交发布。
+
+构建矩阵使用原生 `ubuntu-24.04`（x64）和 `ubuntu-24.04-arm`（arm64）runner，各自完成冻结安装、PTY 重建、构建、单元测试、打包及对该归档的生产安装/启动/文件/终端回归。归档仅包含 JS 与静态资源等白名单文件，依赖在目标机器安装，不是包含 Bun/Node 的独立二进制。当前不声明支持 32 位 ARM 或 musl/Alpine 原生部署。
+
+两端均通过后才创建 GitHub 预发布版本，上传两个 `linux-x64` / `linux-arm64` 归档、各自使用纯文件名的 `.sha256` 和汇总 `SHA256SUMS`。仅下载一种架构时校验对应 `.sha256`；下载两种归档时可运行 `sha256sum -c SHA256SUMS`。GitHub 自动提供标签源码下载，无需再上传重复源码包。本流程不部署到现有服务，也不修改 Tunnel。

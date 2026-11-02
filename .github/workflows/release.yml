@@ -12,14 +12,33 @@ on:
         default: v0.2.0-alpha.2
 
 permissions:
-  contents: write
+  contents: read
+  actions: read
 
 env:
   RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
 
 jobs:
+  verify:
+    name: Require passing Verify for the tagged commit
+    runs-on: ubuntu-24.04
+    outputs:
+      revision: ${{ steps.gate.outputs.revision }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+      - id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          revision="$(git rev-parse HEAD)"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${revision}&event=push" \
+            --jq 'any(.workflow_runs[]; .path == ".github/workflows/ci.yml" and .conclusion == "success")' | grep -qx true
+          echo "revision=${revision}" >> "$GITHUB_OUTPUT"
   build:
     name: Build ${{ matrix.arch }} Linux package
+    needs: verify
     strategy:
       fail-fast: false
       matrix:
@@ -33,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.verify.outputs.revision }}
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
@@ -44,6 +63,12 @@ jobs:
       - run: npm_config_nodedir="$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")" npm rebuild node-pty
       - run: bun run check
       - run: bun run test:unit
+      - name: Validate version and runner architecture
+        env:
+          TARGET_ARCH: ${{ matrix.arch }}
+        run: |
+          test "$RELEASE_TAG" = "v$(node -p "require('./package.json').version")"
+          test "$(node -p process.arch)" = "$TARGET_ARCH"
       - name: Build release archive
         run: |
           mkdir -p .artifacts/release
@@ -53,7 +78,11 @@ jobs:
           target=".artifacts/release/codex-remote-web-${version}-linux-${{ matrix.arch }}.tar.gz"
           mv "$archive" "$target"
           rm -f "$archive.sha256"
-          sha256sum "$target" > "$target.sha256"
+          (cd .artifacts/release && sha256sum "$(basename "$target")" > "$(basename "$target").sha256")
+      - name: Verify the exact production archive on this architecture
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          CODEX_WEBUI_RELEASE_ARCHIVE="${PWD}/.artifacts/release/codex-remote-web-${version}-linux-${{ matrix.arch }}.tar.gz" bun run test:release
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux-${{ matrix.arch }}
@@ -62,12 +91,14 @@ jobs:
 
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs: [verify, build]
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ needs.verify.outputs.revision }}
       - uses: actions/download-artifact@v4
         with:
           pattern: release-linux-*
@@ -79,6 +110,9 @@ jobs:
           test "$RELEASE_TAG" = "v${version}"
           test "$(find .artifacts/release -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 2
           test "$(find .artifacts/release -maxdepth 1 -name '*.sha256' | wc -l)" -eq 2
+          cd .artifacts/release
+          cat *.sha256 > SHA256SUMS
+          sha256sum -c SHA256SUMS
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -87,6 +121,7 @@ jobs:
           gh release create "$RELEASE_TAG" \
             .artifacts/release/*.tar.gz \
             .artifacts/release/*.sha256 \
+            .artifacts/release/SHA256SUMS \
             --repo "${GITHUB_REPOSITORY}" \
             --title "Codex Remote Web ${version}" \
             --notes-file "docs/releases/${version}.md" \

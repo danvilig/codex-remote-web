@@ -39,6 +39,7 @@ export function createWorkspaceChrome({ $, state, t, codexIcon, menu, returnToWo
   function reference(text) { workspaceAction(() => { if(typeof text==='object'){if(!state.composerMentions.some(item=>item.id===text.id))state.composerMentions.push(text);dispatchEvent(new Event('codex-webui:attachment-reference'));return;}const input = $('#prompt'); input.value += `${input.value && !/\s$/.test(input.value) ? ' ' : ''}${text} `; input.dispatchEvent(new Event('input', { bubbles: true })); input.focus(); }); }
   function renderCustomize() {
     if (feature !== 'customize' || !catalog) return;
+    const skillSource = $('#workspaceFeatureContent .skill-install-form input')?.value || '';
     $('#workspaceFeatureTitle').textContent = t(customizeTab === 'plugins' ? 'Plugins' : 'Skills');
     $('#workspaceFeatureDescription').textContent = t(customizeTab === 'plugins' ? 'Manage available plugins. Installed plugins may require account connections in Codex.' : 'Manage skills for this project. Install trusted local skill folders or reference enabled skills in a chat.');
     for (const button of document.querySelectorAll('[data-customize-tab]')) { const active = button.dataset.customizeTab === customizeTab; button.classList.toggle('active', active); button.setAttribute('aria-pressed', String(active)); }
@@ -64,10 +65,9 @@ export function createWorkspaceChrome({ $, state, t, codexIcon, menu, returnToWo
     }
     if(customizeTab==='skills') {
       const form=document.createElement('form');form.className='skill-install-form';
-      const label=document.createElement('label');label.textContent=t('Local skill folder');const input=document.createElement('input');input.className='settings-input';input.required=true;input.placeholder=t('Folder containing SKILL.md');input.setAttribute('aria-label',t('Local skill folder'));label.append(input);
-      const button=document.createElement('button');button.type='button';button.className='settings-action';button.textContent=t('Install skill');
-      const install=()=>{const source=input.value.trim();if(!source){input.focus();return;}confirmChange(form,{kind:'skill',action:'install',source});};
-      button.onclick=install;form.onsubmit=event=>{event.preventDefault();install();};form.append(label,button);content.prepend(form);
+      const label=document.createElement('label');label.textContent=t('Local skill folder');const input=document.createElement('input');input.className='settings-input';input.required=true;input.value=skillSource;input.placeholder=t('Folder containing SKILL.md');input.setAttribute('aria-label',t('Local skill folder'));label.append(input);
+      const button=document.createElement('button');button.type='submit';button.className='settings-action';button.textContent=t('Install skill');form.append(label,button);
+      form.onsubmit=event=>{event.preventDefault();confirmChange(form,{kind:'skill',action:'install',source:input.value.trim()});};content.prepend(form);
     }
 
   }
@@ -79,7 +79,7 @@ export function createWorkspaceChrome({ $, state, t, codexIcon, menu, returnToWo
     confirm.onclick=async()=>{const id=++generation;confirm.disabled=true;cancel.disabled=true;try{
       const cwd=state.active?.cwd||state.workspaceContext?.cwd||state.config.defaultCwd;
       const response=await fetch('/api/customize?'+new URLSearchParams({cwd}),{method:'POST',headers:{'content-type':'application/json','x-workspace-request':'1'},body:JSON.stringify({...payload,confirmed:true})});const result=await response.json();if(!response.ok)throw new Error(result.error);
-      if(feature==='customize'&&generation===id){catalog=result;renderCustomize();}
+      if(feature==='customize'&&generation===id){if(payload.kind==='skill'&&payload.action==='install'){const input=$('#workspaceFeatureContent .skill-install-form input');if(input&&input.value.trim()===payload.source)input.value='';}catalog=result;renderCustomize();}
     }catch(error){if(feature==='customize'&&generation===id){message.textContent=t('Unable to apply this customization change. Reload the catalog and check permissions and resource ownership.');confirm.disabled=false;cancel.disabled=false;}}};
   }
   async function openFeature(kind, anchor) {

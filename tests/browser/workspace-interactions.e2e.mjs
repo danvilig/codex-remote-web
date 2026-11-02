@@ -93,6 +93,7 @@ async function confirm(parent) {
   const panel = parent.locator('.resource-confirm');
   await panel.waitFor({ state: 'visible' });
   await panel.getByRole('button', { name: 'Confirm', exact: true }).click();
+  await panel.waitFor({ state: 'detached' });
 }
 async function closeFeature() {
   await page.locator('#closeWorkspaceFeature').click();
@@ -230,15 +231,35 @@ try {
   await card.locator('[data-customize-action=disable]').click();
   await confirm(card);
   await card.locator('[data-customize-action=enable]').waitFor();
+  // A delayed mutation response must not erase the next installation draft.
+  let releaseSkillEnable, skillEnableStarted;
+  const releaseResponse = new Promise(resolve => { releaseSkillEnable = resolve; });
+  const responseStarted = new Promise(resolve => { skillEnableStarted = resolve; });
+  const delaySkillEnable = async route => {
+    const request = route.request();
+    if (request.method() === 'POST' && request.postDataJSON()?.kind === 'skill' && request.postDataJSON()?.action === 'enable') {
+      const response = await route.fetch();
+      skillEnableStarted();
+      await releaseResponse;
+      await route.fulfill({ response });
+    } else await route.continue();
+  };
+  await page.route('**/api/customize?*', delaySkillEnable);
   await card.locator('[data-customize-action=enable]').click();
-  await confirm(card);
+  await card.locator('.resource-confirm').getByRole('button', { name: 'Confirm', exact: true }).click();
+  await responseStarted;
   await page
     .getByRole('textbox', { name: 'Local skill folder', exact: true })
     .fill(join(project, 'source-skill'));
+  releaseSkillEnable();
+  await card.locator('[data-customize-action=disable]').waitFor();
+  await page.unroute('**/api/customize?*', delaySkillEnable);
+  assert.equal(await page.getByRole('textbox', { name: 'Local skill folder', exact: true }).inputValue(), join(project, 'source-skill'));
   const skillInstallForm = page.locator('.skill-install-form');
   await skillInstallForm.waitFor({ state: 'visible' });
   await skillInstallForm.getByRole('button', { name: 'Install skill', exact: true }).click();
   await confirm(skillInstallForm);
+  assert.equal(await page.getByRole('textbox', { name: 'Local skill folder', exact: true }).inputValue(), '');
   card = page
     .locator('.workspace-resource-card')
     .filter({ hasText: 'local-demo' });
