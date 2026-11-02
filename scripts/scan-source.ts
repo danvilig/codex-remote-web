@@ -27,7 +27,9 @@ if (published) {
   if (remotes !== 'origin') throw new Error('Published checkout must have only its origin remote');
   for (const line of (await git(['remote', '-v'])).split('\n')) {
     const [name, url] = line.split(/\s+/);
-    if (name !== 'origin' || url !== origin.url) throw new Error('Unexpected published repository remote');
+    // actions/checkout uses HTTPS without a .git suffix; git clone commonly
+    // retains it. Both identify the same recorded repository, not a new origin.
+    if (name !== 'origin' || url.replace(/\.git$/, '') !== origin.url.replace(/\.git$/, '')) throw new Error('Unexpected published repository remote');
   }
 } else {
   if (remotes) throw new Error('Snapshot must not have a remote');

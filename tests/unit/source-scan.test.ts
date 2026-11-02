@@ -32,6 +32,8 @@ test('published scanner allows later commits only from the recorded root and rem
   await git('remote','add','origin',provenance.publicRepository.url);
   let result = await scan(['--published']);
   expect(result.code).toBe(0); expect(JSON.parse(result.stdout)).toMatchObject({mode:'published',commits:2,remotes:1});
+  await git('remote','set-url','origin',provenance.publicRepository.url.replace(/\.git$/, ''));
+  expect((await scan(['--published'])).code).toBe(0);
   expect((await scan()).code).toBe(1);
   await git('remote','set-url','origin','https://github.com/example/wrong.git');
   expect((await scan(['--published'])).stderr).toContain('Unexpected published repository remote');
