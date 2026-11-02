@@ -105,7 +105,7 @@ The terminal prints a local link with a one-time credential. API Token permissio
 
 ## Deployment and scope
 
-Native Linux services are the primary deployment method; Docker is an alternative. The wizard cannot configure host systemd from inside a container. The default image includes neither Codex nor cloudflared. macOS release support has not yet been validated.
+Native Linux services are the primary deployment method on x86_64 and arm64; Docker is an alternative. The wizard cannot configure host systemd from inside a container. The default image includes neither Codex nor cloudflared. macOS release support has not yet been validated.
 
 The server listens on loopback by default, with public access through a protected Tunnel. Access authentication operates separately from Codex command approvals, Linux permissions, and sandboxing.
 

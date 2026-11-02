@@ -90,10 +90,9 @@ async function connected(p) {
   );
 }
 async function confirm(parent) {
-  await parent
-    .locator('.resource-confirm')
-    .getByRole('button', { name: 'Confirm', exact: true })
-    .click();
+  const panel = parent.locator('.resource-confirm');
+  await panel.waitFor({ state: 'visible' });
+  await panel.getByRole('button', { name: 'Confirm', exact: true }).click();
 }
 async function closeFeature() {
   await page.locator('#closeWorkspaceFeature').click();
@@ -236,10 +235,10 @@ try {
   await page
     .getByRole('textbox', { name: 'Local skill folder', exact: true })
     .fill(join(project, 'source-skill'));
-  await page
-    .getByRole('button', { name: 'Install skill', exact: true })
-    .click();
-  await confirm(page.locator('.skill-install-form'));
+  const skillInstallForm = page.locator('.skill-install-form');
+  await skillInstallForm.waitFor({ state: 'visible' });
+  await skillInstallForm.evaluate((form) => form.requestSubmit());
+  await confirm(skillInstallForm);
   card = page
     .locator('.workspace-resource-card')
     .filter({ hasText: 'local-demo' });

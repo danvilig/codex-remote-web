@@ -105,7 +105,7 @@ bun run setup:cloudflare
 
 ## 部署与使用边界
 
-Linux 原生服务为主要部署方式，Docker 为备用。容器内不能通过向导配置宿主机 systemd；默认镜像不包含 Codex 或 cloudflared。macOS 暂未完成发布支持。
+Linux 原生服务为主要部署方式，支持 x86_64（x64）和 aarch64（arm64）；Docker 为备用。容器内不能通过向导配置宿主机 systemd；默认镜像不包含 Codex 或 cloudflared。macOS 暂未完成发布支持。
 
 默认仅监听 loopback，公网通过受保护的 Tunnel 接入。Access 身份验证与 Codex 命令审批、Linux 权限和沙箱分别生效。
 

@@ -9,6 +9,7 @@
 - Add previewed project AGENTS.md creation/editing with revision conflicts and inherited-file metadata; manage only clean, unoccupied WebUI worktrees while preserving their branches.
 - Add preview/revalidation cleanup for old unbound uploads and managed cache/logs, protect queued and conversation-bound attachments, and expose a read-only native MCP tool/resource inventory.
 - Prepare independent clean public snapshots with full reachable-history pattern scanning, immutable candidate outputs, version-derived release notes, dependency inventory and SHA-256 manifests. Include WebKit preflight and a synthetic history performance baseline in shared release gates.
+- Add a robust skill-install confirmation regression and the first Linux release workflow for x64 and arm64 runners; target archives rebuild the native PTY module on the destination architecture.
 
 
 - Keep history loading separate from execution: defer live presentation and approval cards until history finishes, reconcile the latest native turn afterwards, and prevent completed items or diff metadata from creating a spurious Working indicator.
