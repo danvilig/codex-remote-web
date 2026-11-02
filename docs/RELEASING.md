@@ -36,6 +36,8 @@ bun run source:scan
 
 已公开仓库的完整检出使用 `bun run source:scan -- --published`。`SOURCE_PROVENANCE.json` 的 `publicRepository` 记录唯一允许的 GitHub origin URL 和公开初始提交；扫描要求非浅检出、只有该 origin、所有历史从该初始提交开始，仍扫描全部可达历史并拒绝不可达对象。Actions 使用 `fetch-depth: 0`；`verify:release` 根据来源记录与远程状态选择该模式。独立导出的快照继续使用默认的单提交、无远程规则，不因公开仓库已有合法后续提交而放宽快照校验。
 
+标签触发的 Verify 按事件提交 SHA 检出，保留完整拉取的附注标签。避免 checkout v4 将标签对象与提交比较后用轻量标签覆盖本地引用，制造不可达标签对象。扫描在安装依赖前执行一次，并在完整验证末尾再次执行，不以删除对象或忽略检查解决问题。维护者可从默认分支手动运行 Verify，在可选 `ref` 中指定已有发布标签；这使用当前工作流验证旧标签，不移动已发布标签或替换附件。
+
 `README.md` 为英文首页，`README-zh.md` 为中文全文，两者互相链接并共用展示图；源码快照与生产包必须同时包含两版。
 
 ## 验证与打包

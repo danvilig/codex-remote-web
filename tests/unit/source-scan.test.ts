@@ -62,6 +62,30 @@ test('published scanner rejects a substituted root and a shallow checkout',async
   const error=await new Response(child.stderr).text();
   expect(await child.exited).toBe(1); expect(error).toContain('full checkout');
 }));
+test('annotated release tag stays reachable with detached commit checkout; overwriting it is rejected',async()=>fixture(async({root,git,commit})=>{
+  await commit();
+  const initialCommit=Bun.spawnSync(['git','rev-parse','HEAD'],{cwd:root,stdout:'pipe'}).stdout.toString().trim();
+  const origin='https://github.com/example/public.git';
+  await writeFile(join(root,'SOURCE_PROVENANCE.json'),JSON.stringify({format:1,developmentCommit:'a'.repeat(40),publicRepository:{url:origin,initialCommit}}));
+  await commit(); await git('tag','-a','v0.2.0-alpha.2','-m','Public alpha release');
+  const checkout=join(root,'checkout');
+  await git('clone','--no-hardlinks',root,checkout);
+  const run=async(...args)=>{const child=Bun.spawn(['git',...args],{cwd:checkout,stdout:'pipe',stderr:'pipe'});const [output,error,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);if(code)throw Error(error);return output.trim();};
+  const scan=async()=>{const child=Bun.spawn(['bun',script,'--directory',checkout,'--published'],{stdout:'pipe',stderr:'pipe'});const [output,error,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);return {output,error,code};};
+  await run('remote','set-url','origin',origin);
+  const sha=await run('rev-parse','HEAD');
+  await run('checkout','--detach',sha);
+  expect(await run('cat-file','-t','refs/tags/v0.2.0-alpha.2')).toBe('tag');
+  expect((await scan()).code).toBe(0);
+  // Reproduce checkout v4's fallback fetch from the failing tag-push log.
+  await run('fetch','--no-tags',root,`+${sha}:refs/tags/v0.2.0-alpha.2`);
+  expect(await run('cat-file','-t','refs/tags/v0.2.0-alpha.2')).toBe('commit');
+  expect((await run('fsck','--full','--no-reflogs','--unreachable'))).toContain('unreachable tag');
+  let result=await scan();expect(result.code).toBe(1);expect(result.error).toContain('unreachable objects');
+  // Restoring the canonical fetched tag makes the same objects reachable again.
+  await run('fetch','--no-tags',root,'+refs/tags/v0.2.0-alpha.2:refs/tags/v0.2.0-alpha.2');
+  result=await scan();expect(result.code).toBe(0);
+}));
 test('source scanner permits only reviewed documentation image paths and still scans their contents',async()=>{
   await fixture(async({root,commit,scan})=>{
     await mkdir(join(root,'docs/images'),{recursive:true});

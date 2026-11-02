@@ -2,6 +2,12 @@ name: Verify
 on:
   push:
   pull_request:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Optional existing branch, tag or commit to verify
+        required: false
+        default: ''
 permissions:
   contents: read
 jobs:
@@ -12,12 +18,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          # Checkout v4 compares an annotated tag object with github.sha (the
+          # peeled commit), then force-fetches that commit over the local tag.
+          # Pin tag pushes by SHA so fetched annotated tags remain reachable.
+          ref: ${{ inputs.ref || (github.ref_type == 'tag' && github.sha || '') }}
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      - name: Validate public history before installing dependencies
+        if: hashFiles('SOURCE_PROVENANCE.json') != ''
+        run: bun run source:scan -- --published
       - run: bun install --frozen-lockfile
       - run: npm_config_nodedir="$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")" npm rebuild node-pty
       - run: bunx playwright install --with-deps chromium webkit
