@@ -28,7 +28,7 @@ const files = [
   'dist/setup.js', 'public/setup.html', 'public/setup.bundle.js', 'public/remote-access.css', 'dist/server.js', 'dist/terminal-worker.js', 'dist/quick-worker.js', 'bun.lock', '.env.example', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'README-zh.md', 'CHANGELOG.md', 'SECURITY.md',
   'public/index.html', 'public/app.bundle.js', 'public/style.css', 'public/workspace.css', 'public/favicon.svg', 'public/auth-bootstrap.js', 'public/access-session.js', 'public/i18n.js', 'public/codex-brand.js',
   'DEVELOPMENT.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'docs/ARCHITECTURE.md', 'docs/ROADMAP.md', 'docs/CONFIGURATION.md', 'docs/RELEASING.md', 'docs/deployment/CLOUDFLARE.md', 'docs/deployment/SETUP.md', 'ops/systemd/codex-remote-web.service.example', 'ops/systemd/environment.example', 'ops/cloudflare/ingress.yml.example',
-  'docs/licenses/BUN.md',
+  'docs/licenses/BUN.md', 'AGENTS.md', 'docs/GIT_WORKFLOW.md',
   `docs/releases/${pkg.version}.md`, ...(await Bun.file(join(root, `docs/releases/${pkg.version}-acceptance.md`)).exists() ? [`docs/releases/${pkg.version}-acceptance.md`] : []), ...(provenance ? ['SOURCE_PROVENANCE.json'] : []),
 ];
 try {
