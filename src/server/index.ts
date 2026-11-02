@@ -11,7 +11,7 @@ import { openQuickOrigin } from './setup/quick-origin.js';
 import { createSetupHandler } from './setup/http.js';
 import { attachTransports } from './realtime/transports.ts';
 import { createHttpHandler } from './http/router.ts';
-import { applicationRoot } from "./config/paths.js";
+import { applicationRoot, standalone } from "./config/paths.js";
 import { name as packageName, version as packageVersion } from "../../package.json";
 import { existsSync } from "node:fs";
 import { join, relative, resolve, delimiter } from "node:path";
@@ -249,7 +249,7 @@ const server = createServer(async (req, res) => {
 
 const transports = attachTransports({ server, accessAuth, localAuth, capabilities, clients, sseClients, leases, terminalSessions, browseRoots, defaultCwd, handleClient, isConnected: () => connected });
 
-if (import.meta.dir !== resolve(appRoot, 'dist')) {
+if (!standalone && import.meta.dir !== resolve(appRoot, 'dist')) {
   const frontendBuild = await Bun.build({ entrypoints: [resolve(publicDir, 'app.js')], outdir: publicDir, naming: 'app.bundle.js', target: 'browser', minify: false });
   if (!frontendBuild.success) throw new Error(`Frontend build failed: ${frontendBuild.logs.join('\n')}`);
   const setupBuild = await Bun.build({ entrypoints: [resolve(publicDir, 'setup.js')], outdir: publicDir, naming: 'setup.bundle.js', target: 'browser' });

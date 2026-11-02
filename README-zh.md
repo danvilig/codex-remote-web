@@ -54,7 +54,26 @@
 
 ## 快速开始
 
+### 下载可执行包（推荐）
+
+从 [Releases](https://github.com/danvilig/codex-remote-web/releases) 下载对应 Linux 架构的归档和同名 `.sha256` 文件：x86_64 选择 `linux-x64`，aarch64 选择 `linux-arm64`。包内包含可执行程序、Bun/Node 运行时、网页资源和预编译终端模块，**无需另外安装 Bun、Node 或编译依赖**。请保留解压后的完整目录。需要自行配置 Codex CLI 和 Git；公网访问还需要 cloudflared。原生系统使用 glibc（原生验收环境为 Ubuntu 24.04），不支持 32 位 ARM 或 Alpine/musl。
+
+```sh
+archive=codex-remote-web-0.2.0-alpha.2-linux-x64.tar.gz
+# arm64 改为 codex-remote-web-0.2.0-alpha.2-linux-arm64.tar.gz
+sha256sum -c "$archive.sha256"
+tar -xzf "$archive"
+cd codex-remote-web-0.2.0-alpha.2
+CODEX_WEBUI_CWD=/path/to/your/project ./codex-remote-web
+```
+
+访问 `http://127.0.0.1:8899` 打开完整 WebUI，再进入设置 → Remote access 配置公网。`./codex-remote-web setup` 只打开独立配置向导；支持 `--help` 和 `--version`。
+
+### 从源码或部署归档运行
+
 需要 Bun **1.4.4**、Node.js **24.22.2**、Git 和已配置的 Codex CLI。当前验证协议版本为 Codex **0.164.0**。Linux 原生依赖还需要 C/C++ 构建工具和 Python 3。
+
+Release 的 `deployment-linux-*` 归档包含已构建的 JS/静态资源和冻结锁文件，在目标机器安装生产依赖后运行 `bun run start`。GitHub 自动提供的 Source code 下载包含源码，需要执行以下构建。
 
 ```sh
 bun install --frozen-lockfile
@@ -75,7 +94,7 @@ bun run dev
 | --- | --- | --- |
 | 地址 | 自己的域名或子域名 | 自动分配的临时 HTTPS 地址 |
 | 登录保护 | Cloudflare Access，指定唯一邮箱 | 邮件验证码，指定唯一邮箱 |
-| 前置条件 | Cloudflare 账户、已托管域名、API Token、cloudflared、Linux 用户级 systemd | 支持 `--allowed-mail` 的 cloudflared 和 Node.js |
+| 前置条件 | Cloudflare 账户、已托管域名、API Token、cloudflared、Linux 用户级 systemd | 支持 `--allowed-mail` 的 cloudflared；可执行包已内置 Node.js |
 | 配置入口 | 开始配置 → 选择 Tunnel 与域名 → 预览 → 应用 | 无域名临时访问 → 填写邮箱 → 启动 |
 | 生命周期 | 原生用户服务，支持配置管理 | 随 WebUI 进程及连接器运行；停止后需重新生成地址 |
 

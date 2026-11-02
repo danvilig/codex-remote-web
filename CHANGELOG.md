@@ -10,7 +10,8 @@
 - Add preview/revalidation cleanup for old unbound uploads and managed cache/logs, protect queued and conversation-bound attachments, and expose a read-only native MCP tool/resource inventory.
 - Prepare independent clean public snapshots with full reachable-history pattern scanning, immutable candidate outputs, version-derived release notes, dependency inventory and SHA-256 manifests. Include WebKit preflight and a synthetic history performance baseline in shared release gates.
 - Preserve the local skill installation draft when an earlier customization response refreshes the catalog, and wait for completed mutations in browser regressions. Cover the delayed-response race explicitly.
-- Add the first Linux release workflow for x64 and arm64 runners, gated on successful Verify and exact production-archive installation, file and PTY checks on both architectures; native dependencies are installed on the destination architecture.
+- Add Linux x64 and arm64 executable packages with bundled runtimes, web assets and prebuilt terminal modules, alongside dependency-installable JS deployment archives and GitHub source downloads. Gate publication on Verify and native checks of both exact package formats, including startup/files/PTY/setup/temporary access without host runtimes or compilers for executable packages.
+- Scan maintained public repository history from its recorded public root, accepting GitHub checkout's HTTPS URL spelling while preserving strict single-commit/no-remote validation for independent exports.
 
 
 - Keep history loading separate from execution: defer live presentation and approval cards until history finishes, reconcile the latest native turn afterwards, and prevent completed items or diff metadata from creating a spurious Working indicator.

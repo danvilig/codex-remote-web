@@ -34,6 +34,12 @@ Lucide's upstream source is https://github.com/lucide-icons/lucide/tree/0.456.0 
 
 Runtime dependencies remain subject to their package licenses. Release archives include a generated inventory and the installed runtime package license notices.
 
+## Portable executable runtimes
+
+Linux executable packages embed Bun 1.4.4 and include Node.js 24.22.2 for isolated terminal and connector workers, plus the target architecture's node-pty native module. Bun's upstream licensing and linked-library notices are retained in `runtime/BUN-LICENSE.md` (source copy: `docs/licenses/BUN.md`); Node's full distribution notices are retained in `runtime/NODE-LICENSE`. Package dependency notices remain in `third-party/`. Runtime versions and source links are recorded in `runtime/RUNTIMES.json`.
+
+The original bundled application remains available as `dist/portable.js` for rebuilding with a modified Bun runtime; `runtime/REBUILD.md` describes rebuilding/relinking. Bun's JavaScriptCore/WebKit and other libraries retain their respective licenses, including LGPL terms; the project MIT license does not replace them. Runtime source: https://github.com/oven-sh/bun/tree/bun-v1.4.4 and https://github.com/nodejs/node/tree/v24.22.2.
+
 DOMPurify 3.4.17 is distributed under the Apache-2.0 option of its dual license (MPL-2.0 OR Apache-2.0). Its license texts and applicable NOTICE files are retained in release dependency notices. KaTeX 0.18.2 is distributed under MIT. The project MIT license does not replace these dependency licenses.
 
 OpenAI and Codex are trademarks of their respective owners. This independent project is not affiliated with or endorsed by OpenAI.

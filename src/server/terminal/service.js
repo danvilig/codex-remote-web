@@ -2,9 +2,9 @@ import { chmodSync, realpathSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve, sep } from 'node:path';
-import { terminalWorkerPath } from '../config/paths.js';
+import { applicationRoot, nodeRuntime, standalone, terminalWorkerPath } from '../config/paths.js';
 
-const require = createRequire(import.meta.url);
+const require = createRequire(join(applicationRoot(), 'package.json'));
 const inside = (path, root) => path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
 
 export function normalizeTerminalResize(message) {
@@ -30,8 +30,7 @@ export function resolveTerminalCwd(requested, allowedRoots, fallback) {
 
 function ensureNodePtySpawnHelper() {
   if (process.platform === 'win32') return;
-  const entry = require.resolve('node-pty');
-  const packageRoot = resolve(dirname(entry), '..');
+  const packageRoot = standalone ? join(applicationRoot(), 'node_modules/node-pty') : resolve(dirname(require.resolve('node-pty')), '..');
   const helper = join(packageRoot, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper');
   try { chmodSync(helper, 0o755); }
   catch { /* Source builds use build/Release and already carry executable permissions. */ }
@@ -49,7 +48,7 @@ export function createTerminalSession({ cwd, cols = 100, rows = 24, onData, onEx
     onExit({ exitCode, signal, error });
   };
   try {
-    session = spawn(process.env.CODEX_WEBUI_NODE || 'node', [worker, cwd, String(cols), String(rows)], {
+    session = spawn(nodeRuntime() || 'node', [worker, cwd, String(cols), String(rows)], {
       cwd,
       env: process.env,
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],

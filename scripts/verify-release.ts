@@ -7,7 +7,7 @@ async function run(args: string[]) {
   if (await child.exited !== 0) throw new Error(`Verification failed: ${args.join(' ')}`);
 }
 await run(['bun', 'audit']);
-for (const suite of ['check', 'build', 'test:unit', 'test:foundations', 'test:workspace', 'test:webkit', 'test:performance', 'test:access', 'test:setup', 'test:quick', 'test:project-roots', 'test:release']) {
+for (const suite of ['check', 'build', 'test:unit', 'test:foundations', 'test:workspace', 'test:webkit', 'test:performance', 'test:access', 'test:setup', 'test:quick', 'test:project-roots', 'test:release', 'test:portable']) {
   await run(['bun', 'run', suite]);
 }
 if (Bun.which('cloudflared')) await run(['bun', 'run', 'test:quick:cli']);

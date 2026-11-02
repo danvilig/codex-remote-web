@@ -54,7 +54,26 @@ These screenshots show the current WebUI using an isolated demo project and simu
 
 ## Quick start
 
+### Download an executable (recommended)
+
+Download the archive for your Linux machine and its `.sha256` file from [Releases](https://github.com/danvilig/codex-remote-web/releases): `linux-x64` for x86_64, `linux-arm64` for aarch64. These packages include the executable, Bun/Node runtimes, web assets and a prebuilt terminal module; **no Bun/Node installation or compilation is required**. Keep the extracted directory intact. Requires a configured Codex CLI and Git; remote access also needs cloudflared. Supported native systems use glibc (validated on Ubuntu 24.04); 32-bit ARM and Alpine/musl are not supported.
+
+```sh
+archive=codex-remote-web-0.2.0-alpha.2-linux-x64.tar.gz
+# For arm64 use codex-remote-web-0.2.0-alpha.2-linux-arm64.tar.gz
+sha256sum -c "$archive.sha256"
+tar -xzf "$archive"
+cd codex-remote-web-0.2.0-alpha.2
+CODEX_WEBUI_CWD=/path/to/your/project ./codex-remote-web
+```
+
+Open `http://127.0.0.1:8899` for the full WebUI. Use Settings → Remote access for public access; `./codex-remote-web setup` opens only the standalone setup wizard. `--help` and `--version` are available.
+
+### Run from source or a deployment archive
+
 Requires Bun **1.4.4**, Node.js **24.22.2**, Git, and a configured Codex CLI. The currently tested Codex protocol version is **0.164.0**. Native Linux dependencies also require C/C++ build tools and Python 3.
+
+The `deployment-linux-*` Release archives contain prebuilt JS/static assets with a frozen dependency lockfile; install production dependencies on the target machine and run `bun run start`. GitHub's Source code downloads contain the source tree and require the build below.
 
 ```sh
 bun install --frozen-lockfile
@@ -75,7 +94,7 @@ In the full local WebUI, open **Settings → Remote access** and choose an optio
 | --- | --- | --- |
 | Address | Your own domain or subdomain | An automatically assigned temporary HTTPS address |
 | Login protection | Cloudflare Access, restricted to one email address | Email verification code, restricted to one email address |
-| Requirements | Cloudflare account, a domain hosted on Cloudflare, API Token, cloudflared, and Linux user-level systemd | cloudflared with `--allowed-mail` support and Node.js |
+| Requirements | Cloudflare account, a domain hosted on Cloudflare, API Token, cloudflared, and Linux user-level systemd | cloudflared with `--allowed-mail` support; Node.js is included in executable packages |
 | Setup | Start setup → Choose Tunnel and domain → Preview → Apply | Temporary access → Enter email → Start |
 | Lifecycle | Native user service with configuration management | Runs with the WebUI process and connector; generate a new address after stopping |
 

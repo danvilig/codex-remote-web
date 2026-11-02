@@ -2,7 +2,7 @@ import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { mkdir, readFile, writeFile, rename, rm, chmod } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
-import { applicationRoot } from '../config/paths.js';
+import { applicationRoot, gatewayCommand } from '../config/paths.js';
 import { SetupError } from './cloudflare.js';
 const MARKER = '# Managed by Codex Remote Web setup v1';
 export async function atomicPrivate(path, value) {
@@ -107,7 +107,8 @@ export class NativeDeployment {
     // EnvironmentFile is a systemd path directive: quotes become part of the
     // path here, so keep the absolute path unquoted and escape percent signs.
     const environmentPath = this.envPath.replaceAll('%', '%%');
-    const unit = `${MARKER}\n[Unit]\nDescription=Codex Remote Web\nAfter=network-online.target\nStartLimitIntervalSec=60\nStartLimitBurst=3\n[Service]\nType=simple\nWorkingDirectory=${this.root.replaceAll('%', '%%')}\nEnvironmentFile=${environmentPath}\nExecStart=:${unitQuote(process.execPath)} run ${unitQuote(join(this.root, 'dist/server.js'))}\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=10\nKillMode=mixed\nUMask=0077\n[Install]\nWantedBy=default.target\n`;
+    const command = gatewayCommand(this.root).map(unitQuote).join(' ');
+    const unit = `${MARKER}\n[Unit]\nDescription=Codex Remote Web\nAfter=network-online.target\nStartLimitIntervalSec=60\nStartLimitBurst=3\n[Service]\nType=simple\nWorkingDirectory=${this.root.replaceAll('%', '%%')}\nEnvironmentFile=${environmentPath}\nExecStart=:${command}\nRestart=on-failure\nRestartSec=5\nTimeoutStopSec=10\nKillMode=mixed\nUMask=0077\n[Install]\nWantedBy=default.target\n`;
     receipt.local = { environment, unit }; receipt.probe = values.CODEX_WEBUI_SETUP_PROBE; await persist();
     await atomicPrivate(this.envPath, environment); await atomicPrivate(this.unitPath, unit);
     await this.run(['systemctl', '--user', 'daemon-reload']);

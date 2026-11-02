@@ -75,14 +75,20 @@ jobs:
           bun scripts/release.ts --output-dir .artifacts/release
           version="$(node -p "require('./package.json').version")"
           archive=".artifacts/release/codex-remote-web-${version}.tar.gz"
-          target=".artifacts/release/codex-remote-web-${version}-linux-${{ matrix.arch }}.tar.gz"
+          target=".artifacts/release/codex-remote-web-${version}-deployment-linux-${{ matrix.arch }}.tar.gz"
           mv "$archive" "$target"
           rm -f "$archive.sha256"
           (cd .artifacts/release && sha256sum "$(basename "$target")" > "$(basename "$target").sha256")
       - name: Verify the exact production archive on this architecture
         run: |
           version="$(node -p "require('./package.json').version")"
-          CODEX_WEBUI_RELEASE_ARCHIVE="${PWD}/.artifacts/release/codex-remote-web-${version}-linux-${{ matrix.arch }}.tar.gz" bun run test:release
+          CODEX_WEBUI_RELEASE_ARCHIVE="${PWD}/.artifacts/release/codex-remote-web-${version}-deployment-linux-${{ matrix.arch }}.tar.gz" bun run test:release
+      - name: Build executable with bundled runtimes and native terminal
+        run: bun run release:portable -- --output-dir .artifacts/release
+      - name: Verify executable without host runtimes or compilers
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          CODEX_WEBUI_PORTABLE_ARCHIVE="${PWD}/.artifacts/release/codex-remote-web-${version}-linux-${{ matrix.arch }}.tar.gz" bun run test:portable
       - uses: actions/upload-artifact@v4
         with:
           name: release-linux-${{ matrix.arch }}
@@ -108,8 +114,8 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "$RELEASE_TAG" = "v${version}"
-          test "$(find .artifacts/release -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 2
-          test "$(find .artifacts/release -maxdepth 1 -name '*.sha256' | wc -l)" -eq 2
+          test "$(find .artifacts/release -maxdepth 1 -name '*.tar.gz' | wc -l)" -eq 4
+          test "$(find .artifacts/release -maxdepth 1 -name '*.sha256' | wc -l)" -eq 4
           cd .artifacts/release
           cat *.sha256 > SHA256SUMS
           sha256sum -c SHA256SUMS

@@ -2,8 +2,12 @@ import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Replaced only by the portable build. Source and JS-archive execution keep
+// their existing paths; compiled modules live in Bun's virtual filesystem.
+export const standalone = typeof CODEX_REMOTE_WEB_COMPILED !== 'undefined' && CODEX_REMOTE_WEB_COMPILED;
+
 // Both source and release layouts locate assets relative to this module, never the shell cwd.
-export function applicationRoot(start = dirname(fileURLToPath(import.meta.url))) {
+export function applicationRoot(start = standalone ? dirname(process.execPath) : dirname(fileURLToPath(import.meta.url))) {
   let current = resolve(start);
   for (;;) {
     try {
@@ -13,6 +17,12 @@ export function applicationRoot(start = dirname(fileURLToPath(import.meta.url)))
     if (parent === current) throw new Error('Cannot locate Codex Remote Web application root');
     current = parent;
   }
+}
+export function nodeRuntime(env = process.env) {
+  return env.CODEX_WEBUI_NODE || (standalone ? join(applicationRoot(), 'runtime/node') : Bun.which('node', { PATH: env.PATH }));
+}
+export function gatewayCommand(root = applicationRoot(), executable = process.execPath, compiled = standalone) {
+  return compiled ? [executable] : [executable, 'run', join(root, 'dist/server.js')];
 }
 export function terminalWorkerPath() {
   const root = applicationRoot();

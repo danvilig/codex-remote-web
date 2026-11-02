@@ -90,6 +90,6 @@ bun run candidate:prepare
 
 `.github/workflows/release.yml` 独立于候选脚本。经维护者确认发布后，将版本标签（例如 `v0.2.0-alpha.2`）指向已经通过 Verify 的公开提交，再推送该标签；也可以针对已有标签手动触发工作流。工作流检查标签与 `package.json` 版本一致，并固定检出的提交，不能将未通过 Verify 的提交发布。
 
-构建矩阵使用原生 `ubuntu-24.04`（x64）和 `ubuntu-24.04-arm`（arm64）runner，各自完成冻结安装、PTY 重建、构建、单元测试、打包及对该归档的生产安装/启动/文件/终端回归。归档仅包含 JS 与静态资源等白名单文件，依赖在目标机器安装，不是包含 Bun/Node 的独立二进制。当前不声明支持 32 位 ARM 或 musl/Alpine 原生部署。
+构建矩阵使用原生 `ubuntu-24.04`（x64）和 `ubuntu-24.04-arm`（arm64）runner，各自完成冻结安装、PTY 重建、构建、单元测试，并验证两种实际归档。`deployment-linux-*` 是需安装依赖的 JS/静态资源部署包；`linux-*` 是包含编译程序、Bun/Node 运行时、静态资源和预编译终端模块的可执行包。`bun run release:portable -- --output-dir <new-directory>` 生成本机架构包；`bun run test:portable` 验证没有宿主机运行时/安装器/编译器时的完整运行。可用 `CODEX_WEBUI_PORTABLE_ARCHIVE` 指定待验收的实际归档。可执行包保留 `dist/portable.js` 和重链接说明、运行时许可证及版本来源。当前不声明支持 32 位 ARM 或 musl/Alpine 原生部署。
 
-两端均通过后才创建 GitHub 预发布版本，上传两个 `linux-x64` / `linux-arm64` 归档、各自使用纯文件名的 `.sha256` 和汇总 `SHA256SUMS`。仅下载一种架构时校验对应 `.sha256`；下载两种归档时可运行 `sha256sum -c SHA256SUMS`。GitHub 自动提供标签源码下载，无需再上传重复源码包。本流程不部署到现有服务，也不修改 Tunnel。
+两端均通过后才创建 GitHub 预发布版本，上传四个归档（两种架构各有可执行包和 `deployment` 包）、各自使用纯文件名的 `.sha256` 和汇总 `SHA256SUMS`。仅下载一种架构时校验对应 `.sha256`；下载全部归档时可运行 `sha256sum -c SHA256SUMS`。GitHub 自动提供标签源码下载，无需再上传重复源码包。本流程不部署到现有服务，也不修改 Tunnel。

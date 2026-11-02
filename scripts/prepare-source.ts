@@ -17,7 +17,7 @@ if(relative(artifacts,await realpath(dirname(output))).startsWith('..'))throw ne
 // mkdir without recursive refuses an existing export. Never replace or delete it.
 await mkdir(output);
 const rootFiles=new Set(['.bun-version','.node-version','.dockerignore','.gitignore','.env.example','package.json','bun.lock','Dockerfile','docker-compose.yml','LICENSE','README.md','README-zh.md','CHANGELOG.md','CONTRIBUTING.md','CODE_OF_CONDUCT.md','DEVELOPMENT.md','SECURITY.md','THIRD_PARTY_NOTICES.md','SOURCE_PROVENANCE.json']);
-const docs=new Set(['ARCHITECTURE.md','CONFIGURATION.md','RELEASING.md','ROADMAP.md','SANDBOX_SETUP.md','WORKSPACE_UI.md','deployment/CLOUDFLARE.md','deployment/SETUP.md',`releases/${pkg.version}.md`,`releases/${pkg.version}-acceptance.md`]);
+const docs=new Set(['ARCHITECTURE.md','CONFIGURATION.md','RELEASING.md','ROADMAP.md','SANDBOX_SETUP.md','WORKSPACE_UI.md','deployment/CLOUDFLARE.md','deployment/SETUP.md','licenses/BUN.md',`releases/${pkg.version}.md`,`releases/${pkg.version}-acceptance.md`]);
 function allowed(path:string) {
  if(publicSourceExcluded.has(path))return false;
  if(documentationImages.has(path))return true;

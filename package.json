@@ -32,6 +32,8 @@
     "release:prepare": "bun scripts/release.ts",
     "source:prepare": "bun scripts/prepare-source.ts",
     "test:release": "bun tests/browser/release.e2e.mjs",
+    "release:portable": "bun scripts/standalone.ts",
+    "test:portable": "bun tests/browser/release.e2e.mjs --portable",
     "setup:cloudflare": "bun scripts/setup.ts",
     "test:setup": "bun tests/browser/setup.e2e.mjs",
     "test:quick": "bun tests/browser/quick.e2e.mjs",

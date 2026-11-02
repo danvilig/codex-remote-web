@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { quickWorkerPath } from '../config/paths.js';
+import { nodeRuntime, quickWorkerPath } from '../config/paths.js';
 import { SetupError } from './cloudflare.js';
 const exec = promisify(execFile);
 export function quickEmail(value) {
@@ -57,7 +57,7 @@ export function quickFailure(code) {
   }[code] || 'Temporary access could not connect securely. Check cloudflared and the network, then retry.');
 }
 export function createQuickConnector({ binary, args, directory, env, onMessage, onExit }) {
-  const node = env.CODEX_WEBUI_NODE || Bun.which('node', { PATH: env.PATH });
+  const node = nodeRuntime(env);
   if (!node) throw new SetupError('Node.js is required to supervise temporary access.');
   const worker = spawn(node, [quickWorkerPath()], { env: connectorEnvironment(env, directory), stdio: ['ignore','ignore','ignore','ipc'] });
   const closed = new Promise(resolve => { worker.once('exit', resolve); worker.once('error', resolve); });
