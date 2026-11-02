@@ -14,4 +14,12 @@ if (Bun.which('cloudflared')) await run(['bun', 'run', 'test:quick:cli']);
 else console.log('SKIP real cloudflared offline validation: binary not installed. Required on deployment hosts with cloudflared.');
 await run(['git', 'diff', '--exit-code']);
 await run(['git', 'diff', '--check']);
-if (await Bun.file(new URL('../SOURCE_PROVENANCE.json', import.meta.url)).exists()) await run(['bun', 'run', 'source:scan']);
+const provenanceFile = Bun.file(new URL('../SOURCE_PROVENANCE.json', import.meta.url));
+if (await provenanceFile.exists()) {
+  const provenance = await provenanceFile.json();
+  // Exported snapshots remain subject to the original single-commit/no-remote
+  // gate. A maintained public checkout scans every commit back to its known root.
+  const remote = Bun.spawnSync(['git', 'remote'], { cwd: root, stdout: 'pipe', stderr: 'pipe' });
+  if (remote.exitCode) throw new Error('Unable to inspect repository remotes');
+  await run(['bun', 'scripts/scan-source.ts', ...(provenance.publicRepository && remote.stdout.toString().trim() ? ['--published'] : [])]);
+}

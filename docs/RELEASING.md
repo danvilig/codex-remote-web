@@ -34,6 +34,8 @@ bun run source:scan
 
 本地确认后，后续公开操作只在选定的独立仓库中添加目标 GitHub 远程并推送 `main`，不是推送原开发分支。首次推送完成后，以这个初始提交延续正常开发历史，不为每次版本发布替换根提交或强制推送。候选脚本每次生成的独立快照用于产物验证，不自动替换已经公开的仓库历史。首次公开仍须完成本文末尾的 GitHub 公开前门槛。
 
+已公开仓库的完整检出使用 `bun run source:scan -- --published`。`SOURCE_PROVENANCE.json` 的 `publicRepository` 记录唯一允许的 GitHub origin URL 和公开初始提交；扫描要求非浅检出、只有该 origin、所有历史从该初始提交开始，仍扫描全部可达历史并拒绝不可达对象。Actions 使用 `fetch-depth: 0`；`verify:release` 根据来源记录与远程状态选择该模式。独立导出的快照继续使用默认的单提交、无远程规则，不因公开仓库已有合法后续提交而放宽快照校验。
+
 `README.md` 为英文首页，`README-zh.md` 为中文全文，两者互相链接并共用展示图；源码快照与生产包必须同时包含两版。
 
 ## 验证与打包

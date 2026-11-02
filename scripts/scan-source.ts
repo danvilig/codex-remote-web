@@ -16,8 +16,23 @@ async function git(args: string[]) {
 const provenance = JSON.parse(await readFile(join(root, 'SOURCE_PROVENANCE.json'), 'utf8'));
 if (provenance.format !== 1 || !/^[a-f0-9]{40}$/.test(provenance.developmentCommit || '')) throw new Error('Missing source provenance');
 if (await git(['status', '--porcelain'])) throw new Error('Source scan requires a clean snapshot');
-if (await git(['remote'])) throw new Error('Snapshot must not have a remote');
-if (await git(['rev-list', '--count', '--all']) !== '1') throw new Error('Snapshot must contain exactly one reachable commit');
+const published = process.argv.includes('--published');
+const remotes = await git(['remote']);
+const commits = Number(await git(['rev-list', '--count', '--all']));
+if (published) {
+  const origin = provenance.publicRepository;
+  if (!origin || !/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\.git$/.test(origin.url || '') || !/^[a-f0-9]{40}$/.test(origin.initialCommit || '')) throw new Error('Missing public repository provenance');
+  if (await git(['rev-parse', '--is-shallow-repository']) !== 'false') throw new Error('Published history scan requires a full checkout');
+  if (await git(['rev-list', '--max-parents=0', '--all']) !== origin.initialCommit) throw new Error('Published history must start at the recorded public initial commit');
+  if (remotes !== 'origin') throw new Error('Published checkout must have only its origin remote');
+  for (const line of (await git(['remote', '-v'])).split('\n')) {
+    const [name, url] = line.split(/\s+/);
+    if (name !== 'origin' || url !== origin.url) throw new Error('Unexpected published repository remote');
+  }
+} else {
+  if (remotes) throw new Error('Snapshot must not have a remote');
+  if (commits !== 1) throw new Error('Snapshot must contain exactly one reachable commit');
+}
 const unreachable = await git(['fsck', '--full', '--no-reflogs', '--unreachable']);
 if (unreachable) throw new Error('Snapshot has unreachable objects; investigate before publication');
 
@@ -50,4 +65,4 @@ const tree = await git(['ls-tree', '-rz', '--full-tree', 'HEAD']);
 for (const entry of tree.split('\0').filter(Boolean)) if (!/^100(?:644|755) blob /.test(entry)) findings.push({ file: entry.slice(entry.indexOf('\t') + 1), rule: 'nonregular-source-entry' });
 if (findings.length) {
   console.error(JSON.stringify({ ok: false, findings }, null, 2)); process.exitCode = 1;
-} else console.log(JSON.stringify({ ok: true, commit: await git(['rev-parse', 'HEAD']), developmentCommit: provenance.developmentCommit, commits: 1, blobs, remotes: 0, unreachableObjects: 0, scope: 'all reachable history and tracked source', limitations: 'Pattern scan is not proof that all sensitive data is absent. Manually review source and public commit identity.' }));
+} else console.log(JSON.stringify({ ok: true, commit: await git(['rev-parse', 'HEAD']), developmentCommit: provenance.developmentCommit, commits, blobs, remotes: remotes ? remotes.split('\n').length : 0, unreachableObjects: 0, mode: published ? 'published' : 'snapshot', scope: 'all reachable history and tracked source', limitations: 'Pattern scan is not proof that all sensitive data is absent. Manually review source and public commit identity.' }));

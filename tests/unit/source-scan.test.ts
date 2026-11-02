@@ -8,7 +8,7 @@ async function fixture(fn) {
   const root = await mkdtemp(join(tmpdir(), 'crw-source-scan-'));
   const git = async (...args) => { const child = Bun.spawn(['git','-c','core.hooksPath=/dev/null',...args],{cwd:root,stdout:'ignore',stderr:'pipe'}); if(await child.exited)throw Error(await new Response(child.stderr).text()); };
   const commit = async () => { await git('add','.'); await git('commit','-qm','snapshot'); };
-  const scan = async () => { const child=Bun.spawn(['bun',script,'--directory',root],{stdout:'pipe',stderr:'pipe'});const [stdout,stderr,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);return {stdout,stderr,code}; };
+  const scan = async (args = []) => { const child=Bun.spawn(['bun',script,'--directory',root,...args],{stdout:'pipe',stderr:'pipe'});const [stdout,stderr,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);return {stdout,stderr,code}; };
   try { await git('init','-q');await git('config','user.name','Fixture');await git('config','user.email','fixture@example.invalid'); await writeFile(join(root,'SOURCE_PROVENANCE.json'),JSON.stringify({format:1,developmentCommit:'a'.repeat(40)}));await fn({root,git,commit,scan}); }
   finally { await rm(root,{recursive:true,force:true}); }
 }
@@ -23,6 +23,42 @@ test('source scanner refuses private paths, token contents and inherited Git his
 }));
 test('source scanner refuses a snapshot with a remote before content scan',async()=>fixture(async({git,commit,scan})=>{
   await commit();await git('remote','add','origin','https://example.invalid/reference.git');const result=await scan();expect(result.code).toBe(1);expect(result.stderr).toContain('must not have a remote');
+}));
+test('published scanner allows later commits only from the recorded root and remote, and scans historical content',async()=>fixture(async({root,git,commit,scan})=>{
+  await writeFile(join(root,'README.md'),'Initial public files.'); await commit();
+  const initialCommit = Bun.spawnSync(['git','rev-parse','HEAD'],{cwd:root,stdout:'pipe'}).stdout.toString().trim();
+  const provenance = {format:1,developmentCommit:'a'.repeat(40),publicRepository:{url:'https://github.com/example/public.git',initialCommit}};
+  await writeFile(join(root,'SOURCE_PROVENANCE.json'),JSON.stringify(provenance)); await commit();
+  await git('remote','add','origin',provenance.publicRepository.url);
+  let result = await scan(['--published']);
+  expect(result.code).toBe(0); expect(JSON.parse(result.stdout)).toMatchObject({mode:'published',commits:2,remotes:1});
+  expect((await scan()).code).toBe(1);
+  await git('remote','set-url','origin','https://github.com/example/wrong.git');
+  expect((await scan(['--published'])).stderr).toContain('Unexpected published repository remote');
+  await git('remote','set-url','origin',provenance.publicRepository.url);
+  await git('remote','add','upstream','https://github.com/example/upstream.git');
+  expect((await scan(['--published'])).stderr).toContain('only its origin');
+  await git('remote','remove','upstream');
+  const secret = 'sk-'+'X'.repeat(40);
+  await writeFile(join(root,'README.md'),secret); await commit();
+  await writeFile(join(root,'README.md'),'Clean current content.'); await commit();
+  result = await scan(['--published']);
+  expect(result.code).toBe(1); expect(result.stderr).toContain('provider-token'); expect(result.stderr).not.toContain(secret);
+}));
+test('published scanner rejects a substituted root and a shallow checkout',async()=>fixture(async({root,git,commit,scan})=>{
+  await commit();
+  const initialCommit = Bun.spawnSync(['git','rev-parse','HEAD'],{cwd:root,stdout:'pipe'}).stdout.toString().trim();
+  const provenance = {format:1,developmentCommit:'a'.repeat(40),publicRepository:{url:'https://github.com/example/public.git',initialCommit:'b'.repeat(40)}};
+  await writeFile(join(root,'SOURCE_PROVENANCE.json'),JSON.stringify(provenance)); await commit();
+  await git('remote','add','origin',provenance.publicRepository.url);
+  expect((await scan(['--published'])).stderr).toContain('recorded public initial commit');
+  provenance.publicRepository.initialCommit=initialCommit;
+  await writeFile(join(root,'SOURCE_PROVENANCE.json'),JSON.stringify(provenance)); await commit();
+  const clone=join(root,'shallow');
+  await git('clone','--depth=1','file://'+root,clone);
+  const child=Bun.spawn(['bun',script,'--directory',clone,'--published'],{stdout:'pipe',stderr:'pipe'});
+  const error=await new Response(child.stderr).text();
+  expect(await child.exited).toBe(1); expect(error).toContain('full checkout');
 }));
 test('source scanner permits only reviewed documentation image paths and still scans their contents',async()=>{
   await fixture(async({root,commit,scan})=>{

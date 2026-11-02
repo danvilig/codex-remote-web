@@ -5,6 +5,10 @@
     "commit": "332b14d2600a7e14332fae7b6032b973c8e5b198",
     "role": "historical-reference"
   },
-  "developmentCommit": "dcc0ef3ff9da4cd226fc43222e7de09c02a30d47",
-  "history": "Independent Codex Remote Web source snapshot; prior development history and extracted assets are not distributed."
+  "developmentCommit": "7cdcf24636d57172bc5e3b20e4a4344768fe6f15",
+  "history": "Independent Codex Remote Web source snapshot; prior development history and extracted assets are not distributed.",
+  "publicRepository": {
+    "url": "https://github.com/danvilig/codex-remote-web.git",
+    "initialCommit": "0812c07def0ea7fb23441d8158a8e0b4466821f1"
+  }
 }
