@@ -1,0 +1,25 @@
+services:
+  codex-remote-web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: codex-remote-web:local
+    restart: unless-stopped
+    user: "${PUID:-1000}:${PGID:-1000}"
+    ports:
+      - "${WEBUI_BIND_IP:-127.0.0.1}:8899:8899"
+    environment:
+      HOST: "0.0.0.0"
+      PORT: "8899"
+      CODEX_HOME: /home/node/.codex
+      CODEX_WEBUI_CWD: /workspace
+      CODEX_WEBUI_REVIEW_ROOT: /workspace
+      CODEX_WEBUI_AUTH_MODE: local
+      CODEX_WEBUI_PASSWORD: "${CODEX_WEBUI_PASSWORD:-}"
+      CODEX_WEBUI_ENABLE_TERMINAL: "false"
+      CODEX_WEBUI_ENABLE_REVIEW_WRITE: "false"
+      TZ: "${TZ:-UTC}"
+    volumes:
+      - ${PROJECT_HOST_PATH:?Set PROJECT_HOST_PATH to your project directory}:/workspace
+      - ${CODEX_HOME_HOST:?Set CODEX_HOME_HOST to your Codex state directory}:/home/node/.codex
+      - ${CODEX_BIN:?Set CODEX_BIN to a compatible Codex executable}:/usr/local/bin/codex:ro

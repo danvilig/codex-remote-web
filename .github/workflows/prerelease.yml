@@ -1,0 +1,40 @@
+name: Prepare prerelease artifact
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  artifact:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - run: npm_config_nodedir="$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")" npm rebuild node-pty
+      - run: bunx playwright install --with-deps chromium webkit
+      - run: bun run verify:release
+      - run: docker build -t codex-remote-web:verify .
+      - run: bun run test:docker
+      - name: Use checked-out commit identity for the local snapshot
+        run: |
+          git config user.name "$(git log -1 --format=%an)"
+          git config user.email "$(git log -1 --format=%ae)"
+      - run: bun run candidate:prepare
+      - uses: actions/upload-artifact@v4
+        with:
+          name: codex-remote-web-prerelease
+          path: |
+            .artifacts/candidates/**/*.tar.gz
+            .artifacts/candidates/**/*.sha256
+            .artifacts/candidates/**/SHA256SUMS
+            .artifacts/candidates/**/candidate.json
+            .artifacts/candidates/**/dependencies.json
+            .artifacts/candidates/**/source-scan.json
+            .artifacts/candidates/**/RELEASE_NOTES.md
+          if-no-files-found: error

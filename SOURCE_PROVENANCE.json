@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "referenceProject": {
+    "repository": "https://github.com/lezi-fun/codex-webui",
+    "commit": "332b14d2600a7e14332fae7b6032b973c8e5b198",
+    "role": "historical-reference"
+  },
+  "developmentCommit": "e9b44bee0989e09b32098b8dd2be3f05992b64b6",
+  "history": "Independent Codex Remote Web source snapshot; prior development history and extracted assets are not distributed."
+}

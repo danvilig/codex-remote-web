@@ -1,0 +1,10 @@
+# Ubuntu 24.04+: allow the bubblewrap executable to create its sandbox.
+# This follows the distribution's userns-exception profile convention.
+# The global kernel.apparmor_restrict_unprivileged_userns setting stays enabled.
+abi <abi/4.0>,
+include <tunables/global>
+
+profile codex-bwrap /usr/bin/bwrap flags=(unconfined) {
+  userns,
+  include if exists <local/codex-bwrap>
+}

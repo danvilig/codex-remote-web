@@ -1,0 +1,66 @@
+import { test, expect } from 'bun:test';
+import { mkdtemp, mkdir, readFile, writeFile, rm, stat, access } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+test('public snapshot contains only allowed current files and has independent history', async () => {
+  const fixture = await mkdtemp(join(tmpdir(), 'crw-source-export-'));
+  const run = (args: string[], cwd = fixture) => {
+    const result = Bun.spawnSync(args, { cwd, env: { ...process.env, GIT_CONFIG_NOSYSTEM: '1' }, stdout: 'pipe', stderr: 'pipe' });
+    if (result.exitCode) throw new Error(result.stderr.toString());
+    return result.stdout.toString().trim();
+  };
+  try {
+    await mkdir(join(fixture, 'scripts'));
+    await mkdir(join(fixture, 'docs/history'), { recursive: true });
+    await mkdir(join(fixture, 'docs/images'), { recursive: true });
+    await mkdir(join(fixture, 'tests/browser'), { recursive: true });
+    await mkdir(join(fixture, 'tests/fixtures'), { recursive: true });
+    await mkdir(join(fixture, 'public/assets'), { recursive: true });
+    await mkdir(join(fixture, 'tests/fixtures'), { recursive: true });
+    await writeFile(join(fixture, 'scripts/prepare-source.ts'), await readFile(new URL('../../scripts/prepare-source.ts', import.meta.url)));
+    await writeFile(join(fixture, 'scripts/documentation-assets.ts'), await readFile(new URL('../../scripts/documentation-assets.ts', import.meta.url)));
+    await writeFile(join(fixture, 'docs/images/workspace.png'), 'Synthetic reviewed image fixture');
+    await writeFile(join(fixture, 'docs/images/README.md'), 'Internal image inventory');
+    await writeFile(join(fixture, 'scripts/capture-docs.ts'), 'internal screenshot generator');
+    await writeFile(join(fixture, 'tests/browser/readme-screenshot.mjs'), 'internal obsolete screenshot test');
+    await writeFile(join(fixture, 'tests/fixtures/showcase-codex.mjs'), 'internal screenshot fixture');
+    await writeFile(join(fixture, 'docs/images/personal.png'), 'Personal screenshot fixture');
+    await writeFile(join(fixture, 'package.json'), JSON.stringify({ name: 'snapshot-fixture', version: '0.2.0-alpha.1' }));
+    await writeFile(join(fixture, '.gitignore'), '.artifacts/\n');
+    await writeFile(join(fixture, 'LICENSE'), 'Original MIT attribution fixture\n');
+    await writeFile(join(fixture, 'README.md'), '[简体中文](README-zh.md)\nEnglish overview\n');
+    await writeFile(join(fixture, 'README-zh.md'), '[English](README.md)\n中文介绍\n');
+    await writeFile(join(fixture, 'docs/history/machine.md'), 'private machine record\n');
+    await writeFile(join(fixture, 'public/assets/old.svg'), '<svg>historical fixture</svg>');
+    await writeFile(join(fixture, 'tests/fixtures/codex'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    run(['git', 'init', '-q', '-b', 'main']);
+    run(['git', 'config', 'user.name', 'Snapshot Test']);
+    run(['git', 'config', 'user.email', 'snapshot@example.invalid']);
+    run(['git', 'add', '.']); run(['git', 'commit', '-qm', 'Historical fixture']);
+    const historicalCommit = run(['git', 'rev-parse', 'HEAD']);
+    const oldBlob = run(['git', 'rev-parse', 'HEAD:public/assets/old.svg']);
+    await rm(join(fixture, 'public/assets/old.svg'));
+    run(['git', 'add', '-u']); run(['git', 'commit', '-qm', 'Current fixture']);
+    const developmentCommit = run(['git', 'rev-parse', 'HEAD']);
+    const exported = JSON.parse(run(['bun', 'scripts/prepare-source.ts']));
+    expect(exported.developmentCommit).toBe(developmentCommit);
+    expect(run(['git', 'rev-list', '--count', '--all'], exported.directory)).toBe('1');
+    expect(run(['git', 'rev-list', '--parents', 'HEAD'], exported.directory)).toBe(exported.commit);
+    expect(run(['git', 'remote'], exported.directory)).toBe('');
+    expect(run(['git', 'status', '--porcelain'], exported.directory)).toBe('');
+    expect(run(['git', 'config', 'user.email'], exported.directory)).toBe('snapshot@example.invalid');
+    expect(await readFile(join(exported.directory, 'LICENSE'), 'utf8')).toContain('Original MIT');
+    for (const readme of ['README.md', 'README-zh.md']) expect(await readFile(join(exported.directory, readme), 'utf8')).toBe(await readFile(join(fixture, readme), 'utf8'));
+    expect(await readFile(join(exported.directory, 'docs/images/workspace.png'), 'utf8')).toBe('Synthetic reviewed image fixture');
+    for (const internal of ['docs/images/README.md', 'scripts/capture-docs.ts', 'tests/browser/readme-screenshot.mjs', 'tests/fixtures/showcase-codex.mjs']) expect(Bun.spawnSync(['git', 'cat-file', '-e', `HEAD:${internal}`], { cwd: exported.directory }).exitCode).not.toBe(0);
+    await expect(access(join(exported.directory, 'docs/images/personal.png'))).rejects.toThrow();
+    expect((await stat(join(exported.directory, 'tests/fixtures/codex'))).mode & 0o111).toBe(0o111);
+    await expect(access(join(exported.directory, 'docs/history/machine.md'))).rejects.toThrow();
+    expect(Bun.spawnSync(['git', 'cat-file', '-e', oldBlob], { cwd: exported.directory }).exitCode).not.toBe(0);
+    for (const commit of [historicalCommit, developmentCommit]) expect(Bun.spawnSync(['git', 'cat-file', '-e', commit], { cwd: exported.directory }).exitCode).not.toBe(0);
+    expect(Bun.spawnSync(['bun', 'scripts/prepare-source.ts'], { cwd: fixture }).exitCode).not.toBe(0);
+    await writeFile(join(fixture, 'uncommitted.txt'), 'dirty');
+    expect(Bun.spawnSync(['bun', 'scripts/prepare-source.ts'], { cwd: fixture }).exitCode).not.toBe(0);
+  } finally { await rm(fixture, { recursive: true, force: true }); }
+});

@@ -1,0 +1,22 @@
+# User unit template. Adjust paths before installing; no service is installed automatically.
+[Unit]
+Description=Codex Remote Web
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=%h/opt/codex-remote-web
+EnvironmentFile=%h/.config/codex-remote-web.env
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
+ExecStart=%h/.local/bin/bun run dist/server.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+KillMode=mixed
+UMask=0077
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,11 @@
+# Insert this item into the EXISTING tunnel ingress, before its catch-all.
+# Do not replace the tunnel ID, credentials, other hostnames, or connector service.
+- hostname: YOUR_WEBUI_HOSTNAME
+  service: http://127.0.0.1:8899
+  originRequest:
+    access:
+      required: true
+      teamName: YOUR_TEAM
+      audTag:
+        - YOUR_ACCESS_APPLICATION_AUD
+# Keep the original public Host; do not set httpHostHeader to localhost.

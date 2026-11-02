@@ -1,0 +1,61 @@
+.remote-access-wizard { max-width: 780px; }
+.remote-access-wizard [hidden] { display: none!important; }
+.remote-access-wizard .settings-description { margin-bottom: 28px; line-height: 1.65; }
+.remote-steps { list-style: none; padding: 0; margin: 0 0 28px; display: flex; gap: 12px; justify-content: space-between; }
+.remote-steps li { display: flex; flex: 1; flex-direction: column; gap: 10px; color: var(--app-text-tertiary); font-size: 12px; }
+.remote-steps li > span { display: grid; place-items: center; width: 28px; height: 28px; border: 1px solid var(--app-border-default); border-radius: 50%; font-size: 13px; }
+.remote-steps [aria-current] { color: var(--app-text); }
+.remote-steps [aria-current] > span { background: var(--app-text); color: var(--app-main); border-color: transparent; }
+.remote-steps .complete > span { color: var(--app-success); border-color: var(--app-success); }
+.remote-access-wizard .remote-card { padding: 26px; border-radius: 16px; }
+.remote-card h2 { font-size: 18px; font-weight: 500; margin: 0 0 14px; }
+.remote-card p { color: var(--app-text-secondary); font-size: 14px; line-height: 1.65; margin: 12px 0 20px; }
+.remote-card label { display: flex; flex-direction: column; gap: 9px; min-width: 0; margin: 18px 0; font-size: 14px; }
+.remote-card input, .remote-card select { width: 100%; min-width: 0; height: 42px; border: 1px solid var(--app-border-default); border-radius: 10px; background: var(--app-main); color: var(--app-text); padding: 8px 12px; font: inherit; }
+.remote-card input:focus, .remote-card select:focus { outline: 2px solid var(--app-link); outline-offset: 2px; }
+.remote-grid { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 18px; }
+.remote-card .remote-hint { font-size: 12px; color: var(--app-text-tertiary); }
+.remote-access-wizard a { color: var(--app-link); text-underline-offset: 3px; font-size: 13px; overflow-wrap: anywhere; }
+.remote-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.remote-access-wizard button, .remote-open { display: inline-flex; justify-content: center; align-items: center; min-height: 38px; padding: 9px 15px; border: 1px solid var(--app-border-default); border-radius: 10px; background: var(--app-hover); font-size: 13px; color: var(--app-text); cursor: pointer; }
+.remote-access-wizard button:hover { background: var(--app-fog); }
+.remote-access-wizard .primary { background: var(--app-text); color: var(--app-main); border-color: transparent; text-decoration: none; }
+.remote-access-wizard .danger, .remote-access-wizard .error { color: var(--app-danger); }
+.remote-message { min-height: 0; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
+.remote-message:empty { display: none; }
+.remote-message:not(:empty) { padding: 12px 16px; border: 1px solid var(--app-border-default); border-radius: 10px; }
+.remote-summary { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 12px 20px; font-size: 13px; }
+.remote-summary dt { color: var(--app-text-tertiary); }.remote-summary dd { margin: 0; overflow-wrap: anywhere; }
+.remote-checks { padding-left: 20px; font-size: 13px; line-height: 1.8; }.remote-checks li { padding: 4px 0; overflow-wrap: anywhere; }.remote-checks .passed { color: var(--app-success); }
+.remote-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; margin-top: 22px; color: var(--app-text-tertiary); font-size: 12px; line-height: 1.6; }
+.remote-footer button { background: transparent; border: 0; padding-inline: 0; }
+.remote-remove { border-top: 1px solid var(--app-border-default); margin-top: 24px; }
+.setup-topbar { height: 58px; display: flex; align-items: center; gap: 12px; padding: 0 22px; color: var(--app-text-secondary); font-size: 14px; }.setup-brand { width: 25px; height: 25px; }.setup-topbar button { margin-left: auto; padding: 8px 14px; border-radius: 9px; background: var(--app-hover); }
+.setup-shell { display: grid; grid-template-columns: 240px minmax(0,1fr); margin: 0 10px 10px; min-height: calc(100dvh - 68px); border: 1px solid var(--app-border-default); border-radius: 18px; background: var(--app-main); overflow: hidden; }
+.setup-nav { padding: 30px 16px; border-right: 1px solid var(--app-border-default); background: var(--app-sidebar); }.setup-nav > strong { display: block; padding: 0 14px 28px; font-size: 17px; font-weight: 500; }.setup-nav-item { display: flex; gap: 12px; align-items: center; background: var(--app-hover); padding: 12px 14px; border-radius: 12px; font-size: 14px; }.setup-nav-item svg { width: 19px; height: 19px; }.setup-nav > p { margin: 28px 14px; font-size: 12px; color: var(--app-text-tertiary); line-height: 1.8; }
+.setup-workspace { overflow: auto; }.setup-workspace .settings-page { margin: 0; max-width: none; }.setup-workspace .settings-page-heading { margin-bottom: 26px; }
+@media (max-width: 760px) { .setup-shell { grid-template-columns: minmax(0,1fr); margin: 0; border-radius: 0; border-inline: 0; }.setup-nav { display: none; }.setup-topbar { padding-inline: 18px; }.remote-access-wizard .remote-card { padding: 18px; }.remote-grid { grid-template-columns: minmax(0,1fr); gap: 0; }.remote-steps { gap: 6px; }.remote-steps li { font-size: 10px; }.remote-summary { grid-template-columns: minmax(0,1fr); gap: 5px; }.remote-summary dd { margin-bottom: 10px; } }
+
+.remote-permissions { margin: 18px 0 20px; border: 1px solid var(--app-border-default); border-radius: 12px; padding: 12px 14px; background: var(--app-fog); }
+.remote-permissions summary { cursor: pointer; color: var(--app-text); font-size: 13px; font-weight: 500; }
+.remote-permission-table { margin-top: 12px; overflow-x: auto; }
+.remote-permission-head, .remote-permission-row { min-width: 610px; display: grid; grid-template-columns: 1fr 2.6fr .7fr; gap: 10px; align-items: center; }
+.remote-permission-head { padding: 0 8px 7px; color: var(--app-text-tertiary); font-size: 11px; }
+.remote-permission-row { padding: 7px 8px; border-top: 1px solid var(--app-border); }
+.remote-permission-row code { color: var(--app-text); font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: normal; overflow-wrap: anywhere; }
+
+.remote-permissions > button { margin-top: 12px; }
+.remote-permission-alternatives { padding-left: 18px; color: var(--app-text-secondary); font-size: 12px; line-height: 1.6; }
+.remote-permission-alternatives code { overflow-wrap: anywhere; font-size: 11px; }
+
+.remote-message > span, .remote-message > code { display: block; margin-top: 8px; }.remote-message > code { color: var(--app-text); font-size: 12px; overflow-wrap: anywhere; }
+
+.remote-hostname { display: flex; align-items: stretch; min-width: 0; border: 1px solid var(--app-border-default); border-radius: 10px; background: var(--app-main); overflow: hidden; }.remote-card .remote-hostname input { flex: 1; width: 45%; min-width: 72px; border: 0; border-radius: 0; background: transparent; }.remote-hostname > span { display: flex; align-items: center; padding: 8px 12px; max-width: 65%; overflow-wrap: anywhere; border-left: 1px solid var(--app-border-default); background: var(--app-hover); color: var(--app-text-secondary); font-size: 13px; }.remote-hostname:focus-within { outline: 2px solid var(--app-link); outline-offset: 2px; }.remote-card .remote-hostname input:focus { outline: 0; }.remote-card .remote-confirm { flex-direction: row; align-items: flex-start; font-size: 12px; line-height: 1.6; }.remote-card .remote-confirm input { width: 18px; height: 18px; flex: 0 0 18px; margin: 1px 0 0; }
+
+.remote-access-choices { display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;margin-top:20px; }
+.remote-access-choice { border:1px solid var(--app-border-default);border-radius:12px;padding:18px;display:flex;flex-direction:column;align-items:flex-start; }
+.remote-access-choice h3 { font-size:15px;font-weight:500;margin:0; }.remote-access-choice p { flex:1;font-size:13px; }
+.remote-quick-address { margin-top:22px; }.remote-quick-address > a { display:block;overflow-wrap:anywhere;font-size:14px;margin-bottom:20px; }
+.remote-quick-qr { width:192px;max-width:100%;border-radius:12px;padding:8px;background:#fff;color:#000; }.remote-quick-qr svg { display:block;width:100%;height:auto; }
+.remote-card button:disabled { cursor:default;opacity:.5; }
+@media(max-width:760px){.remote-access-choices{grid-template-columns:minmax(0,1fr);}.remote-quick-address .remote-actions{justify-content:flex-start;}}
