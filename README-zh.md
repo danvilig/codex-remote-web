@@ -136,6 +136,7 @@ Sites 部署、图片生成、云端 Library、插件账户 OAuth 和完整 MCP 
 - [开发与测试](DEVELOPMENT.md) / [贡献指南](CONTRIBUTING.md)
 - [架构](docs/ARCHITECTURE.md) / [路线图](docs/ROADMAP.md)
 - [发布流程](docs/RELEASING.md) / [验收报告](docs/releases/0.2.0-alpha.2-acceptance.md) / [变更记录](CHANGELOG.md)
+- [贡献规范](CONTRIBUTING.md) / [Git 开发流程](docs/GIT_WORKFLOW.md) / [AI agent 规则](AGENTS.md)
 - [安全说明](SECURITY.md)
 
 ## 参考与致谢

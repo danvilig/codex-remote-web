@@ -1,32 +1,28 @@
+<!-- Complete every section in English or Chinese. Replace placeholders; N/A requires a reason. -->
+<!-- Title: type(scope): description. Normal work targets develop; see CONTRIBUTING.md. -->
+
 ## Summary
 
-<!-- What changed and why? -->
+<!-- Concrete problem, trigger and resulting behavior. Link an issue if available. -->
 
-## Codex protocol surface
+## Changes
 
-<!-- List relevant app-server methods/notifications, or write N/A. -->
-
--
+<!-- Scope, affected interfaces/native methods, rationale. Flag CI/policy, auth, execution, dependencies and packaging changes. -->
 
 ## Verification
 
-- [ ] `bun run test:unit`
-- [ ] `bun run check`
-- [ ] Relevant browser tests
-- [ ] Relevant integration/E2E tests
-- [ ] `git diff --check`
+<!-- Exact commands and observed results; CI links. Explain skipped checks. Reliability fixes: reproducer and before/after evidence. UI: synthetic screenshots for relevant layouts. -->
 
-## Screenshots
+## Risk and rollback
 
-<!-- Required for UI changes. Add desktop and mobile screenshots when relevant. -->
+<!-- Compatibility, permission/data boundaries, migration, rollback and limitations. N/A needs a reason. -->
 
-## Security and compatibility
+## AI assistance
 
-- [ ] No credentials, private logs, proprietary assets, or personal absolute paths were added
-- [ ] Filesystem and command execution boundaries remain validated
-- [ ] Mobile layout and `prefers-reduced-motion` were considered
-- [ ] Documentation was updated if behavior or configuration changed
+<!-- Tools used (or explicitly none), contribution scope, contributor review performed and uncertainty. Never claim a human review that has not happened. -->
 
-## Notes
+## Checklist
 
-<!-- Migration steps, known limitations, follow-up work. -->
+- [ ] No secrets, private data or proprietary assets included.
+- [ ] Reported checks were actually run; skipped checks have reasons.
+- [ ] A maintainer will review and merge; AI output is not approval.
