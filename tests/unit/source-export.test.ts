@@ -13,6 +13,10 @@ test('public snapshot contains only allowed current files and has independent hi
   try {
     await mkdir(join(fixture, 'scripts'));
     await mkdir(join(fixture, 'docs/history'), { recursive: true });
+    await mkdir(join(fixture, '.github'), { recursive: true });
+    await writeFile(join(fixture, 'AGENTS.md'), 'Agent rules for public contributions.');
+    await writeFile(join(fixture, '.github/CODEOWNERS'), '* @example');
+    await writeFile(join(fixture, 'docs/GIT_WORKFLOW.md'), 'Public branch and PR workflow.');
     await mkdir(join(fixture, 'docs/images'), { recursive: true });
     await mkdir(join(fixture, 'tests/browser'), { recursive: true });
     await mkdir(join(fixture, 'tests/fixtures'), { recursive: true });
@@ -53,6 +57,7 @@ test('public snapshot contains only allowed current files and has independent hi
     expect(await readFile(join(exported.directory, 'LICENSE'), 'utf8')).toContain('Original MIT');
     for (const readme of ['README.md', 'README-zh.md']) expect(await readFile(join(exported.directory, readme), 'utf8')).toBe(await readFile(join(fixture, readme), 'utf8'));
     expect(await readFile(join(exported.directory, 'docs/images/workspace.png'), 'utf8')).toBe('Synthetic reviewed image fixture');
+    for (const file of ['AGENTS.md', '.github/CODEOWNERS', 'docs/GIT_WORKFLOW.md']) expect(await readFile(join(exported.directory, file), 'utf8')).toBe(await readFile(join(fixture, file), 'utf8'));
     for (const internal of ['docs/images/README.md', 'scripts/capture-docs.ts', 'tests/browser/readme-screenshot.mjs', 'tests/fixtures/showcase-codex.mjs']) expect(Bun.spawnSync(['git', 'cat-file', '-e', `HEAD:${internal}`], { cwd: exported.directory }).exitCode).not.toBe(0);
     await expect(access(join(exported.directory, 'docs/images/personal.png'))).rejects.toThrow();
     expect((await stat(join(exported.directory, 'tests/fixtures/codex'))).mode & 0o111).toBe(0o111);

@@ -138,6 +138,7 @@ The detailed guides below are currently in Chinese.
 - [Development and testing](DEVELOPMENT.md) / [Contributing](CONTRIBUTING.md)
 - [Architecture](docs/ARCHITECTURE.md) / [Roadmap](docs/ROADMAP.md)
 - [Release process](docs/RELEASING.md) / [Acceptance report](docs/releases/0.2.0-alpha.2-acceptance.md) / [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md) / [Git workflow](docs/GIT_WORKFLOW.md) / [Agent rules](AGENTS.md)
 - [Security](SECURITY.md)
 
 ## References and acknowledgements

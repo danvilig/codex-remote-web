@@ -43,7 +43,9 @@ bun run verify:release
 
 ## Git
 
-本地开发仓库保留历史，公开源码采用 `bun run source:prepare` 生成的独立快照；独立开发分支使用 `codex/` 前缀。每个可验证阶段分别提交；参考项目远程仅用于历史来源追踪，不作为本项目的发布目标。自己的远程仓库尚未配置，不在文档和脚本中虚构仓库地址或维护者身份。当前访问入口与本地 `.env` 不属于发布配置。
+公开仓库为 `danvilig/codex-remote-web`，首次独立快照之后正常延续公开历史。日常从 `develop` 创建 `codex/<主题>` 等短分支，PR 合入 `develop`；发版时再创建 `release/<版本>`，验收后通过 PR 合入 `main`。受保护分支禁止直推/强推，PR 需 Verify 与规范检查通过、目标分支最新及讨论解决，由维护者人工合并。详细流程、合并方式和回合要求见 [Git 开发流程](docs/GIT_WORKFLOW.md)；AI agent 先读根目录 [AGENTS.md](AGENTS.md)。
+
+本地历史开发仓库保留早期历史，不能向公开远程直接推送其分支。应把审阅过的文件改动转移到以公开 `develop` 为祖先的工作分支，通过 PR 提交；参考项目远程只用于来源追踪。`source:prepare` 仅用于独立源码/候选产物验证，不替换公开根提交。当前访问入口与本地 `.env` 不属于发布配置。
 
 
 ## Alpha 2 development tools and browser acceptance
