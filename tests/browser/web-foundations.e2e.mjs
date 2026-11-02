@@ -56,8 +56,18 @@ try {
   await page.locator('[data-autocomplete-id="plan"]').click();
   await page.locator('#prompt').fill('Plan this fixture task');
   await page.locator('#composer').evaluate(form => form.requestSubmit());
-  await page.waitForTimeout(100);
-  const turn = JSON.parse(readFileSync(rpcLog, 'utf8').trim().split('\n')[0]);
+  // Dispatch persists a receipt before reaching the fixture. Wait for its
+  // actual complete JSONL record, not an assumed 100ms disk/network budget.
+  let turn;
+  const deadline = Date.now() + 10000;
+  while (!turn && Date.now() < deadline) {
+    try {
+      turn = readFileSync(rpcLog, 'utf8').split('\n').slice(0, -1)
+        .map(line => JSON.parse(line)).find(message => message.method === 'turn/start');
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (!turn) await Bun.sleep(25);
+  }
+  assert.ok(turn, 'Native turn/start was not recorded within 10s');
   assert.equal(turn.params.collaborationMode.mode, 'plan');
   assert.equal(turn.params.collaborationMode.settings.model, 'gpt-test-fixture');
 
