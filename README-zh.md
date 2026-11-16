@@ -6,12 +6,15 @@
 
 使用 **Cloudflare Tunnel + Access** 的自托管浏览器工作区：通过网页配置远程访问，在其他设备上继续会话、查看工具进度、处理审批和编辑项目文件。
 
+> **下一版说明：** 下文的桌面网关和会话变化由 [#8](https://github.com/danvilig/codex-remote-web/pull/8) 与 [#9](https://github.com/danvilig/codex-remote-web/pull/9) 准备中。已发布的 **0.2.0-alpha.3** 安装包仍通过终端启动；托盘设置应用及新的会话默认行为需要包含这些变更的构建。
+
 ## 项目亮点
 
 - **公网接入，全程网页配置。** 连接 Cloudflare 账户、选择域名与 Tunnel、指定允许登录的邮箱，预览后部署；无需直接暴露 WebUI 端口。
 - **没有域名也能用。** 启动受邮箱验证码保护的临时 HTTPS 地址，复制链接或扫码访问，无需 Cloudflare 账户或 API Token。
+- **桌面管理，浏览器访问。** macOS、Windows 和 Linux 通过托盘与设置页面初始化、控制后台网关；桌面和 Web 设置采用协调的主题与控件，动效遵循系统的减少动态效果偏好。
 - **跨设备继续工作。** 桌面、平板和手机布局，中英文界面、深浅主题、可调整大小的双侧栏和右面板最大化。
-- **连接原生 Codex。** 优先接入 Desktop/CLI 的共享 App Server，继续同一会话；支持流式输出、运行进度、审批、原生临时 Side chat 和 Fork。
+- **继续同一原生会话。** 默认连接 Codex Desktop/CLI 的共享 App Server，服务尚未就绪时等待连接；支持流式输出、运行进度、审批、原生临时 Side chat 和 Fork。
 - **浏览器里的开发工具。** 文件树、语法高亮、代码编辑、Markdown 预览编辑、附件、插件与技能管理，以及项目指令和工作树管理。
 - **发送有反馈，排队可恢复。** 支持运行中追加指令或排队，服务端持久队列、多页面同步和提交结果核对；结果不明时暂停，避免自动重复执行。
 
@@ -54,18 +57,33 @@
 
 ## 快速开始
 
-### 下载可执行包（推荐）
+### 下载桌面安装包或可执行包（推荐）
 
 从 [Releases](https://github.com/danvilig/codex-remote-web/releases) 下载系统对应的归档和同名 `.sha256`。包内含可执行程序、Bun/Node、网页资源和原生终端模块，**无需安装运行时或现场编译**，请保留解压后的完整目录。仍需自行配置 Codex CLI、Git；公网访问需要 cloudflared。
 
 | 系统 | 包名后缀 | 要求 |
 | --- | --- | --- |
-| Linux x64 / arm64 | `linux-x64.tar.gz` / `linux-arm64.tar.gz` | glibc，Ubuntu 24.04 验证 |
+| Linux x64 / arm64 | `desktop-linux-x64.deb` / `desktop-linux-arm64.deb`（桌面）；`linux-x64.tar.gz` / `linux-arm64.tar.gz`（CLI） | glibc；桌面基线为 Ubuntu 24.04 GNOME |
 | macOS Apple Silicon | `macos-arm64.dmg`（安装）/ `.tar.gz`（便携） | macOS 15 或更新；不支持 Intel Mac |
 | Windows x64 | `windows-x64.msi`（安装）/ `.zip`（便携） | Windows 11、NTFS、Windows PowerShell；不支持 ARM64 |
 
-macOS 打开 DMG，将 **Codex Remote Web.app** 拖入 Applications，双击后在 Terminal 启动网关并打开浏览器。Windows 运行当前用户 MSI，使用开始菜单 **Codex Remote Web** / **Open WebUI**，可在“已安装的应用”卸载。两种安装包都不添加后台服务；关闭终端或 Ctrl+C 停止网关，便携归档继续提供。macOS/Windows 包暂未代码签名；核对校验和及源码，仅对可信下载使用系统的单文件批准，不要全局关闭 Gatekeeper 或 SmartScreen。不支持 Linux 32 位 ARM 和 Alpine/musl。
+### 桌面安装包：初始化后通过托盘管理
 
+macOS 将 DMG 中的 **Codex Remote Web.app** 拖入 Applications 后打开。Windows 安装当前用户 MSI，从开始菜单启动 **Codex Remote Web**。Ubuntu 安装桌面 DEB 后，从应用菜单打开。
+
+1. 在**网关设置**选择项目目录和端口（默认 `8899`）；未自动找到程序时选择 Codex/cloudflared 路径，检测依赖并保存。沿用你现有的 Codex 账户与配置。
+2. 在**概览**启动网关并打开浏览器工作区；设置窗口和托盘菜单均可启动、停止和重启网关。
+3. 需要其他设备访问时，进入**远程访问**，选择固定域名或受邮箱验证码保护的临时地址。
+
+关闭设置窗口后隐藏到托盘，退出托盘后后台网关继续运行。Linux 桌面不支持托盘时，关闭设置会最小化到任务栏。点击**停止网关**会停止网关和自有连接，注销登录也会结束后台会话。**登录时启动网关**默认勾选，首次保存设置时注册；不需要时请在保存前取消勾选，之后关闭此选项不会停止当前网关。网页终端默认关闭。
+
+升级前先停止网关。Windows 可从**已安装的应用**卸载，Linux 可移除 DEB；macOS 删除应用前，先在**诊断 → 停止并移除后台组件**清理。项目和 Codex 凭据保留，移除托管 Cloudflare 部署需另在远程访问中操作。详见[桌面平台说明](docs/deployment/PLATFORMS.md)。
+
+桌面包暂未签名；核对校验和及源码，仅对可信下载使用系统的单文件批准，不要全局关闭 Gatekeeper 或 SmartScreen。不支持 Linux 32 位 ARM 和 Alpine/musl。
+
+### CLI 便携包
+
+以下示例使用已发布的 **0.2.0-alpha.3** 包，通过终端运行，关闭终端或按 Ctrl+C 停止网关。请按实际下载选择对应的包名与版本。
 ```sh
 archive=codex-remote-web-0.2.0-alpha.3-linux-x64.tar.gz
 # arm64 改为 codex-remote-web-0.2.0-alpha.3-linux-arm64.tar.gz
@@ -101,21 +119,27 @@ bun run dev
 
 访问 `http://127.0.0.1:8899`。`bun run start` 运行源码服务；生产使用 `bun run build` 后的 `bun run start:production`。程序资源根据安装位置定位，与启动命令所在目录无关。
 
-与 Codex Desktop/CLI 同时使用时，WebUI 优先连接已有的本机共享 App Server。推荐显式设置 `CODEX_WEBUI_APP_SERVER_MODE=shared`；未运行共享服务时默认兼容独立模式，两个独立进程不能同时写同一会话。参见[共享服务配置](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话)。
+### 共享 Codex 会话与独立部署
+
+下一版默认使用 `CODEX_WEBUI_APP_SERVER_MODE=shared`，旧值 `auto` 也会等待共享 daemon。请先通过 Codex Desktop/CLI 启动兼容的本机 daemon；WebUI 先启动时保持未连接并重试，服务就绪后接入，不另起独立写入进程、不自动重放执行请求。WebUI 不代为启动共享 daemon；停止网关不会停止 daemon 或其中的任务。
+
+没有共享 daemon 的专用部署，请在运行环境中显式设置 `CODEX_WEBUI_APP_SERVER_MODE=isolated`；Docker 镜像和 Compose 已显式选择该模式。两个独立进程不能同时写同一会话。升级已有独立部署前，先核对任务、审批和队列，再重启网关以切换连接模式，仅刷新网页无效。Socket 选择及原生传输要求见[共享服务配置](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话)。
 
 ## 配置公网访问
 
-在完整本地 WebUI 打开 **设置 → 远程访问**，根据是否拥有域名选择入口：
+在桌面应用打开**远程访问**，或在完整本地 WebUI 打开 **设置 → 远程访问**。先初始化并启动本地网关，再根据是否拥有域名选择入口：
 
 | 方式 | 固定域名访问 | 无域名临时访问 |
 | --- | --- | --- |
 | 地址 | 自己的域名或子域名 | 自动分配的临时 HTTPS 地址 |
 | 登录保护 | Cloudflare Access，指定唯一邮箱 | 邮件验证码，指定唯一邮箱 |
-| 前置条件 | Cloudflare 账户、已托管域名、API Token、cloudflared、Linux 用户级 systemd | 支持 `--allowed-mail` 的 cloudflared；可执行包已内置 Node.js |
+| 前置条件 | Cloudflare 账户、已托管域名、API Token 和 cloudflared；由桌面应用或 Linux 用户级 systemd 管理 | 支持 `--allowed-mail` 的 cloudflared；可执行包已内置 Node.js |
 | 配置入口 | 开始配置 → 选择 Tunnel 与域名 → 预览 → 应用 | 无域名临时访问 → 填写邮箱 → 启动 |
-| 生命周期 | 原生用户服务，支持配置管理 | 随 WebUI 进程及连接器运行；停止后需重新生成地址 |
+| 生命周期 | 桌面应用管理的后台网关/连接器，或 Linux 用户服务 | 随网关和连接器运行；停止后需重新生成地址 |
 
-固定域名向导支持识别本机连接器、复用或新建 Tunnel、子域名及根域名 `@` 输入，以及后续域名、Tunnel 和邮箱调整。默认部署到独立的 `127.0.0.1:8900` 原生服务，保留开发入口。
+固定域名向导支持识别本机连接器、复用或新建 Tunnel、子域名及根域名 `@` 输入，以及后续域名、Tunnel 和邮箱调整。默认使用独立的 `127.0.0.1:8900` 受保护网关，保留本地工作区。macOS/Windows/Linux 由桌面应用管理该网关和连接器；无桌面的自动服务部署使用 Linux 用户级 systemd。
+
+新建固定域名 Access 应用采用 **30 天（`720h`）应用会话**，Cookie 设置为 HttpOnly、SameSite=Lax。升级 WebUI 不会修改已有应用；管理员可按需另行调整云端设置。较短的策略/全局/客户端有效期、撤销、退出或清除 Cookie 都可能要求提前重新登录。此变化不影响临时地址的邮箱验证码认证。迁移说明见[Cloudflare 部署文档](docs/deployment/CLOUDFLARE.md)。
 
 也可以仅启动配置网页，不启动 Codex App Server：
 
@@ -141,7 +165,9 @@ bun run setup:cloudflare
 
 ## 部署与使用边界
 
-Linux 原生服务为主要部署方式，支持 x86_64（x64）和 aarch64（arm64）；Docker 为备用。容器内不能通过向导配置宿主机 systemd；默认镜像不包含 Codex 或 cloudflared。同时提供 macOS arm64 和 Windows x64 可执行包。固定域名自动部署向导依赖 Linux 用户级 systemd；macOS/Windows 需手动配置 Tunnel + Access，并启用 `cloudflare-access` 认证。受保护临时访问支持 Linux/macOS，Windows 暂不支持。见[跨平台配置](docs/deployment/PLATFORMS.md)。
+桌面使用可选择 macOS/Windows 安装包或 Linux 桌面 DEB；服务器使用无桌面的 Linux 包或 Docker。桌面后台进程以登录用户运行，需要注销后仍在线时应使用服务器部署。桌面应用不会自动接管已有 headless/systemd 部署，切换前先停止冲突网关。
+
+桌面管理的固定域名配置和受保护临时访问支持 macOS、Windows、Linux。无桌面的自动服务部署依赖 Linux 用户级 systemd；容器内不能通过向导配置宿主机 systemd，默认 Docker 镜像不包含 Codex 或 cloudflared。见[跨平台配置](docs/deployment/PLATFORMS.md)。
 
 默认仅监听 loopback，公网通过受保护的 Tunnel 接入。Access 身份验证与 Codex 命令审批、Linux 权限和沙箱分别生效。
 

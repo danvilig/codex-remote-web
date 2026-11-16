@@ -6,12 +6,15 @@
 
 A self-hosted browser workspace using **Cloudflare Tunnel + Access**. Set up remote access through the web UI, then continue conversations, follow tool activity, handle approvals, and edit project files from another device.
 
+> **Next release:** The desktop gateway and session changes below are being prepared in [#8](https://github.com/danvilig/codex-remote-web/pull/8) and [#9](https://github.com/danvilig/codex-remote-web/pull/9). Published **0.2.0-alpha.3** installers still use a terminal launcher; the tray/settings app and new session defaults require a build containing those changes.
+
 ## Highlights
 
 - **Public access, configured in your browser.** Connect your Cloudflare account, choose a domain and Tunnel, specify the allowed email address, then preview and deploy. No need to expose the WebUI port directly.
 - **No domain required.** Start a temporary HTTPS address protected by an email verification code. Copy the link or scan its QR code; no Cloudflare account or API Token required.
+- **A desktop gateway with browser access.** Initialize and control the background gateway from a tray/settings app on macOS, Windows and Linux. Desktop and Web settings share themes, controls and motion that respects reduced-motion preferences.
 - **Work across devices.** Desktop, tablet, and phone layouts; English and Chinese; light and dark themes; resizable sidebars and a maximizable right panel.
-- **Connect to native Codex.** Prefer the shared Desktop/CLI App Server to continue the same conversation, with streaming responses, tool progress, approvals, native temporary Side chat, and Fork.
+- **Continue the same native conversation.** Connect to the shared Codex Desktop/CLI App Server by default, waiting for it to become available. Follow streaming responses, tool progress and approvals, with native temporary Side chat and Fork.
 - **Development tools in your browser.** A file tree, syntax highlighting, code editing, Markdown preview editing, attachments, plugin and skill management, project instructions, and Git worktrees.
 - **Clear sending feedback and recoverable queues.** Steer a running task or queue a message, with a persistent server queue, synchronization across tabs, and submission reconciliation. Uncertain results pause instead of being retried automatically.
 
@@ -54,18 +57,33 @@ These screenshots show the current WebUI using an isolated demo project and simu
 
 ## Quick start
 
-### Download an installer or executable (recommended)
+### Download desktop installers or portable packages (recommended)
 
 Download your package and its `.sha256` from [Releases](https://github.com/danvilig/codex-remote-web/releases). Each executable package includes Bun/Node, web assets and the native terminal module; **no runtime installation or compilation is required**. Keep the extracted directory intact. Install and configure Codex CLI and Git separately; remote access also requires cloudflared.
 
 | Platform | Package | Requirements |
 | --- | --- | --- |
-| Linux x64 / arm64 | `linux-x64.tar.gz` / `linux-arm64.tar.gz` | glibc; validated on Ubuntu 24.04 |
+| Linux x64 / arm64 | `desktop-linux-x64.deb` / `desktop-linux-arm64.deb` (desktop); `linux-x64.tar.gz` / `linux-arm64.tar.gz` (CLI) | glibc; desktop baseline: Ubuntu 24.04 GNOME |
 | macOS Apple Silicon | `macos-arm64.dmg` (installer) / `.tar.gz` (portable) | macOS 15 or newer; Intel Macs are not supported |
 | Windows x64 | `windows-x64.msi` (installer) / `.zip` (portable) | Windows 11, NTFS, Windows PowerShell; ARM64 is not supported |
 
-For macOS, open the DMG, drag **Codex Remote Web.app** into Applications, and open it to start the gateway in Terminal and open your browser. For Windows, run the per-user MSI and use **Codex Remote Web** / **Open WebUI** in the Start menu; uninstall from Installed apps. Neither installer adds a background service. Close the Terminal/console or press Ctrl+C to stop the gateway. Portable archives remain available. macOS/Windows downloads are unsigned; review the checksum and source, and use your system's per-file approval only for a download you trust. Never disable Gatekeeper or SmartScreen globally. Linux 32-bit ARM and Alpine/musl are not supported.
+### Desktop installers: initialize once, then use the tray
 
+On macOS, drag **Codex Remote Web.app** from the DMG into Applications and open it. On Windows, install the per-user MSI and launch **Codex Remote Web** from the Start menu. On Ubuntu, install the desktop DEB and open the application from the app launcher.
+
+1. In **Gateway settings**, choose a project directory and port (default `8899`). Select Codex/cloudflared executable paths if they are not found automatically, check dependencies and save. The app uses your existing Codex account and configuration.
+2. In **Overview**, start the gateway and open the browser workspace. Start, stop and restart controls remain available in the settings window and tray menu.
+3. For access from another device, open **Remote access** and choose a fixed domain or a temporary address protected by an email code.
+
+Closing settings hides the window to the tray; quitting the tray leaves the background gateway running. On Linux desktops without tray support, closing settings minimizes the window to the taskbar. Use **Stop gateway** to stop the gateway and its managed connections; logging out ends the background session. **Start gateway at login** is checked by default and registered when you first save settings; uncheck it before saving if you do not want automatic startup. Disabling it later does not stop the current gateway. The browser terminal is off by default.
+
+Stop the gateway before upgrading. Windows supports uninstalling from **Installed apps**, and Linux supports removing the DEB. Before deleting the macOS app, use **Diagnostics → Stop and remove background component**. Projects and Codex credentials are retained; removing a managed Cloudflare deployment is a separate action in Remote access. See [desktop platform setup](docs/deployment/PLATFORMS.md).
+
+Desktop packages are unsigned. Review the checksum and source, and use your system's per-file approval only for a download you trust. Never disable Gatekeeper or SmartScreen globally. Linux 32-bit ARM and Alpine/musl are not supported.
+
+### Portable CLI packages
+
+The following examples use the published **0.2.0-alpha.3** packages. They run in a terminal; close it or press Ctrl+C to stop the gateway. Use the package name and version matching your download.
 ```sh
 archive=codex-remote-web-0.2.0-alpha.3-linux-x64.tar.gz
 # For arm64 use codex-remote-web-0.2.0-alpha.3-linux-arm64.tar.gz
@@ -101,21 +119,27 @@ bun run dev
 
 Open `http://127.0.0.1:8899`. `bun run start` runs the source server; for production, run `bun run build` followed by `bun run start:production`. Application resources resolve relative to the installation, independently of the directory you launch from.
 
-When used alongside Codex Desktop/CLI, the WebUI prefers an existing local shared App Server. Explicitly setting `CODEX_WEBUI_APP_SERVER_MODE=shared` is recommended. Without a shared service, the default mode supports an isolated process; two isolated processes cannot write to the same conversation simultaneously. See [shared server configuration](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话).
+### Shared Codex sessions and standalone deployments
+
+The next release defaults to `CODEX_WEBUI_APP_SERVER_MODE=shared`; the legacy value `auto` also waits for the shared daemon. Start a compatible local daemon through Codex Desktop/CLI first. If WebUI starts earlier, it stays disconnected and reconnects when the daemon is available, without starting an isolated writer or replaying execution requests. WebUI does not launch the shared daemon, and stopping the gateway does not stop that daemon or its tasks.
+
+For a dedicated deployment without a shared daemon, explicitly set `CODEX_WEBUI_APP_SERVER_MODE=isolated` in its runtime environment. Docker and Compose select this mode explicitly. Two isolated processes must not write to the same conversation. Before upgrading an existing isolated deployment, inspect tasks, approvals and queues, then restart its gateway to switch connection modes; refreshing the browser is insufficient. Socket selection and native transport requirements are covered in [shared server configuration](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话).
 
 ## Set up public access
 
-In the full local WebUI, open **Settings → Remote access** and choose an option based on whether you own a domain:
+Open **Remote access** in the desktop app, or **Settings → Remote access** in the full local WebUI. Initialize and start the local gateway first, then choose an option based on whether you own a domain:
 
 | | Fixed domain | Temporary access without a domain |
 | --- | --- | --- |
 | Address | Your own domain or subdomain | An automatically assigned temporary HTTPS address |
 | Login protection | Cloudflare Access, restricted to one email address | Email verification code, restricted to one email address |
-| Requirements | Cloudflare account, a domain hosted on Cloudflare, API Token, cloudflared, and Linux user-level systemd | cloudflared with `--allowed-mail` support; Node.js is included in executable packages |
+| Requirements | Cloudflare account, a domain hosted on Cloudflare, API Token and cloudflared; managed by the desktop app or Linux user-level systemd | cloudflared with `--allowed-mail` support; Node.js is included in executable packages |
 | Setup | Start setup → Choose Tunnel and domain → Preview → Apply | Temporary access → Enter email → Start |
-| Lifecycle | Native user service with configuration management | Runs with the WebUI process and connector; generate a new address after stopping |
+| Lifecycle | Desktop-managed background gateway/connector or a Linux user service | Runs with the gateway and connector; generate a new address after stopping |
 
-The fixed-domain wizard can identify local connectors, reuse or create a Tunnel, accept a subdomain or `@` for the root domain, and later change the domain, Tunnel, or allowed email. By default, it deploys a separate native service at `127.0.0.1:8900`, keeping the development entry point available.
+The fixed-domain wizard can identify local connectors, reuse or create a Tunnel, accept a subdomain or `@` for the root domain, and later change the domain, Tunnel, or allowed email. By default, it uses a separate protected gateway at `127.0.0.1:8900`, keeping the local workspace available. The desktop app manages this gateway and its connector on macOS/Windows/Linux; headless automatic service deployment uses Linux user-level systemd.
+
+New fixed-domain Access applications use a **30-day (`720h`) application session** with an HttpOnly, SameSite=Lax cookie. Existing applications are not changed by upgrading WebUI. Administrators must adjust their cloud-side settings separately if desired; shorter policy/global/client sessions, revocation, logout or cookie clearing can require an earlier sign-in. This does not change temporary-address email-code authentication. See [Access session migration](docs/deployment/CLOUDFLARE.md).
 
 You can also launch only the setup page, without starting a Codex App Server:
 
@@ -141,7 +165,9 @@ The terminal prints a local link with a one-time credential. API Token permissio
 
 ## Deployment and scope
 
-Native Linux services are the primary deployment method on x86_64 and arm64; Docker is an alternative. The wizard cannot configure host systemd from inside a container. The default image includes neither Codex nor cloudflared. macOS arm64 and Windows x64 executable packages are also available. The fixed-domain automatic service wizard requires Linux user systemd; on macOS/Windows configure Tunnel + Access manually and use `cloudflare-access` authentication. Protected temporary access is available on Linux/macOS; Windows temporary access is not supported. See [platform setup](docs/deployment/PLATFORMS.md).
+For desktop use, choose the macOS/Windows installer or Linux desktop DEB. For servers, use a headless Linux package or Docker. Desktop background processes run as the logged-in user; use a server deployment if the workspace must remain online after logout. The desktop app does not automatically take over an existing headless/systemd deployment: stop conflicting gateways before switching.
+
+Desktop-managed fixed-domain setup and protected temporary access support macOS, Windows and Linux. Headless automatic service deployment requires Linux user-level systemd; the wizard cannot configure host systemd from inside a container. The default Docker image includes neither Codex nor cloudflared. See [platform setup](docs/deployment/PLATFORMS.md).
 
 The server listens on loopback by default, with public access through a protected Tunnel. Access authentication operates separately from Codex command approvals, Linux permissions, and sandboxing.
 
