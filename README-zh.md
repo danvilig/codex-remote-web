@@ -119,11 +119,7 @@ bun run dev
 
 访问 `http://127.0.0.1:8899`。`bun run start` 运行源码服务；生产使用 `bun run build` 后的 `bun run start:production`。程序资源根据安装位置定位，与启动命令所在目录无关。
 
-### 共享 Codex 会话与独立部署
-
-下一版默认使用 `CODEX_WEBUI_APP_SERVER_MODE=shared`，旧值 `auto` 也会等待共享 daemon。请先通过 Codex Desktop/CLI 启动兼容的本机 daemon；WebUI 先启动时保持未连接并重试，服务就绪后接入，不另起独立写入进程、不自动重放执行请求。WebUI 不代为启动共享 daemon；停止网关不会停止 daemon 或其中的任务。
-
-没有共享 daemon 的专用部署，请在运行环境中显式设置 `CODEX_WEBUI_APP_SERVER_MODE=isolated`；Docker 镜像和 Compose 已显式选择该模式。两个独立进程不能同时写同一会话。升级已有独立部署前，先核对任务、审批和队列，再重启网关以切换连接模式，仅刷新网页无效。Socket 选择及原生传输要求见[共享服务配置](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话)。
+WebUI 默认连接本机共享 App Server；socket 尚未就绪时等待，旧值 `auto` 也不会因启动顺序另起写入进程。请启动原生 daemon；没有共享服务的独立部署可显式设置 `CODEX_WEBUI_APP_SERVER_MODE=isolated`。两个独立进程不能同时写同一会话。参见[共享服务配置](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话)。
 
 ## 配置公网访问
 
@@ -172,6 +168,10 @@ bun run setup:cloudflare
 默认仅监听 loopback，公网通过受保护的 Tunnel 接入。Access 身份验证与 Codex 命令审批、Linux 权限和沙箱分别生效。
 
 Sites 部署、图片生成、云端 Library、插件账户 OAuth 和完整 MCP 交互保留在后续路线图。更多限制见[发布说明](docs/releases/0.2.0-alpha.3.md)。
+
+### 共享 Codex 会话与独立部署
+
+WebUI 不代为启动共享 daemon。请通过 Codex Desktop/CLI 启动兼容的 daemon；WebUI 会在服务就绪后重连，不自动重放执行请求。停止网关不会停止 daemon 或其中的任务。Docker 镜像和 Compose 已显式选择 `isolated` 模式。升级已有独立部署前，先核对任务、审批和队列，再重启网关以切换连接模式，仅刷新网页无效。
 
 ## 文档与开发
 

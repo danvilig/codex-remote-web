@@ -14,7 +14,7 @@ A self-hosted browser workspace using **Cloudflare Tunnel + Access**. Set up rem
 - **No domain required.** Start a temporary HTTPS address protected by an email verification code. Copy the link or scan its QR code; no Cloudflare account or API Token required.
 - **A desktop gateway with browser access.** Initialize and control the background gateway from a tray/settings app on macOS, Windows and Linux. Desktop and Web settings share themes, controls and motion that respects reduced-motion preferences.
 - **Work across devices.** Desktop, tablet, and phone layouts; English and Chinese; light and dark themes; resizable sidebars and a maximizable right panel.
-- **Continue the same native conversation.** Connect to the shared Codex Desktop/CLI App Server by default, waiting for it to become available. Follow streaming responses, tool progress and approvals, with native temporary Side chat and Fork.
+- **Connect to native Codex.** Join the shared Desktop/CLI App Server to continue the same conversation, with streaming responses, tool progress, approvals, native temporary Side chat, and Fork.
 - **Development tools in your browser.** A file tree, syntax highlighting, code editing, Markdown preview editing, attachments, plugin and skill management, project instructions, and Git worktrees.
 - **Clear sending feedback and recoverable queues.** Steer a running task or queue a message, with a persistent server queue, synchronization across tabs, and submission reconciliation. Uncertain results pause instead of being retried automatically.
 
@@ -119,11 +119,7 @@ bun run dev
 
 Open `http://127.0.0.1:8899`. `bun run start` runs the source server; for production, run `bun run build` followed by `bun run start:production`. Application resources resolve relative to the installation, independently of the directory you launch from.
 
-### Shared Codex sessions and standalone deployments
-
-The next release defaults to `CODEX_WEBUI_APP_SERVER_MODE=shared`; the legacy value `auto` also waits for the shared daemon. Start a compatible local daemon through Codex Desktop/CLI first. If WebUI starts earlier, it stays disconnected and reconnects when the daemon is available, without starting an isolated writer or replaying execution requests. WebUI does not launch the shared daemon, and stopping the gateway does not stop that daemon or its tasks.
-
-For a dedicated deployment without a shared daemon, explicitly set `CODEX_WEBUI_APP_SERVER_MODE=isolated` in its runtime environment. Docker and Compose select this mode explicitly. Two isolated processes must not write to the same conversation. Before upgrading an existing isolated deployment, inspect tasks, approvals and queues, then restart its gateway to switch connection modes; refreshing the browser is insufficient. Socket selection and native transport requirements are covered in [shared server configuration](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话).
+The WebUI defaults to the local shared Desktop/CLI App Server and waits if its socket is not ready. Legacy `auto` mode also waits; it never starts a second writer based on startup order. Start the native daemon before use, or explicitly set `CODEX_WEBUI_APP_SERVER_MODE=isolated` for a standalone deployment. Two isolated processes cannot write the same conversation simultaneously. See [shared server configuration](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话).
 
 ## Set up public access
 
@@ -172,6 +168,10 @@ Desktop-managed fixed-domain setup and protected temporary access support macOS,
 The server listens on loopback by default, with public access through a protected Tunnel. Access authentication operates separately from Codex command approvals, Linux permissions, and sandboxing.
 
 Sites deployment, image generation, cloud Library, plugin account OAuth, and full MCP interactions remain on the roadmap. See the [release notes](docs/releases/0.2.0-alpha.3.md) for more limitations.
+
+### Shared Codex sessions and standalone deployments
+
+WebUI does not launch the shared daemon. Start a compatible daemon through Codex Desktop/CLI; WebUI reconnects when it becomes available without replaying execution requests. Stopping the gateway does not stop that daemon or its tasks. Docker and Compose explicitly select `isolated` mode. Before upgrading an existing isolated deployment, inspect tasks, approvals and queues, then restart its gateway to switch connection modes; refreshing the browser is insufficient.
 
 ## Documentation and development
 
