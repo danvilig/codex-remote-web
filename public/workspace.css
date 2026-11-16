@@ -807,3 +807,30 @@ html[data-theme="light"] { color-scheme: light; }
 .developer-tools-markdown { overflow-wrap:anywhere; padding:12px; border:1px solid var(--app-border-default); border-radius:10px; }
 .developer-tools-markdown img { max-width:100%; height:auto; }
 .developer-tools-markdown pre { overflow:auto; }
+
+/* Shared settings feedback. Motion starts only when a panel becomes visible,
+   never when its status is polled. Hidden panels cancel their CSS animations. */
+:root { --settings-ease:cubic-bezier(.2,.7,.2,1); }
+@keyframes settings-enter { from { opacity:0; transform:translateY(6px); } to { opacity:1; transform:none; } }
+@keyframes settings-spin { to { transform:rotate(360deg); } }
+@keyframes settings-wait { from { opacity:.5; } to { opacity:1; } }
+:is(.settings-page, .desktop-workspace [data-panel], .remote-access-wizard [data-stage]):not([hidden]) { animation:settings-enter 180ms var(--settings-ease); }
+:is(.settings-action, .settings-nav-scroll button, .desktop-sidebar nav button, .workspace-select-trigger, .workspace-select-popup [role=option], .remote-access-wizard button, .remote-open) { transition:background-color 140ms ease,color 140ms ease,border-color 140ms ease,box-shadow 140ms ease,transform 120ms var(--settings-ease); }
+:is(.settings-action, .desktop-sidebar nav button, .remote-access-wizard button):active:not(:disabled) { transform:translateY(1px); }
+.settings-action.primary:hover:not(:disabled), .remote-access-wizard .primary:hover:not(:disabled) { background:color-mix(in srgb,var(--app-text) 88%,var(--app-main)); color:var(--app-main); }
+.remote-workspace .settings-toggle-row input:checked + .settings-switch { background:var(--app-text); border-color:var(--app-text); }
+.remote-workspace .settings-toggle-row input:checked + .settings-switch::after { background:var(--app-main); }
+.remote-workspace .settings-switch, .remote-workspace .settings-switch::after { transition:background-color 160ms ease,border-color 160ms ease,transform 160ms var(--settings-ease); }
+.remote-workspace .settings-toggle-row input:disabled + .settings-switch { opacity:.45; }
+.workspace-select-popup { animation:settings-enter 140ms var(--settings-ease); }
+:is(.settings-action, .remote-access-wizard button)[aria-busy=true]::after { content:""; display:block; flex:none; width:13px; height:13px; border:1.5px solid currentColor; border-right-color:transparent; border-radius:50%; animation:settings-spin 800ms linear infinite; }
+.settings-action[aria-busy=true]>.icon-slot { display:none; }
+:is(.settings-action, .remote-access-wizard button)[aria-busy=true]:disabled { opacity:.75; }
+@media(prefers-reduced-motion:reduce) {
+  :is(.settings-page, .desktop-workspace [data-panel], .remote-access-wizard [data-stage], .workspace-select-popup),
+  :is(.settings-action, .remote-access-wizard button)[aria-busy=true]::after,
+  .desktop-workspace .hero-mark { animation:none!important; }
+  :is(.settings-action, .settings-nav-scroll button, .desktop-sidebar nav button, .workspace-select-trigger, .workspace-select-popup [role=option], .remote-access-wizard button, .remote-open, .settings-switch, .desktop-workspace .status-dot),
+  .remote-workspace .settings-switch::after { transition:none!important; }
+  :is(.settings-action, .desktop-sidebar nav button, .remote-access-wizard button):active { transform:none; }
+}

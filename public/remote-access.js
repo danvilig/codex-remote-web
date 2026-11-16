@@ -106,7 +106,10 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
     return data;
   }
   async function perform(fn) {
-    if (busy) return; busy = true; buttons(true); setMessage();
+    if (busy) return;
+    const focused = root.contains(document.activeElement) ? document.activeElement : null;
+    const trigger = focused?.closest('button') || focused?.closest('form')?.querySelector('button[type=submit]');
+    busy = true; buttons(true); setMessage(); root.setAttribute('aria-busy', 'true'); trigger?.setAttribute('aria-busy', 'true');
     try { await fn(); } catch (error) {
       setMessage(error instanceof TypeError || error instanceof SyntaxError ? 'Remote access could not be loaded. Retry or refresh this page.' : error.message || 'Setup request failed.', true);
       if (error.details) {
@@ -117,7 +120,7 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
         message.append(context, permission, hint);
       }
       if (error.status === 401 || error.status === 403) { csrf = ''; show('locked'); } }
-    finally { busy = false; buttons(false); }
+    finally { busy = false; buttons(false); root.removeAttribute('aria-busy'); trigger?.removeAttribute('aria-busy'); }
   }
   function options(select, items, empty) {
     if (!Array.isArray(items)) throw new Error('Cloudflare returned incomplete resource data. Retry loading.');
