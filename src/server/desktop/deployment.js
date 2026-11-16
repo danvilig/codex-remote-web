@@ -50,7 +50,7 @@ export class DesktopDeployment extends NativeDeployment {
   async activate(receipt) {
     const env = JSON.parse(receipt.local.environment);
     const current = this.environment();
-    for (const key of ['CODEX_WEBUI_CWD', 'CODEX_WEBUI_REVIEW_ROOT', 'CODEX_WEBUI_ENABLE_TERMINAL', 'CODEX_WEBUI_CODEX', 'CODEX_WEBUI_CLOUDFLARED', 'CODEX_WEBUI_NODE', 'PATH']) {
+    for (const key of ['CODEX_WEBUI_CWD', 'CODEX_WEBUI_REVIEW_ROOT', 'CODEX_WEBUI_ENABLE_TERMINAL', 'CODEX_WEBUI_CODEX', 'CODEX_WEBUI_CLOUDFLARED', 'CODEX_WEBUI_NODE', 'CODEX_WEBUI_APP_SERVER_MODE', 'CODEX_WEBUI_APP_SERVER_SOCKET', 'PATH']) {
       if (current[key] !== undefined) env[key] = current[key]; else delete env[key];
     }
     await this.gateway.stop(); await this.gateway.start({ env, cwd: env.CODEX_WEBUI_CWD });

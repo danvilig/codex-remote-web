@@ -15,10 +15,10 @@ import { setupFixture, INPUT, TOKEN } from '../helpers/setup-fixture.js';
 
 const nativeTimeout = process.platform === 'win32' ? 120000 : 30000;
 async function port() { return new Promise<number>(resolve => { const server = createServer(); server.listen(0, '127.0.0.1', () => { const value = (server.address() as any).port; server.close(() => resolve(value)); }); }); }
-async function fixture(fn, cloud = false) {
+async function fixture(fn, cloud = false, env = process.env) {
   const home = await mkdtemp(join(tmpdir(), 'desktop-test-')); const directory = join(home, 'desktop');
   const remote = setupFixture(directory);
-  const options = { home, directory, startupMs: 10000, command: [Bun.which('node')!, resolve(import.meta.dir, '../fixtures/desktop-gateway.mjs')], serviceFactory: cloud ? deployment => {
+  const options = { home, directory, env, startupMs: 10000, command: [Bun.which('node')!, resolve(import.meta.dir, '../fixtures/desktop-gateway.mjs')], serviceFactory: cloud ? deployment => {
     const ready = deployment.ready.bind(deployment);
     deployment.ready = async (...args) => { await ready(...args); remote.state.installed = true; };
     return new SetupService({ ...remote, deployment });
@@ -57,6 +57,21 @@ test('actual background process stays available across clients, restarts and sto
   expect((await readPrivate(join(f.directory, 'config.json'))).enabled).toBe(false);
   await expect(fetch(first.url)).rejects.toThrow();
 }), nativeTimeout);
+test('desktop children retain explicit shared or isolated App Server selection across restarts', async () => fixture(async f => {
+  await f.agent.dispatch('config', f.config);
+  await f.agent.dispatch('start');
+  let state = await f.agent.dispatch('status');
+  let child = await (await fetch(state.url)).json();
+  expect(child.appServerMode).toBe('shared');
+  expect(child.appServerSocket).toBe(f.options.env.CODEX_WEBUI_APP_SERVER_SOCKET);
+  f.options.env.CODEX_WEBUI_APP_SERVER_MODE = 'isolated';
+  delete f.options.env.CODEX_WEBUI_APP_SERVER_SOCKET;
+  await f.agent.dispatch('restart');
+  state = await f.agent.dispatch('status');
+  child = await (await fetch(state.url)).json();
+  expect(child.appServerMode).toBe('isolated');
+  expect(child.appServerSocket).toBeNull();
+}, false, { ...process.env, CODEX_WEBUI_APP_SERVER_MODE: 'shared', CODEX_WEBUI_APP_SERVER_SOCKET: join(tmpdir(), 'desktop-daemon-fixture.sock') }), nativeTimeout);
 test('desktop Cloudflare deployment uses existing transaction and recovery checks and keeps secrets out of status', async () => fixture(async f => {
   await f.agent.dispatch('config', f.config);
   await f.agent.dispatch('start');

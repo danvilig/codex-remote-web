@@ -33,7 +33,7 @@ export async function startDesktopAgent({ home = homedir(), directory = desktopD
   let connector, setup;
   const environment = () => {
     const result = {};
-    for (const key of ['HOME', 'USERPROFILE', 'SystemRoot', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'CODEX_HOME', 'CODEX_AUTH_PATH']) if (env[key]) result[key] = env[key];
+    for (const key of ['HOME', 'USERPROFILE', 'SystemRoot', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'CODEX_HOME', 'CODEX_AUTH_PATH', 'CODEX_WEBUI_APP_SERVER_MODE', 'CODEX_WEBUI_APP_SERVER_SOCKET']) if (env[key]) result[key] = env[key];
     result.HOME = home;
     result.PATH = [env.PATH, join(home, '.local/bin'), join(home, '.bun/bin'), ...(process.platform === 'darwin' ? ['/opt/homebrew/bin', '/usr/local/bin'] : []), ...(env.APPDATA ? [join(env.APPDATA, 'npm')] : [])].filter(Boolean).join(delimiter);
     Object.assign(result, { HOST: '127.0.0.1', PORT: String(config.port), CODEX_WEBUI_CWD: config.cwd, CODEX_WEBUI_REVIEW_ROOT: config.cwd, CODEX_WEBUI_ENABLE_TERMINAL: String(config.terminal), CODEX_WEBUI_NODE: nodeRuntime(env), CODEX_WEBUI_AUTH_MODE: 'local' });
