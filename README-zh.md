@@ -101,7 +101,7 @@ bun run dev
 
 访问 `http://127.0.0.1:8899`。`bun run start` 运行源码服务；生产使用 `bun run build` 后的 `bun run start:production`。程序资源根据安装位置定位，与启动命令所在目录无关。
 
-与 Codex Desktop/CLI 同时使用时，WebUI 优先连接已有的本机共享 App Server。推荐显式设置 `CODEX_WEBUI_APP_SERVER_MODE=shared`；未运行共享服务时默认兼容独立模式，两个独立进程不能同时写同一会话。参见[共享服务配置](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话)。
+WebUI 默认连接本机共享 App Server；socket 尚未就绪时等待，旧值 `auto` 也不会因启动顺序另起写入进程。请启动原生 daemon；没有共享服务的独立部署可显式设置 `CODEX_WEBUI_APP_SERVER_MODE=isolated`。两个独立进程不能同时写同一会话。参见[共享服务配置](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话)。
 
 ## 配置公网访问
 
