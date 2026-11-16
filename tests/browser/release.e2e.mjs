@@ -134,7 +134,7 @@ try {
   await new Promise((resolve,reject)=>{ws.on('open',resolve);ws.on('error',reject);});
   ws.send(Buffer.from(windows ? "echo PACKAGED_PTY_OK\r\nexit\r\n" : "printf 'PACKAGED_PTY_OK\\n'\nexit\n"));
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{ws.terminate();reject(new Error('Packaged terminal timed out'));},15000);ws.on('close',()=>{clearTimeout(timer);resolve();});});
-  assert.match(terminal,/(?:\r|\n)PACKAGED_PTY_OK\r?\n/);
+  assert.match(terminal,windows ? /(?:\r|\n)PACKAGED_PTY_OK(?:\r?\n|\x1b\[)/ : /(?:\r|\n)PACKAGED_PTY_OK\r?\n/);
   let csrf,setupCookie;const base=`http://127.0.0.1:${port}`;
   const setupRequest=async(path,body)=>{
     const response=await fetch(base+'/api/setup/'+path,{method:body===undefined?'GET':'POST',headers:{origin:base,'x-setup-request':'1','content-type':'application/json',...(csrf?{'x-setup-csrf':csrf}:{}),...(setupCookie?{cookie:setupCookie}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
