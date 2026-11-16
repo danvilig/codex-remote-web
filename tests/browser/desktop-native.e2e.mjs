@@ -28,6 +28,17 @@ await writePrivate(join(directory, 'config.json'), desktopConfig({ initialized: 
 const env = { ...process.env, PATH: process.env.PATH, HOME: home, USERPROFILE: home, CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), XDG_CONFIG_HOME: join(home, '.config'), XDG_CACHE_HOME: join(home, '.cache'), APPDATA: join(home, 'AppData/Roaming'), LOCALAPPDATA: join(home, 'AppData/Local'), CODEX_DESKTOP_BUN: process.env.CODEX_DESKTOP_BUN || 'bun', ELECTRON_ENABLE_LOGGING: '1', ELECTRON_LOG_FILE: join(home, 'electron.log') };
 for (const key of Object.keys(env)) if (key.toUpperCase() === 'ELECTRON_RUN_AS_NODE') delete env[key];
 let application;
+async function closeApplication() {
+  const current = application; application = null;
+  if (!current) return;
+  let timer;
+  try {
+    await Promise.race([current.close(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Native desktop quit timed out')), 20000); })]);
+  } catch (error) {
+    console.error('Native desktop exit state:', { exitCode: current.process().exitCode, signalCode: current.process().signalCode });
+    current.process().kill(); throw error;
+  } finally { clearTimeout(timer); }
+}
 const launch = async () => {
   const args = process.env.CODEX_WEBUI_DESKTOP_MAIN ? [process.env.CODEX_WEBUI_DESKTOP_MAIN] : [];
   try { return await electron.launch({ executablePath: executable, args, chromiumSandbox: true, env, timeout: 60000 }); }
@@ -46,9 +57,11 @@ try {
   await window.locator('#start').click(); await window.waitForFunction(() => document.querySelector('#gatewayState').textContent === 'Running');
   const state = await agentRequest(directory, 'status'); assert.equal(state.local.phase, 'running');
   console.error('Verifying tray exit preserves gateway');
-  await application.close(); application = null;
+  await closeApplication();
+  console.error('Verifying background control after tray exit');
   assert.equal((await agentRequest(directory, 'status')).local.pid, state.local.pid);
-  assert.equal((await (await fetch(state.url + '/api/health')).json()).codex, true);
+  console.error('Verifying gateway health after tray exit');
+  assert.equal((await (await fetch(state.url + '/api/health', { signal: AbortSignal.timeout(10000) })).json()).codex, true);
   console.error('Verifying native desktop reconnect');
   application = await launch(); window = await application.firstWindow({ timeout: 30000 });
   await window.waitForFunction(() => document.querySelector('#gatewayState').textContent === 'Running');
@@ -59,7 +72,7 @@ try {
   console.log('PASS: real sandboxed desktop window, isolated preload, native gateway, tray-app exit independence, reconnect and stop');
 } finally {
   console.error('Cleaning native desktop fixture');
-  await application?.close(); await agentRequest(directory, 'shutdown').catch(() => {});
+  await closeApplication(); await agentRequest(directory, 'shutdown').catch(() => {});
   for (let i = 0; i < 100; i++) { try { await agentRequest(directory, 'status', undefined, { timeoutMs: 100 }); } catch { break; } await delay(50); }
   await rm(home, { recursive: true, force: true });
 }

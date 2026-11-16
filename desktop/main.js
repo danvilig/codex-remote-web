@@ -11,6 +11,8 @@ import { configureSession } from './session.js';
 
 const background = process.argv.includes('--background-agent');
 const uninstall = process.argv.includes('--uninstall-background');
+const trace = message => { if (process.argv.some(value => value.startsWith('--inspect'))) console.error('[desktop] ' + message); };
+trace('bootstrap');
 const here = app.getAppPath();
 const directory = desktopDirectory();
 const root = app.isPackaged ? join(process.resourcesPath, 'gateway') : resolve(here, '../..');
@@ -19,7 +21,9 @@ const launchArgs = app.isPackaged ? [] : [join(here, 'main.cjs')];
 const userData = join(app.getPath('userData'), background ? 'background' : 'desktop');
 mkdirSync(userData, { recursive: true, mode: 0o700 });
 app.setPath('userData', userData);
+trace('private application path selected');
 const ownsLock = app.requestSingleInstanceLock({ uninstall, executable: process.execPath });
+trace('instance lock checked');
 if (!ownsLock && !uninstall) app.quit();
 else {
   let window, tray, quitting = false, backgroundChild, sessionWindow;
@@ -71,12 +75,13 @@ else {
   }
   app.on('second-instance', (_event, argv, _cwd, data) => { if (data?.uninstall) { if (data.executable === process.execPath) { quitting = true; app.quit(); } } else if (!background) { if (argv.includes('--open-workspace')) void operation('openWorkspace').catch(() => {}); else void openWindow(); } });
   app.on('activate', () => { if (!background) void openWindow(); });
-  app.on('window-all-closed', () => { if (!background && !tray) app.quit(); });
+  app.on('window-all-closed', () => { if (!background && !tray && !quitting) app.quit(); });
   app.on('before-quit', event => {
     quitting = true;
     if (backgroundChild?.connected) { event.preventDefault(); backgroundChild.disconnect(); setTimeout(() => app.exit(0), 12000).unref(); }
   });
   void app.whenReady().then(async () => {
+  trace('native application ready');
   if (uninstall) {
     try {
       const registration = await readPrivate(join(directory, 'session.json'));
