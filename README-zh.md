@@ -61,10 +61,10 @@
 | 系统 | 包名后缀 | 要求 |
 | --- | --- | --- |
 | Linux x64 / arm64 | `linux-x64.tar.gz` / `linux-arm64.tar.gz` | glibc，Ubuntu 24.04 验证 |
-| macOS Apple Silicon | `macos-arm64.tar.gz` | macOS 15 或更新；不支持 Intel Mac |
-| Windows x64 | `windows-x64.zip` | Windows 11、NTFS、Windows PowerShell；不支持 ARM64 |
+| macOS Apple Silicon | `macos-arm64.dmg`（安装）/ `.tar.gz`（便携） | macOS 15 或更新；不支持 Intel Mac |
+| Windows x64 | `windows-x64.msi`（安装）/ `.zip`（便携） | Windows 11、NTFS、Windows PowerShell；不支持 ARM64 |
 
-这是命令行网关，不是桌面安装器。macOS/Windows 包暂未代码签名；核对校验和及源码，仅对可信下载使用系统的单文件批准，不要全局关闭 Gatekeeper 或 SmartScreen。不支持 Linux 32 位 ARM 和 Alpine/musl。
+macOS 打开 DMG，将 **Codex Remote Web.app** 拖入 Applications，双击后在 Terminal 启动网关并打开浏览器。Windows 运行当前用户 MSI，使用开始菜单 **Codex Remote Web** / **Open WebUI**，可在“已安装的应用”卸载。两种安装包都不添加后台服务；关闭终端或 Ctrl+C 停止网关，便携归档继续提供。macOS/Windows 包暂未代码签名；核对校验和及源码，仅对可信下载使用系统的单文件批准，不要全局关闭 Gatekeeper 或 SmartScreen。不支持 Linux 32 位 ARM 和 Alpine/musl。
 
 ```sh
 archive=codex-remote-web-0.2.0-alpha.3-linux-x64.tar.gz

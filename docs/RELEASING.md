@@ -99,4 +99,7 @@ bun run candidate:prepare
 
 Alpha.3 新增 macOS Apple Silicon（`macos-15` arm64）及 Windows x64（`windows-2025`）原生 runner；不构建 Intel Mac 或 Windows ARM64。`.github/workflows/platform-packages.yml` 在 PR 和分支推送中生成可审阅 Artifact，发布工作流复用同一构建/验收步骤，全部成功才上传。Mac/Windows 不运行 Linux systemd 或 Unix 专属测试，实际包验收仍覆盖 CLI、异目录启动、静态资源、文件读取/编辑、回执去重、队列、真实 PTY 和平台对应的远程访问边界；Windows 额外在本机 NTFS 上测试 ACL 与 junction 拒绝。Linux 的完整 Verify 与依赖审计继续运行。
 
-Alpha.3 共六个归档：四个系统/架构的可执行包，以及两种 Linux 架构的部署包。Windows 为 zip，其余为 tar.gz，均提供同名 `.sha256`，汇总 `SHA256SUMS` 共六项。不替换 Alpha.2 tag 或附件。Mac/Windows 目前未代码签名/公证，不生成 DMG/MSI，不宣称 Intel Mac、Windows ARM64、Windows 10 或旧 macOS 已验证。平台安装、公网接入及权限边界见 [PLATFORMS](deployment/PLATFORMS.md)。
+Alpha.3 共八个安装/归档文件：macOS DMG、Windows MSI、四个系统/架构的便携包，以及两种 Linux 架构的部署包。Windows 为 zip，其余为 tar.gz，均提供同名 `.sha256`，汇总 `SHA256SUMS` 共八项。不替换 Alpha.2 tag 或附件。Mac/Windows 目前未代码签名/公证，提供 DMG/MSI，不宣称 Intel Mac、Windows ARM64、Windows 10 或旧 macOS 已验证。平台安装、公网接入及权限边界见 [PLATFORMS](deployment/PLATFORMS.md)。
+
+
+macOS runner 挂载 DMG、复制 `.app` 到包含空格的路径、校验 Info.plist/启动脚本，并从安装目录运行真实包回归。Windows runner 使用固定 WiX 5.0.2 构建 per-user MSI，实际静默安装到含空格目录、检查开始菜单、运行同样回归后卸载并确认文件/快捷方式清理。两种安装器不配置系统服务，不改动模型凭据和工作区。GUI 双击、TCC/Gatekeeper/SmartScreen 提示需由用户在真实桌面确认，自动化不冒充 GUI 人工验收。

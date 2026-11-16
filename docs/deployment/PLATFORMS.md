@@ -2,9 +2,11 @@
 
 ## 本地使用
 
-Release 包包含命令行网关、Bun、Node 和原生终端模块；不是 `.app`、DMG 或 MSI 安装器。macOS 仅 Apple Silicon，最低 macOS 15；Windows 仅 x64，验收基线 Windows 11，需 NTFS 和内置 Windows PowerShell。不包含 Codex CLI、Git 或 cloudflared。
+Release 包包含命令行网关、Bun、Node 和原生终端模块；同时提供 macOS DMG 和 Windows MSI 安装包。macOS 仅 Apple Silicon，最低 macOS 15；Windows 仅 x64，验收基线 Windows 11，需 NTFS 和内置 Windows PowerShell。不包含 Codex CLI、Git 或 cloudflared。
 
-解压到用户可写目录（路径允许空格），保留整个文件夹。先核对对应 `.sha256`；macOS 使用 `shasum -a 256 <archive>`，Windows 使用 `Get-FileHash <archive> -Algorithm SHA256`。包未经过 Apple Developer ID/公证或 Authenticode 签名。仅对已核对的可信下载按系统提示单独批准；不全局禁用 Gatekeeper/SmartScreen。
+macOS 打开 DMG，将 `.app` 拖入 Applications；双击应用会打开 Terminal 并在网关就绪后打开浏览器。关闭 Terminal/Ctrl+C 停止网关；把 `.app` 移到废纸篓即可移除程序。Windows MSI 安装到当前用户 LocalAppData/Programs，提供开始菜单的启动和浏览器入口，并在“已安装的应用”中卸载，无需管理员权限。两种安装器均不配置后台自启动，不安装或删除 Codex/Cloudflare 凭据、项目、队列和回执。升级前先停止当前网关。
+
+便携归档可解压到用户可写目录（路径允许空格），保留整个文件夹。先核对对应 `.sha256`；macOS 使用 `shasum -a 256 <archive>`，Windows 使用 `Get-FileHash <archive> -Algorithm SHA256`。包未经过 Apple Developer ID/公证或 Authenticode 签名。仅对已核对的可信下载按系统提示单独批准；不全局禁用 Gatekeeper/SmartScreen。
 
 macOS：
 

@@ -6,7 +6,7 @@ export function portableTarget(platform = process.platform, arch = process.arch)
   return { platform, arch, label: platform === 'darwin' ? 'macos' : platform === 'win32' ? 'windows' : 'linux', extension: platform === 'win32' ? 'zip' : 'tar.gz', executable: `codex-remote-web${platform === 'win32' ? '.exe' : ''}`, node: `node${platform === 'win32' ? '.exe' : ''}`, bun: `bun-${platform === 'win32' ? 'windows' : platform}-${arch}${arch === 'x64' ? '-baseline' : ''}` };
 }
 export async function command(args: string[], cwd: string) {
-  const child = Bun.spawn(args, { cwd, stdout: 'pipe', stderr: 'pipe' });
+  const child = Bun.spawn(args, { cwd, env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' });
   const [out, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
   if (code) throw new Error(`${args[0]} failed: ${error.slice(-4000)}`);
   return out.trim();
@@ -18,10 +18,12 @@ export async function pack(stage: string, archive: string) {
   await command(['tar', ...args, archive, '-C', dirname(stage), basename(stage)], dirname(stage));
 }
 export async function copyPtyNative(source: string, destination: string, platform = process.platform) {
-  let folder = join(source, 'build/Release');
-  try { await readdir(folder); } catch (error) { if (error.code !== 'ENOENT') throw error; folder = join(source, 'prebuilds', `${platform}-${process.arch}`); }
-  const names = await readdir(folder);
   const required = platform === 'win32' ? ['conpty.node', 'conpty_console_list.node'] : platform === 'darwin' ? ['pty.node', 'spawn-helper'] : ['pty.node'];
+  const built = join(source, 'build/Release'), prebuilt = join(source, 'prebuilds', `${platform}-${process.arch}`);
+  let folder = built;
+  const builtNames = await readdir(built).catch(error => { if (error.code !== 'ENOENT') throw error; return []; });
+  if (!required.every(file => builtNames.includes(file))) folder = prebuilt;
+  const names = await readdir(folder);
   for (const file of required) if (!names.includes(file)) throw new Error(`Missing native terminal artifact ${file}; rebuild node-pty on the target system`);
   await mkdir(join(destination, 'build/Release'), { recursive: true });
   // Copy runtime binaries only (including Windows DLLs/helpers), never obj,
@@ -33,4 +35,5 @@ export async function copyPtyNative(source: string, destination: string, platfor
     }
   }
   await copy(folder, join(destination, 'build/Release'));
+  if (folder !== built && builtNames.length) await copy(built, join(destination, 'build/Release'));
 }

@@ -2,6 +2,7 @@
 
 ## 0.2.0-alpha.3
 
+- Add macOS DMG app and per-user Windows MSI installers with native installation checks, plus portable archives.
 - Add native macOS Apple Silicon and Windows x64 executable packages, alongside Linux x64/arm64; verify each archive on its native runner.
 - Include macOS PTY spawn-helper and Windows ConPTY binaries, bundled node.exe and shell-free npm Codex CLI startup.
 - Validate Windows private state using NTFS owner/DACL checks, retaining POSIX ownership and mode checks on Unix.

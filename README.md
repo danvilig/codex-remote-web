@@ -54,17 +54,17 @@ These screenshots show the current WebUI using an isolated demo project and simu
 
 ## Quick start
 
-### Download an executable (recommended)
+### Download an installer or executable (recommended)
 
 Download your package and its `.sha256` from [Releases](https://github.com/danvilig/codex-remote-web/releases). Each executable package includes Bun/Node, web assets and the native terminal module; **no runtime installation or compilation is required**. Keep the extracted directory intact. Install and configure Codex CLI and Git separately; remote access also requires cloudflared.
 
 | Platform | Package | Requirements |
 | --- | --- | --- |
 | Linux x64 / arm64 | `linux-x64.tar.gz` / `linux-arm64.tar.gz` | glibc; validated on Ubuntu 24.04 |
-| macOS Apple Silicon | `macos-arm64.tar.gz` | macOS 15 or newer; Intel Macs are not supported |
-| Windows x64 | `windows-x64.zip` | Windows 11, NTFS, Windows PowerShell; ARM64 is not supported |
+| macOS Apple Silicon | `macos-arm64.dmg` (installer) / `.tar.gz` (portable) | macOS 15 or newer; Intel Macs are not supported |
+| Windows x64 | `windows-x64.msi` (installer) / `.zip` (portable) | Windows 11, NTFS, Windows PowerShell; ARM64 is not supported |
 
-These are command-line gateways, not desktop installers. macOS/Windows downloads are unsigned; review the checksum and source, and use your system's per-file approval only for a download you trust. Never disable Gatekeeper or SmartScreen globally. Linux 32-bit ARM and Alpine/musl are not supported.
+For macOS, open the DMG, drag **Codex Remote Web.app** into Applications, and open it to start the gateway in Terminal and open your browser. For Windows, run the per-user MSI and use **Codex Remote Web** / **Open WebUI** in the Start menu; uninstall from Installed apps. Neither installer adds a background service. Close the Terminal/console or press Ctrl+C to stop the gateway. Portable archives remain available. macOS/Windows downloads are unsigned; review the checksum and source, and use your system's per-file approval only for a download you trust. Never disable Gatekeeper or SmartScreen globally. Linux 32-bit ARM and Alpine/musl are not supported.
 
 ```sh
 archive=codex-remote-web-0.2.0-alpha.3-linux-x64.tar.gz
