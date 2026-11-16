@@ -71,7 +71,7 @@ test('desktop children retain explicit shared or isolated App Server selection a
   child = await (await fetch(state.url)).json();
   expect(child.appServerMode).toBe('isolated');
   expect(child.appServerSocket).toBeNull();
-}, false, { ...process.env, CODEX_WEBUI_APP_SERVER_MODE: 'shared', CODEX_WEBUI_APP_SERVER_SOCKET: join(tmpdir(), 'desktop-daemon-fixture.sock') }), nativeTimeout);
+}, false, { ...process.env, PATH: process.env.PATH, CODEX_WEBUI_APP_SERVER_MODE: 'shared', CODEX_WEBUI_APP_SERVER_SOCKET: join(tmpdir(), 'desktop-daemon-fixture.sock') }), nativeTimeout);
 test('desktop Cloudflare deployment uses existing transaction and recovery checks and keeps secrets out of status', async () => fixture(async f => {
   await f.agent.dispatch('config', f.config);
   await f.agent.dispatch('start');

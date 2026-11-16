@@ -21,7 +21,7 @@ try {
  const desktop=await desktopPackage(unpacked,desktopOutput);
  if(process.platform==='darwin') {
   const image=join(temp,'image');await mkdir(image);
-  await cp(join(desktop,'Codex Remote Web.app'),join(image,'Codex Remote Web.app'),{recursive:true});
+  await cp(join(desktop,'Codex Remote Web.app'),join(image,'Codex Remote Web.app'),{recursive:true,verbatimSymlinks:true});
   await symlink('/Applications',join(image,'Applications'));
   await command(['plutil','-lint',join(image,'Codex Remote Web.app/Contents/Info.plist')],root);
   const kilobytes=Number((await command(['du','-sk',image],root)).split(/\s+/)[0]);

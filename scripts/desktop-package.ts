@@ -20,7 +20,9 @@ export async function desktopPackage(gateway: string, output: string) {
     await writeFile(join(source, 'package.json'), JSON.stringify({ name: pkg.name, productName: 'Codex Remote Web', version: pkg.version, main: 'main.mjs', type: 'module', license: 'MIT' }));
     const payload = join(temp, 'payload/gateway'); await mkdir(dirname(payload), { recursive: true }); await cp(gateway, payload, { recursive: true });
     const [app] = await packager({ dir: source, out: join(temp, 'packed'), name: 'Codex Remote Web', executableName: process.platform === 'linux' ? 'codex-remote-web-desktop' : 'Codex Remote Web', platform: process.platform, arch: process.arch, electronVersion: pkg.devDependencies.electron, appBundleId: 'io.github.danvilig.codex-remote-web', appVersion: pkg.version, buildVersion: pkg.version.split('-')[0], extraResource: [payload], asar: false, prune: false, download: { cacheRoot: process.env.electron_config_cache || join(root, '.artifacts/electron-cache') }, extendInfo: { LSMinimumSystemVersion: '15.0' } });
-    const destination = join(output, basename(app)); await cp(app, destination, { recursive: true, errorOnExist: true, force: false });
+    // Framework symlinks must remain relative when the app is relocated and
+    // this temporary build tree is removed.
+    const destination = join(output, basename(app)); await cp(app, destination, { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false });
     if (process.platform !== 'win32') await distributionPermissions(destination);
     return destination;
   } finally { await rm(temp, { recursive: true, force: true }); }
@@ -31,7 +33,7 @@ export async function linuxDesktopPackage(gateway: string, output: string) {
   const temp = await mkdtemp(join(output, '.deb-'));
   try {
     const prefix = '/opt/codex-remote-web-desktop';
-    await mkdir(join(temp, 'DEBIAN')); await mkdir(join(temp, 'opt')); await cp(app, join(temp, prefix), { recursive: true });
+    await mkdir(join(temp, 'DEBIAN')); await mkdir(join(temp, 'opt')); await cp(app, join(temp, prefix), { recursive: true, verbatimSymlinks: true });
     // Installed by dpkg as root: preserve Chromium's supported setuid sandbox
     // helper rather than requiring --no-sandbox or global userns changes.
     await writeFile(join(temp, 'DEBIAN/control'), `Package: codex-remote-web-desktop\nVersion: ${pkg.version.replace('-', '~')}\nArchitecture: ${arch}\nMaintainer: Codex Remote Web contributors\nDepends: libgtk-3-0, libnss3, libxss1, libasound2t64, libgbm1\nDescription: Codex Remote Web desktop gateway and settings\n`);
