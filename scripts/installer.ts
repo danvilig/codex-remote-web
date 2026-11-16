@@ -43,7 +43,11 @@ done
 `,{mode:0o755});
   await symlink('/Applications',join(image,'Applications'));
   await command(['plutil','-lint',join(contents,'Info.plist')],root);
-  await command(['hdiutil','create','-volname','Codex Remote Web','-srcfolder',image,'-ov','-format','UDZO',installer],root);
+  const kilobytes=Number((await command(['du','-sk',image],root)).split(/\s+/)[0]);
+  if(!Number.isFinite(kilobytes)||kilobytes<=0)throw new Error('Cannot size DMG payload');
+  // hdiutil auto-sizing can underestimate thousands of license/font files.
+  const megabytes=Math.max(512,Math.ceil(kilobytes/1024*1.35+64));
+  await command(['hdiutil','create','-size',`${megabytes}m`,'-fs','HFS+','-volname','Codex Remote Web','-srcfolder',image,'-ov','-format','UDZO',installer],root);
  } else {
   const launcher='Start Codex Remote Web.cmd';
   await writeFile(join(unpacked,launcher),'@echo off\r\nif not defined CODEX_WEBUI_CWD set "CODEX_WEBUI_CWD=%USERPROFILE%"\r\n"%~dp0codex-remote-web.exe"\r\n');
