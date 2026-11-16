@@ -66,8 +66,8 @@ jobs:
         run: |
           version="$(node -p "require('./package.json').version")"
           test "$RELEASE_TAG" = "v${version}"
-          test "$(find .artifacts/release -maxdepth 1 \( -name '*.tar.gz' -o -name '*.zip' \) | wc -l)" -eq 6
-          test "$(find .artifacts/release -maxdepth 1 -name '*.sha256' | wc -l)" -eq 6
+          test "$(find .artifacts/release -maxdepth 1 \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.dmg' -o -name '*.msi' \) | wc -l)" -eq 8
+          test "$(find .artifacts/release -maxdepth 1 -name '*.sha256' | wc -l)" -eq 8
           cd .artifacts/release
           cat *.sha256 > SHA256SUMS
           sha256sum -c SHA256SUMS
@@ -79,6 +79,8 @@ jobs:
           gh release create "$RELEASE_TAG" \
             .artifacts/release/*.tar.gz \
             .artifacts/release/*.zip \
+            .artifacts/release/*.dmg \
+            .artifacts/release/*.msi \
             .artifacts/release/*.sha256 \
             .artifacts/release/SHA256SUMS \
             --repo "${GITHUB_REPOSITORY}" \

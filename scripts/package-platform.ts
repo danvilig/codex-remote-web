@@ -21,3 +21,9 @@ const built = JSON.parse((await command(['bun', 'scripts/standalone.ts', '--outp
 process.env.CODEX_WEBUI_PORTABLE_ARCHIVE = built.archive;
 console.log(await command(['bun', 'run', 'test:portable'], root));
 console.log(`PASS: native ${target.label}-${target.arch} archives`);
+
+if (process.platform !== 'linux') {
+  const installer = JSON.parse((await command(['bun','scripts/installer.ts'],root)).split('\n').at(-1)!);
+  process.env.CODEX_WEBUI_INSTALLER = installer.installer;
+  console.log(await command(['bun','tests/browser/installer.e2e.mjs'],root));
+}

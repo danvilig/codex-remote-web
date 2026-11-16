@@ -41,7 +41,7 @@ try {
   assert.equal(listing.split('\n').some(path=>path.endsWith('/.env')),false);
   assert.equal(/codex-app-icon|codex-motion|overview\.png/.test(listing),false);
   await run(['tar','-xf',archive,'-C',fixture]);
-  const unpacked = join(fixture,name);
+  const unpacked = process.env.CODEX_WEBUI_INSTALLED_DIRECTORY || join(fixture,name);
   for (const readme of ['README.md', 'README-zh.md']) assert.equal(readFileSync(join(unpacked,readme),'utf8'),readFileSync(join(root,readme),'utf8'),`Bilingual README missing or changed: ${readme}`);
   for (const image of documentationImages) assert.deepEqual(readFileSync(join(unpacked,image)),readFileSync(join(root,image)),`README image missing or changed in archive: ${image}`);
   const manifest=JSON.parse(readFileSync(join(unpacked,'release.json'),'utf8'));assert.equal(manifest.version,pkg.version);

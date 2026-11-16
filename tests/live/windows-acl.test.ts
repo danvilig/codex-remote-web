@@ -10,7 +10,7 @@ test.skipIf(process.platform !== 'win32')('NTFS private state rejects broad acce
   try {
     writeFileSync(file,'{}');
     const acl=inspectWindowsAcl(file);
-    console.log('Native ACL diagnostic',JSON.stringify(acl));
+    expect(acl.allow.length).toBeGreaterThan(0);
     expect(privateAccess(lstatSync(file),file)).toBe(true);
     execFileSync('icacls',[file,'/grant','*S-1-1-0:R'],{stdio:'pipe'});
     expect(privateAccess(lstatSync(file),file)).toBe(false);

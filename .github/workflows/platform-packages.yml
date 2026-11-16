@@ -63,6 +63,9 @@ jobs:
       - name: Verify NTFS privacy boundaries
         if: runner.os == 'Windows'
         run: bun test tests/live/windows-acl.test.ts
+      - name: Install pinned MSI build tools
+        if: runner.os == 'Windows'
+        run: dotnet tool install --global wix --version 5.0.2
       - name: Build and verify actual native archives
         run: bun scripts/package-platform.ts
       - uses: actions/upload-artifact@v4
@@ -71,4 +74,6 @@ jobs:
           path: |
             .artifacts/release/*.tar.gz*
             .artifacts/release/*.zip*
+            .artifacts/release/*.dmg*
+            .artifacts/release/*.msi*
           if-no-files-found: error
