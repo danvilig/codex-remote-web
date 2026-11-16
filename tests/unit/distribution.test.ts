@@ -22,7 +22,8 @@ test('private NTFS access fails closed for other owners, broad or unknown truste
   const acl = { user, owner: user, allow: [user, 'S-1-5-18', 'S-1-5-32-544'] };
   expect(privateWindowsAcl(acl)).toBe(true);
   for (const sid of ['S-1-1-0', 'S-1-5-11', 'S-1-5-32-545', 'S-1-5-21-11-22-33-1002']) expect(privateWindowsAcl({ ...acl, allow: [...acl.allow, sid] })).toBe(false);
-  expect(privateWindowsAcl({ ...acl, owner: 'S-1-5-18' })).toBe(false);
+  expect(privateWindowsAcl({ ...acl, owner: 'S-1-5-32-544' })).toBe(true);
+  expect(privateWindowsAcl({ ...acl, owner: 'S-1-5-21-11-22-33-1002' })).toBe(false);
   expect(privateWindowsAcl({ ...acl, allow: [] })).toBe(false);
   expect(privateWindowsAcl(null)).toBe(false);
 });

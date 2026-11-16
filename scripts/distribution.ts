@@ -18,7 +18,8 @@ export async function pack(stage: string, archive: string) {
   await command(['tar', ...args, archive, '-C', dirname(stage), basename(stage)], dirname(stage));
 }
 export async function copyPtyNative(source: string, destination: string, platform = process.platform) {
-  const folder = join(source, 'build/Release');
+  let folder = join(source, 'build/Release');
+  try { await readdir(folder); } catch (error) { if (error.code !== 'ENOENT') throw error; folder = join(source, 'prebuilds', `${platform}-${process.arch}`); }
   const names = await readdir(folder);
   const required = platform === 'win32' ? ['conpty.node', 'conpty_console_list.node'] : platform === 'darwin' ? ['pty.node', 'spawn-helper'] : ['pty.node'];
   for (const file of required) if (!names.includes(file)) throw new Error(`Missing native terminal artifact ${file}; rebuild node-pty on the target system`);

@@ -3,7 +3,7 @@ import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
 
 export function privateWindowsAcl(acl) {
-  if (!acl || !/^S-1-5-21-(?:\d+-){3}\d+$/.test(acl.user || '') || acl.owner !== acl.user || !Array.isArray(acl.allow) || !acl.allow.length) return false;
+  if (!acl || !/^S-1-5-21-(?:\d+-){3}\d+$/.test(acl.user || '') || ![acl.user, 'S-1-5-18', 'S-1-5-32-544'].includes(acl.owner) || !Array.isArray(acl.allow) || !acl.allow.length) return false;
   return acl.allow.every(sid => [acl.user, 'S-1-5-18', 'S-1-5-32-544'].includes(sid));
 }
 // Windows chmod/uid bits do not express confidentiality. Inspect the NTFS DACL

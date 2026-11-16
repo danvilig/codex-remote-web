@@ -119,10 +119,10 @@ try {
   assert.equal((await(await fetch(`http://127.0.0.1:${port}/api/library/preview?path=${encodeURIComponent(join(project,'visible.txt'))}`)).json()).text,'PACKAGED_PROJECT_FILE');
   assert.equal((await fetch(`http://127.0.0.1:${port}/api/workspace/context?cwd=${encodeURIComponent(fixture)}`)).status,400);
   const baseUrl=`http://127.0.0.1:${port}`;
-  const rpc=async(method,params={})=>{const response=await fetch(baseUrl+'/api/rpc',{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify({id:1,method,params})});assert.equal(response.status,200);const data=await response.json();assert.equal(data.error,undefined,JSON.stringify(data));return data.result;};
+  const rpc=async(method,params={})=>{const response=await fetch(baseUrl+'/api/rpc',{method:'POST',headers:{origin:baseUrl,'content-type':'application/json','x-workspace-request':'1'},body:JSON.stringify({id:1,method,params})});assert.equal(response.status,200);const data=await response.json();assert.equal(data.error,undefined,JSON.stringify(data));return data.result;};
   const documentUrl=baseUrl+'/api/files/document?cwd='+encodeURIComponent(project)+'&path=visible.txt';
   const document=await(await fetch(documentUrl)).json();assert.equal(document.text,'PACKAGED_PROJECT_FILE');
-  const saved=await fetch(baseUrl+'/api/files/document',{method:'POST',headers:{origin:baseUrl,'content-type':'application/json'},body:JSON.stringify({cwd:project,path:'visible.txt',revision:document.revision,text:'PACKAGED_PROJECT_EDIT'})});assert.equal(saved.status,200);assert.equal(readFileSync(join(project,'visible.txt'),'utf8'),'PACKAGED_PROJECT_EDIT');
+  const saved=await fetch(baseUrl+'/api/files/document',{method:'POST',headers:{origin:baseUrl,'content-type':'application/json','x-workspace-request':'1'},body:JSON.stringify({cwd:project,path:'visible.txt',revision:document.revision,text:'PACKAGED_PROJECT_EDIT'})});assert.equal(saved.status,200);assert.equal(readFileSync(join(project,'visible.txt'),'utf8'),'PACKAGED_PROJECT_EDIT');
   // Exercise real private receipt/SQLite and queue state on every native OS,
   // using a protocol fixture only. Repeating a UUID must not dispatch twice.
   const clientUserMessageId=randomUUID(), params={threadId:'thread-A',input:[{type:'text',text:'packaged fixture only'}],clientUserMessageId};
