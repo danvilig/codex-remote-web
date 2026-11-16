@@ -8,7 +8,7 @@ export function portableTarget(platform = process.platform, arch = process.arch)
 export async function command(args: string[], cwd: string) {
   const child = Bun.spawn(args, { cwd, env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' });
   const [out, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-  if (code) throw new Error(`${args[0]} failed: ${error.slice(-4000)}`);
+  if (code) throw new Error(`${args[0]} failed (${code}): ${error.slice(-4000)}\n${out.slice(-4000)}`);
   return out.trim();
 }
 export async function pack(stage: string, archive: string) {
