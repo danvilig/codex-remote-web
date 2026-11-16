@@ -4,7 +4,7 @@
 
 - Add macOS DMG app and per-user Windows MSI installers with native installation checks, plus portable archives.
 - Add native macOS Apple Silicon and Windows x64 executable packages, alongside Linux x64/arm64; verify each archive on its native runner.
-- Include macOS PTY spawn-helper and Windows ConPTY binaries, bundled node.exe and shell-free npm Codex CLI startup.
+- Include macOS PTY spawn-helper and Windows ConPTY addons, bundled node.exe and shell-free npm Codex CLI startup.
 - Validate Windows private state using NTFS owner/DACL checks, retaining POSIX ownership and mode checks on Unix.
 - Verify packaged file editing, durable submissions, duplicate UUID handling and private queue access; publish SHA-256 files for every archive.
 - Document manual Tunnel + Access configuration on macOS/Windows and platform limits. Keep existing Alpha.2 assets and tag unchanged.

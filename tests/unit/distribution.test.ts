@@ -35,7 +35,7 @@ test('package commands forward newly selected immutable archive identities', asy
   try { expect(await command([process.execPath,'--eval','console.log(process.env.CRW_DISTRIBUTION_FIXTURE)'],process.cwd())).toBe('selected-archive'); }
   finally { if(before===undefined)delete process.env.CRW_DISTRIBUTION_FIXTURE;else process.env.CRW_DISTRIBUTION_FIXTURE=before; }
 });
-test('native payload selection merges prebuilt addons with Windows DLLs and repairs macOS helper mode', async () => {
+test('native payload selection includes only needed Windows addons and repairs macOS helper mode', async () => {
   const { mkdtemp, mkdir, writeFile, readFile, stat, rm }=await import('node:fs/promises');
   const {tmpdir}=await import('node:os');const {copyPtyNative}=await import('../../scripts/distribution.ts');
   const root=await mkdtemp(join(tmpdir(),'crw-native-payload-'));
@@ -47,7 +47,7 @@ test('native payload selection merges prebuilt addons with Windows DLLs and repa
     await writeFile(join(source,'build/Release/private.pdb'),'debug file');
     await copyPtyNative(source,out,'win32');
     expect(await readFile(join(out,'build/Release/conpty.node'),'utf8')).toBe('test fixture');
-    expect(await readFile(join(out,'build/Release/conpty/conpty.dll'),'utf8')).toBe('test DLL');
+    await expect(stat(join(out,'build/Release/conpty/conpty.dll'))).rejects.toThrow();
     await expect(stat(join(out,'build/Release/private.pdb'))).rejects.toThrow();
     if(process.platform!=='win32') {
       await mkdir(join(source,'prebuilds',`darwin-${process.arch}`),{recursive:true});

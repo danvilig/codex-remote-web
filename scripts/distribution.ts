@@ -27,6 +27,12 @@ export async function copyPtyNative(source: string, destination: string, platfor
   const names = await readdir(folder);
   for (const file of required) if (!names.includes(file)) throw new Error(`Missing native terminal artifact ${file}; rebuild node-pty on the target system`);
   await mkdir(join(destination, 'build/Release'), { recursive: true });
+  if (platform === 'win32') {
+    // Supported Windows 11 uses the OS ConPTY API (useConptyDll defaults false).
+    // Do not ship unused WinPTY or redistributable OpenConsole/DLL payloads.
+    for (const file of required) await cp(join(folder, file), join(destination, 'build/Release', file));
+    return;
+  }
   // Copy runtime binaries only (including Windows DLLs/helpers), never obj,
   // pdb, source, build scripts or fixtures. Preserve nested runtime DLL paths.
   async function copy(directory: string, target: string) {
