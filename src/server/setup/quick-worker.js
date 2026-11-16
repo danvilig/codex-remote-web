@@ -48,7 +48,7 @@ process.on('message', message => {
     if (buffer.length > 65536) { send({ type: 'error', code: 'output' }); stop(); }
   };
   try {
-    child = spawn(message.binary, message.args, { cwd: directory, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
+    child = spawn(message.binary, message.args, { cwd: directory, env: process.env, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
     child.stdout.on('data', output); child.stderr.on('data', output);
     child.once('error', () => { send({ type: 'error', code: 'launch' }); void finish(1); });

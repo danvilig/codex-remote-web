@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Add a unified macOS/Windows/Linux desktop settings window, tray controls and an independent user-session gateway agent.
+- Add desktop-managed fixed-domain deployment, protected Windows temporary access, login startup and lifecycle diagnostics.
+- Replace terminal-based native installer launchers and add Linux desktop DEB packaging; preserve headless distributions and user state.
+
 ## 0.2.0-alpha.3
 
 - Add macOS DMG app and per-user Windows MSI installers with native installation checks, plus portable archives.

@@ -22,6 +22,7 @@ function allowed(path:string) {
  if(publicSourceExcluded.has(path))return false;
  if(documentationImages.has(path))return true;
  if(rootFiles.has(path))return true;
+ if(/^desktop\/[^/]+\.(?:js|cjs|html|css)$/.test(path))return true;
  if(path.startsWith('docs/'))return docs.has(path.slice(5));
  return /^(?:src\/.+\.(?:js|ts)|public\/[^/]+\.(?:js|html|css|svg)|scripts\/[^/]+\.(?:ts|py)|tests\/(?:unit|browser|live|helpers|fixtures)\/.+\.(?:js|ts|mjs)|tests\/fixtures\/codex|\.github\/(?:workflows|ISSUE_TEMPLATE)\/[^/]+\.yml|\.github\/pull_request_template\.md|ops\/(?:apparmor\/codex-bwrap|cloudflare\/ingress\.yml\.example|systemd\/(?:environment|codex-remote-web\.service)\.example))$/.test(path);
 }
