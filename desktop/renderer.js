@@ -1,11 +1,12 @@
 import { mountRemoteAccess } from '../public/remote-access.js';
-import { createI18n } from '../public/i18n.js';
+import { createI18n, createDomI18n } from '../public/i18n.js';
 import { codexInterfaceMark } from '../public/codex-brand.js';
 
 const translations = {
   'Your gateway, in the background.': '你的网关，在后台运行。', Overview: '概览', 'Gateway settings': '网关设置', 'Remote access': '远程访问', Diagnostics: '诊断', 'DESKTOP GATEWAY': '桌面网关', 'Open workspace': '打开工作区', 'Start gateway': '启动网关', 'Stop gateway': '停止网关', Restart: '重启', 'Always available while you are signed in': '登录期间，持续在后台运行', 'Close this window or quit the tray: your gateway keeps running. Signing out stops the background service.': '关闭窗口或退出托盘后，网关仍继续运行；注销系统后，后台服务停止。', 'Initialize gateway': '初始化网关', 'Initialize and configure': '初始化与设置', 'Stop the gateway before changing its settings. Your existing Codex account and configuration are used.': '修改设置前请先停止网关。网关沿用你现有的 Codex 账户与配置。', 'Project directory': '项目目录', Browse: '浏览', 'Local port': '本地端口', Language: '语言', System: '跟随系统', 'Codex executable (optional)': 'Codex 程序路径（可选）', 'cloudflared executable (optional)': 'cloudflared 程序路径（可选）', Appearance: '外观', Light: '浅色', Dark: '深色', 'Start gateway at login': '登录时启动网关', 'Enable web terminal': '启用网页终端', 'The web terminal runs with your user permissions. Enable it only when needed.': '网页终端使用当前用户权限，仅在需要时启用。', 'Save settings': '保存设置', 'Check dependencies': '检测依赖', Dependencies: '依赖', 'Codex and Git are required. cloudflared is required only for remote access. Install missing tools or select their executable paths, then check again.': '需要 Codex 与 Git；远程访问还需要 cloudflared。安装缺少的工具或选择程序路径后重新检测。', 'Background activity': '后台活动', 'Lifecycle events only. Credentials and conversation contents are never shown here.': '仅展示启动、停止等活动，不包含凭据和会话内容。', 'Background component': '后台组件', "Remove login startup and stop this application's background processes. Projects and credentials are preserved.": '移除登录启动项并停止本应用的后台进程，保留项目与凭据。', 'Stop and remove background component': '停止并移除后台组件', Running: '运行中', Stopped: '已停止', Starting: '启动中', Stopping: '停止中', Failed: '启动失败', 'Ready to initialize': '等待初始化', 'Complete initialization to start your gateway.': '完成初始化，即可启动网关。', 'Your workspace is available. You can close this window.': '工作区已就绪，可以关闭此窗口。', 'The gateway is stopped. Your settings are saved.': '网关已停止，设置已保存。', 'Settings saved.': '设置已保存。', 'Working…': '正在处理…', 'Background agent is unavailable': '后台代理不可用',
 };
 const i18n = createI18n();
+createDomI18n(i18n);
 const t = message => i18n.locale === 'zh-CN' ? translations[message] || i18n.t(message) : message;
 const $ = selector => document.querySelector(selector);
 const form = $('#configuration');

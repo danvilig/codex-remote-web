@@ -6,7 +6,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { desktopDirectory } from '../src/shared/desktop-config.js';
 import { agentRequest } from './client.js';
-import { privateDirectory } from '../src/server/desktop/private-store.js';
+import { privateDirectory, readPrivate } from '../src/server/desktop/private-store.js';
 import { configureSession } from './session.js';
 
 const background = process.argv.includes('--background-agent');
@@ -19,7 +19,7 @@ const launchArgs = app.isPackaged ? [] : [join(here, 'main.mjs')];
 const userData = join(app.getPath('userData'), background ? 'background' : 'desktop');
 mkdirSync(userData, { recursive: true, mode: 0o700 });
 app.setPath('userData', userData);
-const ownsLock = app.requestSingleInstanceLock({ uninstall });
+const ownsLock = app.requestSingleInstanceLock({ uninstall, executable: process.execPath });
 if (!ownsLock && !uninstall) app.quit();
 else {
   let window, tray, quitting = false, backgroundChild, sessionWindow;
@@ -69,7 +69,7 @@ else {
     }
     return agentRequest(directory, action, body);
   }
-  app.on('second-instance', (_event, argv, _cwd, data) => { if (data?.uninstall) { quitting = true; app.quit(); } else if (!background) { if (argv.includes('--open-workspace')) void operation('openWorkspace').catch(() => {}); else void openWindow(); } });
+  app.on('second-instance', (_event, argv, _cwd, data) => { if (data?.uninstall) { if (data.executable === process.execPath) { quitting = true; app.quit(); } } else if (!background) { if (argv.includes('--open-workspace')) void operation('openWorkspace').catch(() => {}); else void openWindow(); } });
   app.on('activate', () => { if (!background) void openWindow(); });
   app.on('window-all-closed', () => { if (!background && !tray) app.quit(); });
   app.on('before-quit', event => {
@@ -79,9 +79,13 @@ else {
   void app.whenReady().then(async () => {
   if (uninstall) {
     try {
-      await agentRequest(directory, 'stop').catch(() => {});
-      await configureSession(false, sessionOptions);
-      await agentRequest(directory, 'shutdown').catch(() => {});
+      const registration = await readPrivate(join(directory, 'session.json'));
+      const descriptor = await readPrivate(join(directory, 'agent.json'));
+      if (registration?.executable === process.execPath || descriptor?.installation === process.execPath) {
+        await agentRequest(directory, 'stop').catch(() => {});
+        if (registration?.executable === process.execPath) await configureSession(false, sessionOptions);
+        await agentRequest(directory, 'shutdown').catch(() => {});
+      }
       app.exit(0);
     } catch { app.exit(1); }
   } else if (background) {
@@ -121,5 +125,9 @@ else {
     await openWindow();
     if (process.argv.includes('--open-workspace')) await operation('openWorkspace').catch(() => {});
   }
-  }).catch(error => { dialog.showErrorBox('Codex Remote Web', error.message); app.exit(1); });
+  }).catch(error => {
+    if (background || uninstall) console.error('Desktop background component could not start. Check installation and private state permissions.');
+    else dialog.showErrorBox('Codex Remote Web', error.message);
+    app.exit(1);
+  });
 }

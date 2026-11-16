@@ -60,6 +60,7 @@ try {
   await page.screenshot({ path: join(root, '.artifacts/desktop-settings-dark-zh.png'), fullPage: true });
   await page.locator('[data-page=remote]').click(); await page.locator('[name=token]').waitFor({ state: 'visible' });
   assert.equal(await page.locator('[data-stage=account]').isVisible(), true);
+  await page.waitForFunction(() => document.querySelector('[data-stage=account] h2').textContent === '连接 Cloudflare');
   await page.screenshot({ path: join(root, '.artifacts/desktop-remote-zh.png'), fullPage: true });
   await page.locator('[data-page=configuration]').click();
   await page.setViewportSize({ width: 720, height: 820 }); await page.screenshot({ path: join(root, '.artifacts/desktop-settings-compact.png'), fullPage: true });

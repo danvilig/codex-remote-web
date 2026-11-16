@@ -26,7 +26,7 @@ Codex CLI is required; cloudflared is needed for remote access.`);
   const installation = process.argv[3];
   if (!installation || registration?.executable === installation || descriptor?.installation === installation) {
     await agentRequest(directory, 'stop').catch(() => {});
-    await configureSession(false, { directory, executable: process.execPath });
+    if (!installation || registration?.executable === installation) await configureSession(false, { directory, executable: process.execPath });
     await agentRequest(directory, 'shutdown').catch(() => {});
   }
 } else if (command === 'agent') {

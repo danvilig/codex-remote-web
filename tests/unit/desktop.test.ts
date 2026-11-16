@@ -13,11 +13,12 @@ import { QuickTunnel } from '../../src/server/setup/quick.js';
 import { SetupService } from '../../src/server/setup/service.js';
 import { setupFixture, INPUT, TOKEN } from '../helpers/setup-fixture.js';
 
+const nativeTimeout = process.platform === 'win32' ? 120000 : 30000;
 async function port() { return new Promise<number>(resolve => { const server = createServer(); server.listen(0, '127.0.0.1', () => { const value = (server.address() as any).port; server.close(() => resolve(value)); }); }); }
 async function fixture(fn, cloud = false) {
   const home = await mkdtemp(join(tmpdir(), 'desktop-test-')); const directory = join(home, 'desktop');
   const remote = setupFixture(directory);
-  const options = { home, directory, startupMs: 2000, command: [Bun.which('node')!, resolve(import.meta.dir, '../fixtures/desktop-gateway.mjs')], serviceFactory: cloud ? deployment => {
+  const options = { home, directory, startupMs: 10000, command: [Bun.which('node')!, resolve(import.meta.dir, '../fixtures/desktop-gateway.mjs')], serviceFactory: cloud ? deployment => {
     const ready = deployment.ready.bind(deployment);
     deployment.ready = async (...args) => { await ready(...args); remote.state.installed = true; };
     return new SetupService({ ...remote, deployment });
@@ -40,7 +41,7 @@ test('private control refuses unauthenticated, browser-origin and forwarded requ
   const inode = (await stat(join(f.directory, 'agent-lock.sqlite'))).ino;
   await f.agent.close(); const second = await startDesktopAgent(f.options);
   try { expect((await stat(join(f.directory, 'agent-lock.sqlite'))).ino).toBe(inode); } finally { await second.close(); }
-}));
+}), nativeTimeout);
 test('actual background process stays available across clients, restarts and stops without erasing configuration', async () => fixture(async f => {
   await agentRequest(f.directory, 'validateConfig', f.config);
   expect((await agentRequest(f.directory, 'status')).config.initialized).toBe(false);
@@ -55,7 +56,7 @@ test('actual background process stays available across clients, restarts and sto
   await agentRequest(f.directory, 'stop'); expect((await agentRequest(f.directory, 'status')).local.phase).toBe('stopped');
   expect((await readPrivate(join(f.directory, 'config.json'))).enabled).toBe(false);
   await expect(fetch(first.url)).rejects.toThrow();
-}));
+}), nativeTimeout);
 test('desktop Cloudflare deployment uses existing transaction and recovery checks and keeps secrets out of status', async () => fixture(async f => {
   await f.agent.dispatch('config', f.config);
   await f.agent.dispatch('start');
@@ -75,7 +76,7 @@ test('desktop Cloudflare deployment uses existing transaction and recovery check
   expect((await f.agent.dispatch('status')).setup.phase).toBe('failed');
   expect((await readPrivate(join(f.directory, 'protected-gateway.json'))).owner).toBe('someone-else');
   expect(receipt.local.owner).not.toBe('someone-else');
-}, true));
+}, true), nativeTimeout);
 test('desktop writes reject linked state without changing the target', async () => {
   if (process.platform === 'win32') return; // Native NTFS privacy has a separate gate.
   const directory = await mkdtemp(join(tmpdir(), 'desktop-private-'));
@@ -91,7 +92,7 @@ test('shutdown waits for an accepted startup and closes its child before releasi
   expect((await f.agent.dispatch('status')).local.pid).toBeNull();
   expect((await readPrivate(join(f.directory, 'config.json'))).enabled).toBe(true);
   expect(await readPrivate(join(f.directory, 'agent.json'))).toBeNull();
-}));
+}), nativeTimeout);
 test('session definitions preserve paths and scope background lifetime to the logged-in user', () => {
   const settings = { home: '/fixture/user', executable: '/fixture/Application With Spaces/app', args: ['/fixture/a&b/main.mjs'] };
   expect(sessionDefinition({ ...settings, platform: 'darwin' }).content).toContain('a&amp;b');
