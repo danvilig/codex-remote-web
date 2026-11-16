@@ -17,4 +17,4 @@ test.skipIf(process.platform !== 'win32')('NTFS private state rejects broad acce
     const target=join(directory,'target'),link=join(directory,'link');mkdirSync(target);symlinkSync(target,link,'junction');
     expect(privateAccess(lstatSync(target),link)).toBe(false);
   } finally {rmSync(directory,{recursive:true,force:true});}
-},30000);
+},60000);

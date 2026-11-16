@@ -18,8 +18,11 @@ export function privateAccess(stat, path) {
   } catch { return false; }
 }
 export function inspectWindowsAcl(path) {
-  const script = "$ErrorActionPreference='Stop'; $acl=Get-Acl -LiteralPath $env:CRW_ACL_PATH; $sid=[System.Security.Principal.SecurityIdentifier]; $user=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $owner=$acl.GetOwner($sid).Value; $allow=@($acl.GetAccessRules($true,$true,$sid) | Where-Object { $_.AccessControlType -eq 'Allow' } | ForEach-Object { $_.IdentityReference.Value }); @{ user=$user; owner=$owner; allow=$allow } | ConvertTo-Json -Compress";
+  // Use .NET ACL APIs directly: no profile, Get-Acl autoload or inherited
+  // PowerShell 7 module path is involved when running Windows PowerShell 5.1.
+  const script = `$ErrorActionPreference='Stop'; $path=$env:CRW_ACL_PATH; $acl=if([System.IO.Directory]::Exists($path)){[System.IO.Directory]::GetAccessControl($path)}else{[System.IO.File]::GetAccessControl($path)}; $sid=[System.Security.Principal.SecurityIdentifier]; $user=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $owner=$acl.GetOwner($sid).Value; $allow=@(); foreach($rule in $acl.GetAccessRules($true,$true,$sid)){if($rule.AccessControlType -eq 'Allow'){$allow+=('"'+$rule.IdentityReference.Value+'"')}}; [Console]::WriteLine('{"user":"'+$user+'","owner":"'+$owner+'","allow":['+($allow -join ',')+']}')`;
+
   const executable = join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  const output = execFileSync(executable, ['-NoProfile', '-NonInteractive', '-Command', script], { env: { ...process.env, CRW_ACL_PATH: path, PSModulePath: join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/Modules') }, encoding: 'utf8', timeout: 10000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  const output = execFileSync(executable, ['-NoProfile', '-NonInteractive', '-Command', script], { env: { ...process.env, CRW_ACL_PATH: path, PSModulePath: join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/Modules') }, encoding: 'utf8', timeout: 15000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
   return JSON.parse(output);
 }
