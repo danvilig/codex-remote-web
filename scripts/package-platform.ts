@@ -39,7 +39,7 @@ if (process.platform !== 'linux') {
     await command(['sudo', 'dpkg', '-i', desktop.installer], root, observed);
     try {
       process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE = '/opt/codex-remote-web-desktop/codex-remote-web-desktop';
-      await command(['xvfb-run', '-a', 'bun', 'tests/browser/desktop-native.e2e.mjs'], root, observed);
+      await command(['xvfb-run', '-a', 'node', 'tests/browser/desktop-native.e2e.mjs'], root, observed);
     } finally { await command(['sudo', 'dpkg', '-r', 'codex-remote-web-desktop'], root, observed); }
   } finally { await rm(temp, { recursive: true, force: true }); }
 }

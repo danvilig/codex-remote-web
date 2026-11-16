@@ -42,7 +42,7 @@ try {
   process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(destination,'Codex Remote Web.exe');
  } else throw new Error('Native installer test requires macOS or Windows');
  await command(['bun','run','test:portable'],root,{stream:true,timeoutMs:240_000});
- await command(['bun','tests/browser/desktop-native.e2e.mjs'],root,{stream:true,timeoutMs:240_000});
+ await command(['node','tests/browser/desktop-native.e2e.mjs'],root,{stream:true,timeoutMs:240_000});
  if(installed) {
   await msi(['/x',installer]);installed=false;
   const uninstallLog=await readFile(join(temp,'uninstall.log'),'utf8');
