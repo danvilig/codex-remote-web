@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { _electron as electron } from 'playwright';
-import { mkdtemp, mkdir, writeFile, cp, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, readFile, cp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
@@ -24,10 +24,16 @@ if (windows) {
   await writeFile(codex, `#!/bin/sh\nexec ${quote(Bun.which('node'))} ${quote(fixture)} "$@"\n`, { mode: 0o700 });
 }
 await writePrivate(join(directory, 'config.json'), desktopConfig({ initialized: true, enabled: false, autostart: false, cwd: home, codex, port, language: 'en' }, home));
-const env = { ...process.env, HOME: home, USERPROFILE: home, CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), XDG_CONFIG_HOME: join(home, '.config'), XDG_CACHE_HOME: join(home, '.cache'), APPDATA: join(home, 'AppData/Roaming'), LOCALAPPDATA: join(home, 'AppData/Local'), CODEX_DESKTOP_BUN: process.execPath };
-delete env.ELECTRON_RUN_AS_NODE;
+const env = { ...process.env, PATH: process.env.PATH, HOME: home, USERPROFILE: home, CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), XDG_CONFIG_HOME: join(home, '.config'), XDG_CACHE_HOME: join(home, '.cache'), APPDATA: join(home, 'AppData/Roaming'), LOCALAPPDATA: join(home, 'AppData/Local'), CODEX_DESKTOP_BUN: process.execPath, ELECTRON_ENABLE_LOGGING: '1', ELECTRON_LOG_FILE: join(home, 'electron.log') };
+for (const key of Object.keys(env)) if (key.toUpperCase() === 'ELECTRON_RUN_AS_NODE') delete env[key];
 let application;
-const launch = () => electron.launch({ executablePath: executable, args: process.env.CODEX_WEBUI_DESKTOP_MAIN ? [process.env.CODEX_WEBUI_DESKTOP_MAIN] : [], chromiumSandbox: true, env, timeout: 60000 });
+const launch = async () => {
+  try { return await electron.launch({ executablePath: executable, args: process.env.CODEX_WEBUI_DESKTOP_MAIN ? [process.env.CODEX_WEBUI_DESKTOP_MAIN] : [], chromiumSandbox: true, env, timeout: 60000 }); }
+  catch (error) {
+    console.error('Electron launch diagnostics:', await readFile(env.ELECTRON_LOG_FILE, 'utf8').catch(() => '(no Chromium log)'));
+    throw error;
+  }
+};
 try {
   application = await launch(); let window = await application.firstWindow({ timeout: 30000 });
   await window.locator('#start').waitFor(); await window.waitForFunction(() => document.querySelector('#start').disabled === false);
