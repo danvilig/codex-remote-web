@@ -36,19 +36,22 @@ async function closeApplication() {
   if (!current) return;
   // ChildProcess 'close' waits for inherited automation pipes, even after the
   // tray process exits. The independent background process may retain them.
-  // Close the test's readers only after real OS process exit, then let
-  // Playwright finish its normal cleanup and verify a successful exit code.
+  // Close the test's readers only after real OS process exit. The OS exit and
+  // code are authoritative; Playwright's context-close promise can outlive its
+  // already-disposed Electron dispatcher when the gateway stays independent.
   const child = current.process();
   const releasePipes = () => { for (const stream of child.stdio) stream?.destroy?.(); };
   child.once('exit', releasePipes);
   if (child.exitCode !== null) releasePipes();
   let timer;
   try {
-    await Promise.race([current.close(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Native desktop quit timed out')), 20000); })]);
+    const exited = child.exitCode !== null ? Promise.resolve() : new Promise(resolve => child.once('exit', resolve));
+    void current.close().catch(() => {});
+    await Promise.race([exited, new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Native desktop quit timed out')), 20000); })]);
     assert.equal(child.exitCode, 0, 'The tray process must exit normally');
   } catch (error) {
-    console.error('Native desktop exit state:', { exitCode: current.process().exitCode, signalCode: current.process().signalCode });
-    current.process().kill(); throw error;
+    console.error('Native desktop exit state:', { exitCode: child.exitCode, signalCode: child.signalCode });
+    child.kill(); throw error;
   } finally { clearTimeout(timer); child.off('exit', releasePipes); }
 }
 const launch = async () => {
