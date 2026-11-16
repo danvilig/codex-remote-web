@@ -1,10 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- Default to the shared Codex App Server and wait for delayed daemon startup; keep isolated writers an explicit opt-in.
-- Configure new fixed-domain Access applications for 30-day HttpOnly, SameSite=Lax browser sessions; preserve existing deployments and document manual migration.
-
 ## 0.2.0-alpha.3
 
 - Add macOS DMG app and per-user Windows MSI installers with native installation checks, plus portable archives.
