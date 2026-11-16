@@ -1,7 +1,7 @@
 name: Native platform packages
 on:
   push:
-    branches: ['codex/**', develop, main, 'release/**']
+    branches: [develop, main, 'release/**']
   pull_request:
   workflow_dispatch:
   workflow_call:
@@ -12,6 +12,9 @@ on:
       tag:
         type: string
         required: true
+concurrency:
+  group: native-packages-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:

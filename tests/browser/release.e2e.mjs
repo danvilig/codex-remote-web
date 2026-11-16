@@ -33,7 +33,7 @@ try {
     if (portable) { copyFileSync(built.archive, archive); copyFileSync(built.archive+'.sha256',archive+'.sha256'); }
   }
   const digest = createHash('sha256').update(readFileSync(archive)).digest('hex'); assert.ok(readFileSync(`${archive}.sha256`,'utf8').startsWith(digest));
-  const listing = await run(['tar','-tf',archive]);
+  const listing = (await run(['tar','-tf',archive])).replaceAll('\r\n','\n');
   for (const internal of ['docs/images/README.md', 'scripts/capture-docs.ts', 'tests/browser/readme-screenshot.mjs', 'tests/fixtures/showcase-codex.mjs']) assert.equal(listing.includes(`/${internal}`),false,`Internal documentation tooling leaked into archive: ${internal}`);
   assert.equal(/\/(?:src|tests|history|\.artifacts|\.git)\//.test(listing),false);
   if (!portable) assert.equal(listing.includes('/node_modules/'), false);

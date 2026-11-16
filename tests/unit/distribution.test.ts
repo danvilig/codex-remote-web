@@ -27,3 +27,33 @@ test('private NTFS access fails closed for other owners, broad or unknown truste
   expect(privateWindowsAcl({ ...acl, allow: [] })).toBe(false);
   expect(privateWindowsAcl(null)).toBe(false);
 });
+
+test('package commands forward newly selected immutable archive identities', async () => {
+  const { command } = await import('../../scripts/distribution.ts');
+  const before=process.env.CRW_DISTRIBUTION_FIXTURE;
+  process.env.CRW_DISTRIBUTION_FIXTURE='selected-archive';
+  try { expect(await command([process.execPath,'--eval','console.log(process.env.CRW_DISTRIBUTION_FIXTURE)'],process.cwd())).toBe('selected-archive'); }
+  finally { if(before===undefined)delete process.env.CRW_DISTRIBUTION_FIXTURE;else process.env.CRW_DISTRIBUTION_FIXTURE=before; }
+});
+test('native payload selection merges prebuilt addons with Windows DLLs and repairs macOS helper mode', async () => {
+  const { mkdtemp, mkdir, writeFile, readFile, stat, rm }=await import('node:fs/promises');
+  const {tmpdir}=await import('node:os');const {copyPtyNative}=await import('../../scripts/distribution.ts');
+  const root=await mkdtemp(join(tmpdir(),'crw-native-payload-'));
+  try {
+    const source=join(root,'source'),out=join(root,'out'),prebuilt=join(source,'prebuilds',`win32-${process.arch}`);
+    await mkdir(prebuilt,{recursive:true});await mkdir(join(source,'build/Release/conpty'),{recursive:true});
+    for (const file of ['conpty.node','conpty_console_list.node'])await writeFile(join(prebuilt,file),'test fixture');
+    await writeFile(join(source,'build/Release/conpty/conpty.dll'),'test DLL');
+    await writeFile(join(source,'build/Release/private.pdb'),'debug file');
+    await copyPtyNative(source,out,'win32');
+    expect(await readFile(join(out,'build/Release/conpty.node'),'utf8')).toBe('test fixture');
+    expect(await readFile(join(out,'build/Release/conpty/conpty.dll'),'utf8')).toBe('test DLL');
+    await expect(stat(join(out,'build/Release/private.pdb'))).rejects.toThrow();
+    if(process.platform!=='win32') {
+      await mkdir(join(source,'prebuilds',`darwin-${process.arch}`),{recursive:true});
+      for(const file of ['pty.node','spawn-helper'])await writeFile(join(source,'prebuilds',`darwin-${process.arch}`,file),'fixture',{mode:0o644});
+      await copyPtyNative(source,join(root,'mac'),'darwin');
+      expect((await stat(join(root,'mac/build/Release/spawn-helper'))).mode & 0o111).toBe(0o111);
+    }
+  } finally {await rm(root,{recursive:true,force:true});}
+});
