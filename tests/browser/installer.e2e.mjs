@@ -43,7 +43,8 @@ try {
  await command(['bun','run','test:portable'],root,{stream:true,timeoutMs:240_000});
  if(installed) {
   await msi(['/x',installer]);installed=false;
-  await assert.rejects(access(join(destination,'codex-remote-web.exe')),`Installed executable remained after uninstall: ${await readFile(join(temp,'uninstall.log'),'utf8')}`);
+  const uninstallLog=await readFile(join(temp,'uninstall.log'),'utf8');
+  await assert.rejects(access(join(destination,'codex-remote-web.exe')),`Installed executable remained after uninstall: ${uninstallLog}`);
   await assert.rejects(access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk')),'Start menu shortcut remained after uninstall');
  }
  console.log('PASS: exact native installer, installation into a path with spaces, installed gateway/files/submissions/PTY and MSI uninstall');
