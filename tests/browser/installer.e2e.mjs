@@ -10,7 +10,11 @@ let mounted=false,installed=false;
 const mount=join(temp,'mount'),destination=join(temp,'Installed application with spaces');
 async function msi(args) {
  console.error(`Verifying msiexec ${args[0]}`);
- const child=Bun.spawn(['msiexec.exe',...args,'/qn','/norestart'],{stdout:'pipe',stderr:'pipe'});
+ // msiexec parses PROPERTY="value with spaces", not the CRT-style quoted
+ // whole argument "PROPERTY=value with spaces". Preserve its native grammar.
+ const quote=value=>`"${value.replaceAll('"','""')}"`;
+ const nativeArgs=args.map(arg=>arg.startsWith('INSTALLFOLDER=')?`INSTALLFOLDER=${quote(arg.slice('INSTALLFOLDER='.length))}`:arg.startsWith('/')?arg:quote(arg));
+ const child=Bun.spawn(['msiexec.exe',...nativeArgs,'/qn','/norestart'],{windowsVerbatimArguments:true,stdout:'ignore',stderr:'ignore'});
  let timedOut=false;const timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL');},120_000);
  let code;try {code=await child.exited;}finally{clearTimeout(timer);}
  assert.equal(timedOut,false,`msiexec ${args[0]} timed out; installer log: ${await readFile(join(temp,'install.log'),'utf8').catch(()=>'(unavailable)')}`);
