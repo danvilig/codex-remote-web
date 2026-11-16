@@ -27,17 +27,29 @@ if (windows) {
 await writePrivate(join(directory, 'config.json'), desktopConfig({ initialized: true, enabled: false, autostart: false, cwd: home, codex, port, language: 'en' }, home));
 const env = { ...process.env, PATH: process.env.PATH, HOME: home, USERPROFILE: home, CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), XDG_CONFIG_HOME: join(home, '.config'), XDG_CACHE_HOME: join(home, '.cache'), APPDATA: join(home, 'AppData/Roaming'), LOCALAPPDATA: join(home, 'AppData/Local'), CODEX_DESKTOP_BUN: process.env.CODEX_DESKTOP_BUN || 'bun', ELECTRON_ENABLE_LOGGING: '1', ELECTRON_LOG_FILE: join(home, 'electron.log') };
 for (const key of Object.keys(env)) if (key.toUpperCase() === 'ELECTRON_RUN_AS_NODE') delete env[key];
+// Windows known-folder lookup requires the substituted profile directories to
+// exist before Electron asks for userData. These belong only to this fixture.
+for (const path of [env.APPDATA, env.LOCALAPPDATA, env.XDG_CONFIG_HOME, env.XDG_CACHE_HOME]) await mkdir(path, { recursive: true, mode: 0o700 });
 let application;
 async function closeApplication() {
   const current = application; application = null;
   if (!current) return;
+  // ChildProcess 'close' waits for inherited automation pipes, even after the
+  // tray process exits. The independent background process may retain them.
+  // Close the test's readers only after real OS process exit, then let
+  // Playwright finish its normal cleanup and verify a successful exit code.
+  const child = current.process();
+  const releasePipes = () => { for (const stream of child.stdio) stream?.destroy?.(); };
+  child.once('exit', releasePipes);
+  if (child.exitCode !== null) releasePipes();
   let timer;
   try {
     await Promise.race([current.close(), new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Native desktop quit timed out')), 20000); })]);
+    assert.equal(child.exitCode, 0, 'The tray process must exit normally');
   } catch (error) {
     console.error('Native desktop exit state:', { exitCode: current.process().exitCode, signalCode: current.process().signalCode });
     current.process().kill(); throw error;
-  } finally { clearTimeout(timer); }
+  } finally { clearTimeout(timer); child.off('exit', releasePipes); }
 }
 const launch = async () => {
   const args = process.env.CODEX_WEBUI_DESKTOP_MAIN ? [process.env.CODEX_WEBUI_DESKTOP_MAIN] : [];
