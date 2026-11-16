@@ -10,6 +10,8 @@ let mounted=false,installed=false;
 const mount=join(temp,'mount'),destination=join(temp,'Installed application with spaces');
 async function msi(args) {
  console.error(`Verifying msiexec ${args[0]}`);
+ const log=join(temp,args[0]==='/i'?'install.log':'uninstall.log');
+ args=[...args,'/l*v',log];
  // msiexec parses PROPERTY="value with spaces", not the CRT-style quoted
  // whole argument "PROPERTY=value with spaces". Preserve its native grammar.
  const quote=value=>`"${value.replaceAll('"','""')}"`;
@@ -17,8 +19,8 @@ async function msi(args) {
  const child=Bun.spawn(['msiexec.exe',...nativeArgs,'/qn','/norestart'],{windowsVerbatimArguments:true,stdout:'ignore',stderr:'ignore'});
  let timedOut=false;const timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL');},120_000);
  let code;try {code=await child.exited;}finally{clearTimeout(timer);}
- assert.equal(timedOut,false,`msiexec ${args[0]} timed out; installer log: ${await readFile(join(temp,'install.log'),'utf8').catch(()=>'(unavailable)')}`);
- assert.ok([0,3010].includes(code),`msiexec failed ${code}; installer log: ${await readFile(join(temp,'install.log'),'utf8').catch(()=>'(unavailable)')}`);
+ assert.equal(timedOut,false,`msiexec ${args[0]} timed out; installer log: ${await readFile(log,'utf8').catch(()=>'(unavailable)')}`);
+ assert.ok([0,3010].includes(code),`msiexec failed ${code}; installer log: ${await readFile(log,'utf8').catch(()=>'(unavailable)')}`);
 }
 try {
  if(process.platform==='darwin') {
@@ -33,7 +35,7 @@ try {
   await command(['/bin/sh','-n',join(contents,'MacOS/launch')],root);
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=join(contents,'Resources/gateway');
  } else if(process.platform==='win32') {
-  await msi(['/i',installer,`INSTALLFOLDER=${destination}`,'/l*v',join(temp,'install.log')]);installed=true;
+  await msi(['/i',installer,`INSTALLFOLDER=${destination}`]);installed=true;
   await access(join(destination,'Start Codex Remote Web.cmd'));
   await access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk'));
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=destination;
@@ -41,8 +43,8 @@ try {
  await command(['bun','run','test:portable'],root,{stream:true,timeoutMs:240_000});
  if(installed) {
   await msi(['/x',installer]);installed=false;
-  await assert.rejects(access(join(destination,'codex-remote-web.exe')));
-  await assert.rejects(access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk')));
+  await assert.rejects(access(join(destination,'codex-remote-web.exe')),`Installed executable remained after uninstall: ${await readFile(join(temp,'uninstall.log'),'utf8')}`);
+  await assert.rejects(access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk')),'Start menu shortcut remained after uninstall');
  }
  console.log('PASS: exact native installer, installation into a path with spaces, installed gateway/files/submissions/PTY and MSI uninstall');
 } finally {
