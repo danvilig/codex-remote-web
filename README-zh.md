@@ -56,18 +56,35 @@
 
 ### 下载可执行包（推荐）
 
-从 [Releases](https://github.com/danvilig/codex-remote-web/releases) 下载对应 Linux 架构的归档和同名 `.sha256` 文件：x86_64 选择 `linux-x64`，aarch64 选择 `linux-arm64`。包内包含可执行程序、Bun/Node 运行时、网页资源和预编译终端模块，**无需另外安装 Bun、Node 或编译依赖**。请保留解压后的完整目录。需要自行配置 Codex CLI 和 Git；公网访问还需要 cloudflared。原生系统使用 glibc（原生验收环境为 Ubuntu 24.04），不支持 32 位 ARM 或 Alpine/musl。
+从 [Releases](https://github.com/danvilig/codex-remote-web/releases) 下载系统对应的归档和同名 `.sha256`。包内含可执行程序、Bun/Node、网页资源和原生终端模块，**无需安装运行时或现场编译**，请保留解压后的完整目录。仍需自行配置 Codex CLI、Git；公网访问需要 cloudflared。
+
+| 系统 | 包名后缀 | 要求 |
+| --- | --- | --- |
+| Linux x64 / arm64 | `linux-x64.tar.gz` / `linux-arm64.tar.gz` | glibc，Ubuntu 24.04 验证 |
+| macOS Apple Silicon | `macos-arm64.tar.gz` | macOS 15 或更新；不支持 Intel Mac |
+| Windows x64 | `windows-x64.zip` | Windows 11、NTFS、Windows PowerShell；不支持 ARM64 |
+
+这是命令行网关，不是桌面安装器。macOS/Windows 包暂未代码签名；核对校验和及源码，仅对可信下载使用系统的单文件批准，不要全局关闭 Gatekeeper 或 SmartScreen。不支持 Linux 32 位 ARM 和 Alpine/musl。
 
 ```sh
-archive=codex-remote-web-0.2.0-alpha.2-linux-x64.tar.gz
-# arm64 改为 codex-remote-web-0.2.0-alpha.2-linux-arm64.tar.gz
+archive=codex-remote-web-0.2.0-alpha.3-linux-x64.tar.gz
+# arm64 改为 codex-remote-web-0.2.0-alpha.3-linux-arm64.tar.gz
 sha256sum -c "$archive.sha256"
 tar -xzf "$archive"
-cd codex-remote-web-0.2.0-alpha.2
+cd codex-remote-web-0.2.0-alpha.3
 CODEX_WEBUI_CWD=/path/to/your/project ./codex-remote-web
 ```
 
 访问 `http://127.0.0.1:8899` 打开完整 WebUI，再进入设置 → Remote access 配置公网。`./codex-remote-web setup` 只打开独立配置向导；支持 `--help` 和 `--version`。
+
+macOS 解压 `macos-arm64` 后使用同样的启动方式。Windows 解压 zip，在目录内打开 PowerShell：
+
+```powershell
+# 解压前将输出与同名 .sha256 内容核对。
+Get-FileHash .\codex-remote-web-0.2.0-alpha.3-windows-x64.zip -Algorithm SHA256
+$env:CODEX_WEBUI_CWD = 'C:\path\to\your\project'
+.\codex-remote-web.exe
+```
 
 ### 从源码或部署归档运行
 
@@ -124,18 +141,18 @@ bun run setup:cloudflare
 
 ## 部署与使用边界
 
-Linux 原生服务为主要部署方式，支持 x86_64（x64）和 aarch64（arm64）；Docker 为备用。容器内不能通过向导配置宿主机 systemd；默认镜像不包含 Codex 或 cloudflared。macOS 暂未完成发布支持。
+Linux 原生服务为主要部署方式，支持 x86_64（x64）和 aarch64（arm64）；Docker 为备用。容器内不能通过向导配置宿主机 systemd；默认镜像不包含 Codex 或 cloudflared。同时提供 macOS arm64 和 Windows x64 可执行包。固定域名自动部署向导依赖 Linux 用户级 systemd；macOS/Windows 需手动配置 Tunnel + Access，并启用 `cloudflare-access` 认证。受保护临时访问支持 Linux/macOS，Windows 暂不支持。见[跨平台配置](docs/deployment/PLATFORMS.md)。
 
 默认仅监听 loopback，公网通过受保护的 Tunnel 接入。Access 身份验证与 Codex 命令审批、Linux 权限和沙箱分别生效。
 
-Sites 部署、图片生成、云端 Library、插件账户 OAuth 和完整 MCP 交互保留在后续路线图。更多限制见[发布说明](docs/releases/0.2.0-alpha.2.md#已知限制)。
+Sites 部署、图片生成、云端 Library、插件账户 OAuth 和完整 MCP 交互保留在后续路线图。更多限制见[发布说明](docs/releases/0.2.0-alpha.3.md)。
 
 ## 文档与开发
 
 - [配置参考](docs/CONFIGURATION.md) / [Cloudflare 部署](docs/deployment/CLOUDFLARE.md)
 - [开发与测试](DEVELOPMENT.md) / [贡献指南](CONTRIBUTING.md)
 - [架构](docs/ARCHITECTURE.md) / [路线图](docs/ROADMAP.md)
-- [发布流程](docs/RELEASING.md) / [验收报告](docs/releases/0.2.0-alpha.2-acceptance.md) / [变更记录](CHANGELOG.md)
+- [发布流程](docs/RELEASING.md) / [验收报告](docs/releases/0.2.0-alpha.3.md) / [变更记录](CHANGELOG.md)
 - [贡献规范](CONTRIBUTING.md) / [Git 开发流程](docs/GIT_WORKFLOW.md) / [AI agent 规则](AGENTS.md)
 - [安全说明](SECURITY.md)
 

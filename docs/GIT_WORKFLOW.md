@@ -57,7 +57,7 @@ Complete every PR-template section and its three declarations. Replace placehold
 
 1. From reviewed `develop`, create `release/<version>`; stabilization changes enter it through PRs.
 2. Run full gates and prepare release notes. Open `release/<version>` → `main`, inspect and manually merge after checks pass.
-3. After the merged `main` commit passes Verify, a maintainer explicitly authorizes the version tag and publication. The Linux workflow validates x64/arm64 packages; merging alone does not publish.
+3. After the merged `main` commit passes Verify, a maintainer explicitly authorizes the version tag and publication. The native platform workflow validates Linux x64/arm64, macOS arm64 and Windows x64 packages; merging alone does not publish.
 4. Back-merge `main` → `develop` through a PR. Retain a protected release branch until a deliberate retirement decision; do not weaken protection merely for housekeeping.
 
 See [release operations](RELEASING.md) for candidate generation and package validation. Existing `v0.2.0-alpha.2` is unchanged by adopting this workflow.

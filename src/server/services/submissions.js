@@ -1,3 +1,4 @@
+import { privateAccess } from '../config/private-access.js';
 import { constants } from 'node:fs';
 import { mkdir, open, lstat, rename, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -44,14 +45,14 @@ export function createSubmissionService({ privateRoot, request, connected, onCha
   async function ensureDirectory() {
     await mkdir(directory, { recursive: true, mode: 0o700 });
     const stat = await lstat(directory);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || stat.uid !== process.getuid?.() || (stat.mode & 0o077))
+    if (!stat.isDirectory() || stat.isSymbolicLink() || !privateAccess(stat, directory))
       throw failure('Unsafe submission directory', 'SUBMISSION_STORAGE_UNSAFE', 500);
   }
   async function readPrivate(path, limit = maxBytes) {
     const fd = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const stat = await fd.stat();
-      if (!stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) || stat.size > limit)
+      if (!stat.isFile() || !privateAccess(stat, path) || stat.size > limit)
         throw failure('Unsafe submission state', 'SUBMISSION_STORAGE_UNSAFE', 500);
       return { data: JSON.parse(await fd.readFile('utf8')), stat };
     } finally { await fd.close(); }

@@ -14,10 +14,10 @@ import { createHttpHandler } from './http/router.ts';
 import { applicationRoot, standalone } from "./config/paths.js";
 import { name as packageName, version as packageVersion } from "../../package.json";
 import { existsSync } from "node:fs";
-import { join, relative, resolve, delimiter } from "node:path";
+import { join, relative, resolve, delimiter, sep } from "node:path";
 import { createAppServerBridge } from "./bridge/app-server.ts";
 import { createServer, type ServerResponse } from "node:http";
-import { networkInterfaces, tmpdir } from "node:os";
+import { networkInterfaces, homedir, tmpdir } from "node:os";
 import { WebSocket } from "ws";
 import { defaultBrowseRoots, resolveBrowsePath, isDirectory } from "./files/folders.js";
 import { ReviewDiffStore } from "./review/state.js";
@@ -48,7 +48,7 @@ const accessAuth = authConfig.mode === 'cloudflare-access' ? createAccessAuthent
 const managedPasswordPath = passwordStorePath();
 const appRoot = applicationRoot();
 const publicDir = resolve(appRoot, "public");
-const homeDir = process.env.HOME || process.cwd();
+const homeDir = process.env.HOME || homedir();
 const projectless = process.env.CODEX_WEBUI_PROJECTLESS === "true";
 const configuredReviewRoot = process.env.CODEX_WEBUI_REVIEW_ROOT || null;
 const ntfyTopic = process.env.CODEX_WEBUI_NTFY_TOPIC || null;
@@ -198,7 +198,7 @@ async function dispatchBrowserMessage(message: any) {
           for (const input of entry?.params?.input || []) {
             if (input.type !== 'localImage' || typeof input.path !== 'string') continue;
             const child = relative(join(privateCodexRoot, 'remote-web-attachments'), resolve(input.path));
-            if (!child.startsWith('..') && child.split('/').length === 2) ids.add(child.split('/')[0]);
+            if (!child.startsWith('..') && child.split(sep).length === 2) ids.add(child.split(sep)[0]);
           }
           if (ids.size) {
             const cwd = entry.params?.cwd || (await request('thread/read', { threadId: entry.threadId, includeTurns: false })).thread?.cwd;

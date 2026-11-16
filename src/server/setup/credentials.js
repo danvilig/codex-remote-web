@@ -1,3 +1,4 @@
+import { privateAccess } from '../config/private-access.js';
 import { constants } from 'node:fs';
 import { open, mkdir, lstat, rm, chmod } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -13,7 +14,7 @@ export class SetupCredentials {
     try {
       handle = await open(this.path, constants.O_RDONLY | constants.O_NOFOLLOW);
       const stat = await handle.stat();
-      if (!stat.isFile() || stat.size > 2048 || (stat.mode & 0o077) || (process.getuid && stat.uid !== process.getuid())) throw new Error();
+      if (!stat.isFile() || stat.size > 2048 || !privateAccess(stat, this.path)) throw new Error();
       const data = JSON.parse(await handle.readFile('utf8'));
       if (data.version !== 1 || typeof data.token !== 'string' || !/^[A-Za-z0-9_.-]{16,512}$/.test(data.token)) throw new Error();
       return data.token;
@@ -28,6 +29,7 @@ export class SetupCredentials {
     const stat = await lstat(this.directory);
     if (!stat.isDirectory() || stat.isSymbolicLink() || (process.getuid && stat.uid !== process.getuid())) throw new SetupError('The management credential directory is not a private local directory.', 400);
     await chmod(this.directory, 0o700);
+    if (!privateAccess(await lstat(this.directory), this.directory)) throw new SetupError('The management credential directory must be private to your user.', 400);
     await atomicPrivate(this.path, JSON.stringify({ version: 1, token }) + '\n');
   }
   async forget() { await rm(this.path, { force: true }); }

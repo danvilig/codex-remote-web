@@ -1,6 +1,6 @@
 # 本地 Alpha 发布流程
 
-目标版本为 `0.2.0-alpha.2`。本地脚本只准备候选或 CI Artifact，不自动推送、打标签、上传 GitHub Release 或重启服务。公开仓库为 `danvilig/codex-remote-web`，首次公开从独立快照开始，后续遵循 [Git 开发流程](GIT_WORKFLOW.md)：日常 PR 进入 `develop`，准备发版才创建 `release/<version>`，稳定后通过 PR 合入 `main`。标签指向已通过 Verify 的 `main` 提交，由维护者单独授权发布。
+目标版本为 `0.2.0-alpha.3`。本地脚本只准备候选或 CI Artifact，不自动推送、打标签、上传 GitHub Release 或重启服务。公开仓库为 `danvilig/codex-remote-web`，首次公开从独立快照开始，后续遵循 [Git 开发流程](GIT_WORKFLOW.md)：日常 PR 进入 `develop`，准备发版才创建 `release/<version>`，稳定后通过 PR 合入 `main`。标签指向已通过 Verify 的 `main` 提交，由维护者单独授权发布。
 
 ## 公开源码快照
 
@@ -88,10 +88,15 @@ bun run candidate:prepare
 
 两个工作流共享 `verify:release`，均执行依赖审计、临时访问、WebKit 预检和合成性能回归；有 cloudflared 时执行离线验证。验证后调用 `candidate:prepare`，导出并扫描干净独立快照后构建。手动流程只上传候选 CI Artifact，未调用公开发布 API。Artifact 的可见性由目标仓库设置决定。
 
-## Linux GitHub Release
+## 跨平台 GitHub Release
 
 `.github/workflows/release.yml` 独立于候选脚本。经维护者确认发布后，将版本标签（例如 `v0.2.0-alpha.2`）指向已经通过 Verify 的公开提交，再推送该标签；也可以针对已有标签手动触发工作流。工作流检查标签与 `package.json` 版本一致，并固定检出的提交，不能将未通过 Verify 的提交发布。
 
 构建矩阵使用原生 `ubuntu-24.04`（x64）和 `ubuntu-24.04-arm`（arm64）runner，各自完成冻结安装、PTY 重建、构建、单元测试，并验证两种实际归档。`deployment-linux-*` 是需安装依赖的 JS/静态资源部署包；`linux-*` 是包含编译程序、Bun/Node 运行时、静态资源和预编译终端模块的可执行包。`bun run release:portable -- --output-dir <new-directory>` 生成本机架构包；`bun run test:portable` 验证没有宿主机运行时/安装器/编译器时的完整运行。可用 `CODEX_WEBUI_PORTABLE_ARCHIVE` 指定待验收的实际归档。可执行包保留 `dist/portable.js` 和重链接说明、运行时许可证及版本来源。当前不声明支持 32 位 ARM 或 musl/Alpine 原生部署。
 
 两端均通过后才创建 GitHub 预发布版本，上传四个归档（两种架构各有可执行包和 `deployment` 包）、各自使用纯文件名的 `.sha256` 和汇总 `SHA256SUMS`。仅下载一种架构时校验对应 `.sha256`；下载全部归档时可运行 `sha256sum -c SHA256SUMS`。GitHub 自动提供标签源码下载，无需再上传重复源码包。本流程不部署到现有服务，也不修改 Tunnel。
+
+
+Alpha.3 新增 macOS Apple Silicon（`macos-15` arm64）及 Windows x64（`windows-2025`）原生 runner；不构建 Intel Mac 或 Windows ARM64。`.github/workflows/platform-packages.yml` 在 PR 和分支推送中生成可审阅 Artifact，发布工作流复用同一构建/验收步骤，全部成功才上传。Mac/Windows 不运行 Linux systemd 或 Unix 专属测试，实际包验收仍覆盖 CLI、异目录启动、静态资源、文件读取/编辑、回执去重、队列、真实 PTY 和平台对应的远程访问边界；Windows 额外在本机 NTFS 上测试 ACL 与 junction 拒绝。Linux 的完整 Verify 与依赖审计继续运行。
+
+Alpha.3 共六个归档：四个系统/架构的可执行包，以及两种 Linux 架构的部署包。Windows 为 zip，其余为 tar.gz，均提供同名 `.sha256`，汇总 `SHA256SUMS` 共六项。不替换 Alpha.2 tag 或附件。Mac/Windows 目前未代码签名/公证，不生成 DMG/MSI，不宣称 Intel Mac、Windows ARM64、Windows 10 或旧 macOS 已验证。平台安装、公网接入及权限边界见 [PLATFORMS](deployment/PLATFORMS.md)。

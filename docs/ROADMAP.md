@@ -36,3 +36,6 @@ Files 已采用按需展开的开发者文件树，支持键盘导航、搜索�
 ## 网页接入向导
 
 已实现：复用远程管理 Tunnel 的本机 Web 向导、原生用户服务安装、变更预览、部署清理、诊断、独立入口与模拟回归。真实域名与登录、受保护临时访问已完成连通验证；用户服务跨退出/主机重启行为、实际撤销时效属于部署专项检查。已补充本机连接器识别、专用 Tunnel 创建和独立连接器服务、子域名及 @ 输入；临时访问已支持无需域名/账户的单邮箱 OTP、状态、二维码与停止控制；cloudflared 软件自动安装和 Terraform 输出留待后续。
+
+
+Alpha.3 候选加入 Linux x64/arm64、macOS Apple Silicon 与 Windows x64 原生可执行包及逐平台验收。固定域名自动服务向导仍限 Linux systemd；macOS/Windows 手动配置受保护的 Tunnel + Access。Windows 临时访问、Intel Mac、Windows ARM64、签名安装器及系统服务安装留待后续，不在本版支持范围。
