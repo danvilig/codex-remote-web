@@ -18,8 +18,10 @@ function trayPng() {
 }
 export async function buildDesktop(output = join(root, '.artifacts/desktop-dev')) {
   await mkdir(output, { recursive: true });
-  for (const [entry, name, target] of [['desktop/main.js', 'main.mjs', 'node'], ['desktop/renderer.js', 'renderer.js', 'browser']]) {
-    const result = await Bun.build({ entrypoints: [join(root, entry)], outdir: output, naming: name, target: target as 'node' | 'browser', packages: target === 'node' ? 'external' : 'bundle' });
+  // Load lifecycle hooks synchronously before Electron initializes Chromium.
+  // Keep the browser renderer as ESM and the native bootstrap as CommonJS.
+  for (const [entry, name, target] of [['desktop/main.js', 'main.cjs', 'node'], ['desktop/renderer.js', 'renderer.js', 'browser']]) {
+    const result = await Bun.build({ entrypoints: [join(root, entry)], outdir: output, naming: name, target: target as 'node' | 'browser', format: target === 'node' ? 'cjs' : 'esm', packages: target === 'node' ? 'external' : 'bundle' });
     if (!result.success) throw new Error(result.logs.join('\n'));
   }
   for (const file of ['index.html', 'desktop.css', 'preload.cjs']) await cp(join(root, 'desktop', file), join(output, file));
@@ -31,6 +33,6 @@ if (import.meta.main) {
   const output = await buildDesktop();
   if (process.argv.includes('--run')) {
     const executable = (await import('electron')).default;
-    const child = Bun.spawn([executable, join(output, 'main.mjs')], { env: { ...process.env, CODEX_DESKTOP_BUN: process.execPath }, stdout: 'inherit', stderr: 'inherit' }); process.exitCode = await child.exited;
+    const child = Bun.spawn([executable, join(output, 'main.cjs')], { env: { ...process.env, CODEX_DESKTOP_BUN: process.execPath }, stdout: 'inherit', stderr: 'inherit' }); process.exitCode = await child.exited;
   } else console.log(output);
 }

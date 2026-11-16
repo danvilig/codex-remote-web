@@ -2,8 +2,8 @@ import { app, BrowserWindow, Menu, Tray, nativeImage, ipcMain, dialog, shell, po
 import { spawn, execFile } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { promisify } from 'node:util';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { desktopDirectory } from '../src/shared/desktop-config.js';
 import { agentRequest } from './client.js';
 import { privateDirectory, readPrivate } from '../src/server/desktop/private-store.js';
@@ -11,10 +11,10 @@ import { configureSession } from './session.js';
 
 const background = process.argv.includes('--background-agent');
 const uninstall = process.argv.includes('--uninstall-background');
-const here = dirname(fileURLToPath(import.meta.url));
+const here = app.getAppPath();
 const directory = desktopDirectory();
 const root = app.isPackaged ? join(process.resourcesPath, 'gateway') : resolve(here, '../..');
-const launchArgs = app.isPackaged ? [] : [join(here, 'main.mjs')];
+const launchArgs = app.isPackaged ? [] : [join(here, 'main.cjs')];
 // Independent locks: quitting the tray must never terminate the agent.
 const userData = join(app.getPath('userData'), background ? 'background' : 'desktop');
 mkdirSync(userData, { recursive: true, mode: 0o700 });

@@ -157,3 +157,26 @@ test('Windows Quick Tunnel writes only a private HTTP origin capability and wait
     connector.onMessage({ type: 'ready', publicOrigin: 'https://fixture.trycloudflare.com' }); await quick.runtime.starting; expect(quick.status().phase).toBe('ready');
   } finally { await quick.stop(); await rm(directory, { recursive: true, force: true }); }
 });
+test('built native bootstrap registers lifecycle state synchronously from its application directory', async () => {
+  const { buildDesktop } = await import('../../scripts/desktop.ts');
+  const { runInNewContext } = await import('node:vm');
+  const { createRequire } = await import('node:module');
+  const root = await mkdtemp(join(tmpdir(), 'desktop-bootstrap-'));
+  const require = createRequire(import.meta.url), calls = [];
+  const app = {
+    isPackaged: true,
+    getAppPath: () => { calls.push('application-path'); return root; },
+    getPath: () => root,
+    setPath: (name, path) => calls.push([name, path]),
+    requestSingleInstanceLock: () => { calls.push('lock'); return false; },
+    quit: () => calls.push('quit'),
+  };
+  try {
+    await buildDesktop(root);
+    runInNewContext(await readFile(join(root, 'main.cjs'), 'utf8'), {
+      require: name => name === 'electron' ? { app } : name === 'node:fs' ? { ...require(name), mkdirSync: () => {} } : require(name),
+      process: { ...process, argv: ['desktop-fixture'] }, exports: {}, module: { exports: {} },
+    });
+    expect(calls).toEqual(['application-path', ['userData', join(root, 'desktop')], 'lock', 'quit']);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
