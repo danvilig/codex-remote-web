@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { portableTarget } from '../../scripts/distribution.ts';
+import { portableTarget, installerGuid } from '../../scripts/distribution.ts';
 import { codexCommand } from '../../src/server/config/codex-command.js';
 import { privateWindowsAcl } from '../../src/server/config/private-access.js';
 import { join } from 'node:path';
@@ -56,4 +56,10 @@ test('native payload selection merges prebuilt addons with Windows DLLs and repa
       expect((await stat(join(root,'mac/build/Release/spawn-helper'))).mode & 0o111).toBe(0o111);
     }
   } finally {await rm(root,{recursive:true,force:true});}
+});
+
+test('MSI file component identities are stable and path-specific UUIDv5 values', () => {
+  expect(installerGuid('runtime/node.exe')).toBe(installerGuid('runtime/node.exe'));
+  expect(installerGuid('runtime/node.exe')).not.toBe(installerGuid('codex-remote-web.exe'));
+  expect(installerGuid('runtime/node.exe')).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-5[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/);
 });

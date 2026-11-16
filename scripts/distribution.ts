@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { chmod, cp, mkdir, readdir } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
@@ -36,4 +37,12 @@ export async function copyPtyNative(source: string, destination: string, platfor
   }
   await copy(folder, join(destination, 'build/Release'));
   if (folder !== built && builtNames.length) await copy(built, join(destination, 'build/Release'));
+}
+
+// Stable UUIDv5 component identities keep MSI repair/upgrade/uninstall coherent
+// across installation paths. The namespace belongs to this product family.
+export function installerGuid(name: string) {
+  const bytes=createHash('sha1').update(Buffer.from('8f8555d4c0e04b2f94573c824076eb40','hex')).update(name).digest().subarray(0,16);
+  bytes[6]=(bytes[6]&15)|80;bytes[8]=(bytes[8]&63)|128;
+  const hex=bytes.toString('hex');return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
 }

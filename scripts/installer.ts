@@ -3,7 +3,7 @@
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
-import { command, portableTarget } from './distribution.ts';
+import { command, portableTarget, installerGuid } from './distribution.ts';
 const root=resolve(import.meta.dir,'..'),target=portableTarget();
 if (!['darwin','win32'].includes(process.platform)) throw new Error('Native installers require macOS or Windows');
 const pkg=await Bun.file(join(root,'package.json')).json(),name=`${pkg.name}-${pkg.version}`;
@@ -56,7 +56,7 @@ done
    for(const item of (await readdir(folder,{withFileTypes:true})).sort((a,b)=>a.name.localeCompare(b.name))) {
     const local=relative?`${relative}/${item.name}`:item.name;
     if(item.isDirectory()) result+=`<Directory Id="${id('dir:'+local)}" Name="${xml(item.name)}">${await tree(join(folder,item.name),local,id('dir:'+local))}</Directory>`;
-    else {const key=id('file:'+local);components.push(key);result+=`<Component Id="${key}" Guid="*"><File Source="${xml(join(folder,item.name))}" Name="${xml(item.name)}" KeyPath="no"/><RegistryValue Root="HKCU" Key="Software\\Codex Remote Web\\Installer" Name="${key}" Type="integer" Value="1" KeyPath="yes"/></Component>`;}
+    else {const key=id('file:'+local);components.push(key);result+=`<Component Id="${key}" Guid="${installerGuid(local)}"><File Source="${xml(join(folder,item.name))}" Name="${xml(item.name)}" KeyPath="no"/><RegistryValue Root="HKCU" Key="Software\\Codex Remote Web\\Installer" Name="${key}" Type="integer" Value="1" KeyPath="yes"/></Component>`;}
    }
    return result;
   }
