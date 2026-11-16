@@ -47,3 +47,6 @@ CODEX_WEBUI_CF_ACCESS_ALLOWED_EMAIL=you@example.com
 4. 启动网关及连接器，从公网确认出现 Access 登录、身份验证通过后才能访问，错误邮箱和直接访问源站均被拒绝。参考 [Cloudflare 部署](CLOUDFLARE.md) 配置与回滚。
 
 受保护的无域名临时访问依赖 Unix socket，支持 Linux/macOS；Windows 暂不支持，不会降级为无认证临时隧道。命令行进程停止后网关/临时连接器结束；后台自启动需用户自行配置，本版不提供安装服务按钮。
+
+
+Windows 文件内容在原子替换前执行 flush，但 Node/Bun 不提供目录 fsync，因此不承诺突然断电时目录项的落盘保证；保留回执、队列及 SQLite 状态，恢复时核对未知结果，不自动重放。多用户共享存储和跨主机队列不属于支持范围。

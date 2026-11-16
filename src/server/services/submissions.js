@@ -1,3 +1,4 @@
+import { syncDirectory } from '../config/durability.js';
 import { privateAccess } from '../config/private-access.js';
 import { constants } from 'node:fs';
 import { mkdir, open, lstat, rename, unlink } from 'node:fs/promises';
@@ -77,8 +78,7 @@ export function createSubmissionService({ privateRoot, request, connected, onCha
     finally { await fd.close(); }
     try {
       await rename(temporary, stateFile);
-      const dir = await open(directory, 'r');
-      try { await dir.sync(); } finally { await dir.close(); }
+      await syncDirectory(directory);
     } finally { await unlink(temporary).catch(() => {}); }
   }
   async function transaction(change) {

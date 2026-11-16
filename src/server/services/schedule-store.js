@@ -1,3 +1,4 @@
+import { syncDirectory } from '../config/durability.js';
 import { privateAccess } from '../config/private-access.js';
 import { acquirePrivateLock } from './private-lock.js';
 import { mkdir, open, lstat, readFile, rename, unlink } from 'node:fs/promises';
@@ -121,12 +122,7 @@ export function createScheduleStore(privateRoot) {
         }
         try {
           await rename(temporary, file);
-          const dir = await open(directory, 'r');
-          try {
-            await dir.sync();
-          } finally {
-            await dir.close();
-          }
+          await syncDirectory(directory);
         } finally {
           await unlink(temporary).catch(() => {});
         }
