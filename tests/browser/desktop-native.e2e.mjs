@@ -28,7 +28,11 @@ const env = { ...process.env, PATH: process.env.PATH, HOME: home, USERPROFILE: h
 for (const key of Object.keys(env)) if (key.toUpperCase() === 'ELECTRON_RUN_AS_NODE') delete env[key];
 let application;
 const launch = async () => {
-  try { return await electron.launch({ executablePath: executable, args: process.env.CODEX_WEBUI_DESKTOP_MAIN ? [process.env.CODEX_WEBUI_DESKTOP_MAIN] : [], chromiumSandbox: true, env, timeout: 60000 }); }
+  // Like Playwright's Electron loader, prevent an elevated Windows CI process
+  // from relaunching outside the automation pipes. Keep Chromium sandboxed.
+  const args = windows ? ['--disable-features=AutoDeElevate', '--do-not-de-elevate'] : [];
+  if (process.env.CODEX_WEBUI_DESKTOP_MAIN) args.push(process.env.CODEX_WEBUI_DESKTOP_MAIN);
+  try { return await electron.launch({ executablePath: executable, args, chromiumSandbox: true, env, timeout: 60000 }); }
   catch (error) {
     console.error('Electron launch diagnostics:', await readFile(env.ELECTRON_LOG_FILE, 'utf8').catch(() => '(no Chromium log)'));
     throw error;
