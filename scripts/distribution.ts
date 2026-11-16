@@ -6,9 +6,20 @@ export function portableTarget(platform = process.platform, arch = process.arch)
   if (!['linux', 'darwin', 'win32'].includes(platform) || !['x64', 'arm64'].includes(arch) || (platform === 'win32' && arch !== 'x64') || (platform === 'darwin' && arch !== 'arm64')) throw new Error('Supported native builds: Linux x64/arm64, macOS arm64, Windows x64');
   return { platform, arch, label: platform === 'darwin' ? 'macos' : platform === 'win32' ? 'windows' : 'linux', extension: platform === 'win32' ? 'zip' : 'tar.gz', executable: `codex-remote-web${platform === 'win32' ? '.exe' : ''}`, node: `node${platform === 'win32' ? '.exe' : ''}`, bun: `bun-${platform === 'win32' ? 'windows' : platform}-${arch}${arch === 'x64' ? '-baseline' : ''}` };
 }
-export async function command(args: string[], cwd: string) {
+export async function command(args: string[], cwd: string, options: { stream?: boolean; timeoutMs?: number } = {}) {
+  if (options.stream) console.error(`Running: ${args.join(' ')}`);
   const child = Bun.spawn(args, { cwd, env: { ...process.env }, stdout: 'pipe', stderr: 'pipe' });
-  const [out, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  let timedOut = false;
+  const timer = options.timeoutMs ? setTimeout(() => { timedOut = true; child.kill('SIGKILL'); }, options.timeoutMs) : undefined;
+  async function collect(stream: ReadableStream<Uint8Array>) {
+    const decoder = new TextDecoder(); let result = '';
+    for await (const chunk of stream) { const value = decoder.decode(chunk, { stream: true }); result += value; if (options.stream) process.stderr.write(value); }
+    return result + decoder.decode();
+  }
+  let out: string, error: string, code: number;
+  try { [out, error, code] = await Promise.all([collect(child.stdout), collect(child.stderr), child.exited]); }
+  finally { clearTimeout(timer); }
+  if (timedOut) throw new Error(`${args[0]} timed out after ${options.timeoutMs}ms: ${error.slice(-4000)}\n${out.slice(-4000)}`);
   if (code) throw new Error(`${args[0]} failed (${code}): ${error.slice(-4000)}\n${out.slice(-4000)}`);
   return out.trim();
 }

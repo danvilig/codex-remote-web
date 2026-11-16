@@ -9,8 +9,11 @@ const temp=await mkdtemp(join(tmpdir(),'crw-installer-'));
 let mounted=false,installed=false;
 const mount=join(temp,'mount'),destination=join(temp,'Installed application with spaces');
 async function msi(args) {
+ console.error(`Verifying msiexec ${args[0]}`);
  const child=Bun.spawn(['msiexec.exe',...args,'/qn','/norestart'],{stdout:'pipe',stderr:'pipe'});
- const code=await child.exited;
+ let timedOut=false;const timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL');},120_000);
+ let code;try {code=await child.exited;}finally{clearTimeout(timer);}
+ assert.equal(timedOut,false,`msiexec ${args[0]} timed out; installer log: ${await readFile(join(temp,'install.log'),'utf8').catch(()=>'(unavailable)')}`);
  assert.ok([0,3010].includes(code),`msiexec failed ${code}; installer log: ${await readFile(join(temp,'install.log'),'utf8').catch(()=>'(unavailable)')}`);
 }
 try {
@@ -31,7 +34,7 @@ try {
   await access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk'));
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=destination;
  } else throw new Error('Native installer test requires macOS or Windows');
- console.log(await command(['bun','run','test:portable'],root));
+ await command(['bun','run','test:portable'],root,{stream:true,timeoutMs:240_000});
  if(installed) {
   await msi(['/x',installer]);installed=false;
   await assert.rejects(access(join(destination,'codex-remote-web.exe')));

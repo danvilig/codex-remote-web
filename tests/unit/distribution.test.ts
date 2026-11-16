@@ -35,6 +35,10 @@ test('package commands forward newly selected immutable archive identities', asy
   try { expect(await command([process.execPath,'--eval','console.log(process.env.CRW_DISTRIBUTION_FIXTURE)'],process.cwd())).toBe('selected-archive'); }
   finally { if(before===undefined)delete process.env.CRW_DISTRIBUTION_FIXTURE;else process.env.CRW_DISTRIBUTION_FIXTURE=before; }
 });
+test('a hung package subprocess fails with its captured diagnostic instead of blocking CI', async () => {
+  const { command } = await import('../../scripts/distribution.ts');
+  await expect(command([process.execPath,'--eval','console.error("PACKAGE_HANG_FIXTURE"); setInterval(()=>{},1000)'],process.cwd(),{timeoutMs:2000})).rejects.toThrow(/timed out.*PACKAGE_HANG_FIXTURE/s);
+});
 test('native payload selection includes only needed Windows addons and repairs macOS helper mode', async () => {
   const { mkdtemp, mkdir, writeFile, readFile, stat, rm }=await import('node:fs/promises');
   const {tmpdir}=await import('node:os');const {copyPtyNative}=await import('../../scripts/distribution.ts');
