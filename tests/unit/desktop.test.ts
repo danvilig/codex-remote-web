@@ -175,7 +175,7 @@ test('built native bootstrap registers lifecycle state synchronously from its ap
     await buildDesktop(root);
     runInNewContext(await readFile(join(root, 'main.cjs'), 'utf8'), {
       require: name => name === 'electron' ? { app } : name === 'node:fs' ? { ...require(name), mkdirSync: () => {} } : require(name),
-      process: { ...process, argv: ['desktop-fixture'] }, exports: {}, module: { exports: {} },
+      process: { ...process, resourcesPath: root, argv: ['desktop-fixture'] }, exports: {}, module: { exports: {} },
     });
     expect(calls).toEqual(['application-path', ['userData', join(root, 'desktop')], 'lock', 'quit']);
   } finally { await rm(root, { recursive: true, force: true }); }
