@@ -7,6 +7,7 @@ import { createServer } from 'node:net';
 import { desktopConfig, desktopDirectory } from '../../src/shared/desktop-config.js';
 import { writePrivate } from '../../src/server/desktop/private-store.js';
 import { agentRequest } from '../../desktop/client.js';
+import WebSocket from 'ws';
 import { root } from '../helpers/browser-runtime.mjs';
 
 const executable = process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE;
@@ -27,6 +28,33 @@ await writePrivate(join(directory, 'config.json'), desktopConfig({ initialized: 
 const env = { ...process.env, PATH: process.env.PATH, HOME: home, USERPROFILE: home, CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), XDG_CONFIG_HOME: join(home, '.config'), XDG_CACHE_HOME: join(home, '.cache'), APPDATA: join(home, 'AppData/Roaming'), LOCALAPPDATA: join(home, 'AppData/Local'), CODEX_DESKTOP_BUN: process.execPath, ELECTRON_ENABLE_LOGGING: '1', ELECTRON_LOG_FILE: join(home, 'electron.log') };
 for (const key of Object.keys(env)) if (key.toUpperCase() === 'ELECTRON_RUN_AS_NODE') delete env[key];
 let application;
+async function probeWindowsLaunch() {
+  // Attach before entrypoint execution so native startup exceptions cannot be
+  // hidden behind a modal dialog or a missing Chromium debugging endpoint.
+  const child = Bun.spawn([executable, '--inspect-brk=0', '--remote-debugging-port=0'], { env, stdout: 'pipe', stderr: 'pipe' });
+  let socket;
+  const timer = setTimeout(() => { socket?.close(); child.kill(); }, 15000);
+  try {
+    let diagnostic = '';
+    for await (const chunk of child.stderr) {
+      diagnostic += Buffer.from(chunk).toString();
+      const endpoint = diagnostic.match(/Debugger listening on (ws:\/\/\S+)/)?.[1];
+      if (!socket && endpoint) {
+        socket = new WebSocket(endpoint);
+        await new Promise((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject); });
+        let id = 0;
+        const send = (method, params) => socket.send(JSON.stringify({ id: ++id, method, params }));
+        socket.on('message', bytes => {
+          const event = JSON.parse(String(bytes));
+          if (event.method === 'Runtime.exceptionThrown' || event.method === 'Runtime.consoleAPICalled') console.error('Native startup event:', JSON.stringify(event.params));
+          if (event.method === 'Debugger.paused') send('Debugger.resume');
+        });
+        send('Runtime.enable'); send('Debugger.enable'); send('Runtime.runIfWaitingForDebugger');
+      }
+    }
+    console.error('Native startup stderr:', diagnostic);
+  } finally { clearTimeout(timer); socket?.close(); child.kill(); }
+}
 const launch = async () => {
   // Like Playwright's Electron loader, prevent an elevated Windows CI process
   // from relaunching outside the automation pipes. Keep Chromium sandboxed.
@@ -35,6 +63,7 @@ const launch = async () => {
   try { return await electron.launch({ executablePath: executable, args, chromiumSandbox: true, env, timeout: 60000 }); }
   catch (error) {
     console.error('Electron launch diagnostics:', await readFile(env.ELECTRON_LOG_FILE, 'utf8').catch(() => '(no Chromium log)'));
+    if (windows) await probeWindowsLaunch();
     throw error;
   }
 };
