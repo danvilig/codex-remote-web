@@ -19,7 +19,7 @@ export function applicationRoot(start = standalone ? dirname(process.execPath) :
   }
 }
 export function nodeRuntime(env = process.env) {
-  return env.CODEX_WEBUI_NODE || (standalone ? join(applicationRoot(), 'runtime/node') : Bun.which('node', { PATH: env.PATH }));
+  return env.CODEX_WEBUI_NODE || (standalone ? join(applicationRoot(), process.platform === 'win32' ? 'runtime/node.exe' : 'runtime/node') : Bun.which('node', { PATH: env.PATH }));
 }
 export function gatewayCommand(root = applicationRoot(), executable = process.execPath, compiled = standalone) {
   return compiled ? [executable] : [executable, 'run', join(root, 'dist/server.js')];

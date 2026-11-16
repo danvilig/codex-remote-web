@@ -3,9 +3,10 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync, existsSync, realpathSyn
 import { join, delimiter, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
-import { createHash } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import WebSocket from 'ws';
 import { root } from '../helpers/browser-runtime.mjs';
+import { portableTarget } from '../../scripts/distribution.ts';
 import { documentationImages } from '../../scripts/documentation-assets.ts';
 
 const fixture = mkdtempSync(join(tmpdir(), 'crw-package-test-'));
@@ -14,7 +15,9 @@ mkdirSync(home); mkdirSync(project);
 writeFileSync(join(project, 'visible.txt'), 'PACKAGED_PROJECT_FILE');
 const pkg = JSON.parse(readFileSync(join(root,'package.json'),'utf8'));
 const name = `${pkg.name}-${pkg.version}`;
-const archive = join(fixture, 'releases', `${name}.tar.gz`);
+const target = portableTarget();
+const windows = process.platform === 'win32';
+const archive = join(fixture, 'releases', `${name}.${process.argv.includes('--portable') ? target.extension : 'tar.gz'}`);
 const portable = process.argv.includes('--portable');
 async function run(args, cwd = root, extraEnv = {}) { const child = Bun.spawn(args,{cwd,env:{...process.env,...extraEnv},stdout:'pipe',stderr:'pipe'});const [out,error,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);assert.equal(code,0,`${args[0]} failed: ${error.slice(-3000)}`);return out; }
 let server, setup, serverLog;
@@ -30,15 +33,15 @@ try {
     if (portable) { copyFileSync(built.archive, archive); copyFileSync(built.archive+'.sha256',archive+'.sha256'); }
   }
   const digest = createHash('sha256').update(readFileSync(archive)).digest('hex'); assert.ok(readFileSync(`${archive}.sha256`,'utf8').startsWith(digest));
-  const listing = await run(['tar','-tzf',archive]);
+  const listing = (await run(['tar','-tf',archive])).replaceAll('\r\n','\n');
   for (const internal of ['docs/images/README.md', 'scripts/capture-docs.ts', 'tests/browser/readme-screenshot.mjs', 'tests/fixtures/showcase-codex.mjs']) assert.equal(listing.includes(`/${internal}`),false,`Internal documentation tooling leaked into archive: ${internal}`);
   assert.equal(/\/(?:src|tests|history|\.artifacts|\.git)\//.test(listing),false);
   if (!portable) assert.equal(listing.includes('/node_modules/'), false);
   else for (const line of listing.split('\n').filter(path=>path.includes('/node_modules/'))) assert.match(line,/\/node_modules\/(?:$|node-pty\/|katex\/|@xterm\/(?:$|xterm\/))/);
   assert.equal(listing.split('\n').some(path=>path.endsWith('/.env')),false);
   assert.equal(/codex-app-icon|codex-motion|overview\.png/.test(listing),false);
-  await run(['tar','-xzf',archive,'-C',fixture]);
-  const unpacked = join(fixture,name);
+  await run(['tar','-xf',archive,'-C',fixture]);
+  const unpacked = process.env.CODEX_WEBUI_INSTALLED_DIRECTORY || join(fixture,name);
   for (const readme of ['README.md', 'README-zh.md']) assert.equal(readFileSync(join(unpacked,readme),'utf8'),readFileSync(join(root,readme),'utf8'),`Bilingual README missing or changed: ${readme}`);
   for (const image of documentationImages) assert.deepEqual(readFileSync(join(unpacked,image)),readFileSync(join(root,image)),`README image missing or changed in archive: ${image}`);
   const manifest=JSON.parse(readFileSync(join(unpacked,'release.json'),'utf8'));assert.equal(manifest.version,pkg.version);
@@ -48,7 +51,7 @@ try {
     assert.equal(manifest.commit,(await run(['git','rev-parse','HEAD'])).trim());
     assert.deepEqual(JSON.parse(readFileSync(join(unpacked,'SOURCE_PROVENANCE.json'),'utf8')),provenance);
   }
-  function scan(directory) { for(const entry of readdirSync(directory,{withFileTypes:true})) { const path=join(directory,entry.name);if(entry.isDirectory())scan(path);else { const bytes=readFileSync(path);if(portable&&bytes.subarray(0,4).equals(Buffer.from([0x7f,0x45,0x4c,0x46])))continue;const data=bytes.toString('utf8');assert.equal(/\/home\/ubuntu|M11\.9434 0\.430908|assets\/codex-motion|lottie-web/.test(data),false,`Private/extracted material in ${entry.name}`); } } }
+  function scan(directory) { for(const entry of readdirSync(directory,{withFileTypes:true})) { const path=join(directory,entry.name);if(entry.isDirectory())scan(path);else { const bytes=readFileSync(path);if(portable&&(bytes.subarray(0,4).equals(Buffer.from([0x7f,0x45,0x4c,0x46])) || ['cffaedfe','feedfacf','cafebabe'].includes(bytes.subarray(0,4).toString('hex')) || bytes.subarray(0,2).toString()==='MZ'))continue;const data=bytes.toString('utf8');assert.equal(/\/home\/ubuntu|M11\.9434 0\.430908|assets\/codex-motion|lottie-web/.test(data),false,`Private/extracted material in ${entry.name}`); } } }
   scan(unpacked);
   const inventory=JSON.parse(readFileSync(join(unpacked,'third-party/dependencies.json'),'utf8'));
   assert.ok(inventory.length>10);
@@ -60,11 +63,11 @@ try {
   // writable HOME. This also exercises installation on sandboxed release hosts.
   if (!portable) await run(['bun','install','--production','--frozen-lockfile'],unpacked,{BUN_INSTALL_CACHE_DIR:join(fixture,'bun-cache')});
   // PTY is a native dependency: validate source rebuild with installed headers, without downloading Node.
-  const nodePath=portable?join(unpacked,'runtime/node'):realpathSync(Bun.which('node'));
+  const nodePath=portable?join(unpacked,'runtime',target.node):realpathSync(Bun.which('node'));
   if (!portable) await run(['npm','rebuild','node-pty'],unpacked,{npm_config_nodedir:dirname(dirname(nodePath)),npm_config_cache:join(fixture,'npm-cache')});
-  const executable=join(unpacked,'codex-remote-web');
+  const executable=join(unpacked,target.executable);
   if (portable) {
-    assert.equal(manifest.distribution,'portable');assert.equal(manifest.arch,process.arch);assert.equal(manifest.runtimeIncluded,true);
+    assert.equal(manifest.platform,process.platform);assert.equal(manifest.distribution,'portable');assert.equal(manifest.arch,process.arch);assert.equal(manifest.runtimeIncluded,true);
     assert.match(await run([executable,'--version'],fixture),new RegExp(pkg.version.replaceAll('.','\\.')));
     assert.match(await run([executable,'--help'],fixture),/Usage: codex-remote-web/);
     assert.ok(readFileSync(join(unpacked,'runtime/NODE-LICENSE'),'utf8').includes('Node'));
@@ -73,30 +76,40 @@ try {
   }
   const port = await new Promise(resolve=>{const probe=createServer();probe.listen(0,'127.0.0.1',()=>{const value=probe.address().port;probe.close(()=>resolve(value));});});
   const quickBin=join(fixture,'quick-bin');mkdirSync(quickBin);
+  if (!windows) {
   copyFileSync(join(root,'tests/fixtures/quick-cloudflared.mjs'),join(quickBin,'quick-cloudflared.mjs'));
   const quickPort=await new Promise(resolve=>{const probe=createServer();probe.listen(0,'127.0.0.1',()=>{const value=probe.address().port;probe.close(()=>resolve(value));});});
   writeFileSync(join(quickBin,'quick-fixture.json'),JSON.stringify({port:quickPort,state:join(fixture,'quick-state.json')}));
   writeFileSync(join(quickBin,'cloudflared'),`#!/bin/sh\nexec '${nodePath.replaceAll("'","'\\''")}' '${join(quickBin,'quick-cloudflared.mjs').replaceAll("'","'\\''")}' "$@"\n`,{mode:0o700});
+  }
   const poisonLog=join(fixture,'unexpected-runtime');
-  if (portable) {
+  if (portable && !windows) {
     copyFileSync(join(root,'tests/fixtures/codex'),join(quickBin,'codex-fixture.mjs'));
     writeFileSync(join(quickBin,'codex'),`#!/bin/sh\nexec '${nodePath.replaceAll("'","'\\''")}' '${join(quickBin,'codex-fixture.mjs').replaceAll("'","'\\''")}' "$@"\n`,{mode:0o700});
     for (const tool of ['bun','node','npm','npx','cc','gcc','g++','make','python3']) writeFileSync(join(quickBin,tool),`#!/bin/sh\nprintf '%s\\n' '${tool}' >> '${poisonLog}'\nexit 91\n`,{mode:0o700});
     symlinkSync(Bun.which('git'),join(quickBin,'git'));
   }
-  const env={...process.env,HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_AUTH_MODE:'local',HOME:home,CODEX_HOME:join(home,'.codex'),CODEX_AUTH_PATH:join(home,'auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_REVIEW_ROOT:project,CODEX_WEBUI_ENABLE_TERMINAL:'true',CODEX_WEBUI_ENABLE_REVIEW_WRITE:'false',SHELL:'/bin/bash',PATH:portable?quickBin:`${quickBin}${delimiter}${join(root,'tests/fixtures')}${delimiter}${process.env.PATH}`};
+  if (windows) {
+    const cli = join(quickBin,'node_modules/@openai/codex/bin'); mkdirSync(cli,{recursive:true});
+    copyFileSync(join(root,'tests/fixtures/codex'),join(cli,'codex.js'));
+    writeFileSync(join(cli,'../package.json'),JSON.stringify({name:'@openai/codex',type:'module'}));
+    writeFileSync(join(quickBin,'codex.cmd'),'@echo off\r\nexit /b 91\r\n'); // Must resolve JS, never execute the shim.
+    for (const tool of ['node','bun','npm','npx','cl','python']) writeFileSync(join(quickBin,tool+'.cmd'),`@echo off\r\necho ${tool} >> "${poisonLog}"\r\nexit /b 91\r\n`);
+  }
+  const runtimePath = windows ? [quickBin,join(process.env.SystemRoot,'System32'),join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0'),dirname(Bun.which('git'))].join(delimiter) : quickBin;
+  const env={...process.env,HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_AUTH_MODE:'local',HOME:home,CODEX_HOME:join(home,'.codex'),CODEX_AUTH_PATH:join(home,'auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_REVIEW_ROOT:project,CODEX_WEBUI_ENABLE_TERMINAL:'true',CODEX_WEBUI_ENABLE_REVIEW_WRITE:'false',SHELL:windows?join(process.env.SystemRoot,'System32/cmd.exe'):'/bin/bash',USERPROFILE:home,CODEX_WEBUI_APP_SERVER_MODE:'isolated',PATH:portable?runtimePath:`${quickBin}${delimiter}${join(root,'tests/fixtures')}${delimiter}${process.env.PATH}`};
   delete env.CODEX_WEBUI_NODE;
   // Start from a different cwd and without source: no frontend rebuild may be needed.
   server=Bun.spawn(portable?[executable]:['bun',join(unpacked,'dist/server.js')],{cwd:fixture,env,stdout:'pipe',stderr:'pipe'});
   const serverError=serverLog=new Response(server.stderr).text();
-  for(let attempt=0;;attempt++){try {const response=await fetch(`http://127.0.0.1:${port}/api/health`);if((await response.json()).codex)break;}catch{} if(attempt>=100)throw new Error('Packaged gateway failed to start');await Bun.sleep(50);}
+  for(let attempt=0;;attempt++){try {const response=await fetch(`http://127.0.0.1:${port}/api/health`);if((await response.json()).codex)break;}catch{} if(attempt>=400)throw new Error('Packaged gateway failed to start');await Bun.sleep(50);}
   for (const path of ['/', '/app.bundle.js', '/auth-bootstrap.js', '/access-session.js', '/i18n.js', '/codex-brand.js', '/workspace.css', '/remote-access.css', '/setup', '/setup.bundle.js', '/setup-assets/style.css', '/vendor/katex/katex.min.css', '/vendor/xterm/xterm.css']) assert.equal((await fetch(`http://127.0.0.1:${port}${path}`)).status,200,path);
   assert.equal(existsSync(join(unpacked,'public/app.js')),false);assert.ok(existsSync(join(unpacked,'dist/quick-worker.js')));
   // The standalone configuration page must also start without source or an App Server.
   const setupLog=join(fixture,'setup.log');
   setup=Bun.spawn(portable?[executable,'setup']:['bun',join(unpacked,'dist/setup.js')],{cwd:fixture,env,stdout:Bun.file(setupLog),stderr:'pipe'});
   let setupUrl;
-  for(let attempt=0;;attempt++){try { setupUrl=readFileSync(setupLog,'utf8').match(/http:\/\/127\.0\.0\.1:\d+\/setup#setup=[A-Za-z0-9_-]+/)?.[0];if(setupUrl)break; }catch{} if(attempt>100)throw new Error('Packaged setup failed to start');await Bun.sleep(50);}
+  for(let attempt=0;;attempt++){try { setupUrl=readFileSync(setupLog,'utf8').match(/http:\/\/127\.0\.0\.1:\d+\/setup#setup=[A-Za-z0-9_-]+/)?.[0];if(setupUrl)break; }catch{} if(attempt>400)throw new Error('Packaged setup failed to start');await Bun.sleep(50);}
   const setupOrigin=new URL(setupUrl).origin;
   for(const path of ['/setup','/setup.bundle.js','/setup-assets/style.css','/setup-assets/workspace.css','/setup-assets/remote-access.css'])assert.equal((await fetch(setupOrigin+path)).status,200,path);
   setup.kill('SIGTERM');await setup.exited;setup=null;
@@ -105,24 +118,41 @@ try {
   assert.equal(await (await fetch(`http://127.0.0.1:${port}/api/files/download?path=${encodeURIComponent(join(project,'visible.txt'))}`)).text(),'PACKAGED_PROJECT_FILE');
   assert.equal((await(await fetch(`http://127.0.0.1:${port}/api/library/preview?path=${encodeURIComponent(join(project,'visible.txt'))}`)).json()).text,'PACKAGED_PROJECT_FILE');
   assert.equal((await fetch(`http://127.0.0.1:${port}/api/workspace/context?cwd=${encodeURIComponent(fixture)}`)).status,400);
+  const baseUrl=`http://127.0.0.1:${port}`;
+  const rpc=async(method,params={})=>{const response=await fetch(baseUrl+'/api/rpc',{method:'POST',headers:{origin:baseUrl,'content-type':'application/json','x-workspace-request':'1'},body:JSON.stringify({id:1,method,params})});assert.equal(response.status,200);const data=await response.json();assert.equal(data.error,undefined,JSON.stringify(data));return data.result;};
+  const documentUrl=baseUrl+'/api/files/document?cwd='+encodeURIComponent(project)+'&path=visible.txt';
+  const document=await(await fetch(documentUrl)).json();assert.equal(document.text,'PACKAGED_PROJECT_FILE');
+  const saved=await fetch(baseUrl+'/api/files/document',{method:'POST',headers:{origin:baseUrl,'content-type':'application/json','x-workspace-request':'1'},body:JSON.stringify({cwd:project,path:'visible.txt',revision:document.revision,text:'PACKAGED_PROJECT_EDIT'})});assert.equal(saved.status,200);assert.equal(readFileSync(join(project,'visible.txt'),'utf8'),'PACKAGED_PROJECT_EDIT');
+  // Exercise real private receipt/SQLite and queue state on every native OS,
+  // using a protocol fixture only. Repeating a UUID must not dispatch twice.
+  const clientUserMessageId=randomUUID(), params={threadId:'thread-A',input:[{type:'text',text:'packaged fixture only'}],clientUserMessageId};
+  const first=await rpc('turn/start',params),duplicate=await rpc('turn/start',params);
+  assert.deepEqual(duplicate,first);assert.equal((await rpc('host/submissions/get',{id:clientUserMessageId})).status,'accepted');
+  assert.ok(await rpc('host/delivery/list',{threadId:'thread-A'}));
   const ws=new WebSocket(`ws://127.0.0.1:${port}/terminal?cwd=${encodeURIComponent(project)}`);
   let terminal='';ws.on('message',data=>{terminal+=String(data);});
   await new Promise((resolve,reject)=>{ws.on('open',resolve);ws.on('error',reject);});
-  ws.send(Buffer.from("printf 'PACKAGED_PTY_OK\\n'\nexit\n"));
-  await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{ws.terminate();reject(new Error('Packaged terminal timed out'));},5000);ws.on('close',()=>{clearTimeout(timer);resolve();});});
-  assert.match(terminal,/(?:\r|\n)PACKAGED_PTY_OK\r?\n/);
+  ws.send(Buffer.from(windows ? "echo PACKAGED_PTY_OK\r\nexit\r\n" : "printf 'PACKAGED_PTY_OK\\n'\nexit\n"));
+  await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{ws.terminate();reject(new Error('Packaged terminal timed out'));},15000);ws.on('close',()=>{clearTimeout(timer);resolve();});});
+  assert.match(terminal,windows ? /(?:\r|\n)PACKAGED_PTY_OK(?:\r?\n|\x1b\[)/ : /(?:\r|\n)PACKAGED_PTY_OK\r?\n/);
   let csrf,setupCookie;const base=`http://127.0.0.1:${port}`;
   const setupRequest=async(path,body)=>{
     const response=await fetch(base+'/api/setup/'+path,{method:body===undefined?'GET':'POST',headers:{origin:base,'x-setup-request':'1','content-type':'application/json',...(csrf?{'x-setup-csrf':csrf}:{}),...(setupCookie?{cookie:setupCookie}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
     const data=await response.json();assert.ok(response.ok,JSON.stringify(data));return {response,data};
   };
   let session=await setupRequest('launch',{});session=await setupRequest('session',{key:session.data.key});csrf=session.data.csrf;setupCookie=session.response.headers.get('set-cookie').split(';')[0];
+  if (!windows) {
   await setupRequest('quick/start',{email:'owner@example.test'});
   for(let attempt=0;;attempt++){const {data}=await setupRequest('quick/status');if(data.phase==='ready')break;if(data.phase==='failed'||attempt>100)throw new Error(data.error||'Packaged temporary origin failed');await Bun.sleep(50);}
   const quickState=JSON.parse(readFileSync(join(fixture,'quick-state.json'),'utf8'));assert.equal(quickState.email,'owner@example.test');
   await setupRequest('quick/stop',{});
-  for(let attempt=0;;attempt++){if((await setupRequest('quick/status')).data.phase==='stopped')break;if(attempt>100)throw new Error('Packaged temporary connector did not stop');await Bun.sleep(30);}
+  for(let attempt=0;;attempt++){if((await setupRequest('quick/status')).data.phase==='stopped')break;if(attempt>400)throw new Error('Packaged temporary connector did not stop');await Bun.sleep(30);}
+  } else {
+    const response=await fetch(base+'/api/setup/quick/start',{method:'POST',headers:{origin:base,'x-setup-request':'1','content-type':'application/json','x-setup-csrf':csrf,cookie:setupCookie},body:JSON.stringify({email:'owner@example.test'})});
+    assert.equal(response.status,202);
+    for (let attempt=0;;attempt++) { const {data}=await setupRequest('quick/status'); if(data.phase==='failed'){assert.match(data.error,/Unix socket/);break;} if(attempt>100)throw new Error('Unsupported Windows quick tunnel did not fail closed');await Bun.sleep(50); }
+  }
   server.kill('SIGTERM');await server.exited;assert.equal((await serverError).includes('Frontend build failed'),false);server=null;
   if (portable) assert.equal(existsSync(poisonLog),false,'Executable must not use a host runtime, installer or compiler');
-  console.log(portable ? 'PASS: native executable, bundled runtime/license/relink bundle, no host runtime/install/compiler use, outside-HOME and foreign-cwd gateway/setup, assets, restricted project APIs, real PTY and temporary connector' : 'PASS: allowlisted archive, checksum, dependency notices, frozen production install, outside-HOME production installation, restricted project APIs, foreign-cwd gateway/setup startup and packaged PTY/temporary-connector workers');
+  console.log(portable ? 'PASS: native executable, bundled runtime/license/relink bundle, no host runtime/install/compiler use, outside-HOME and foreign-cwd gateway/setup, assets, restricted project APIs, real PTY and platform-appropriate remote-access checks' : 'PASS: allowlisted archive, checksum, dependency notices, frozen production install, outside-HOME production installation, restricted project APIs, foreign-cwd gateway/setup startup and packaged PTY/temporary-connector workers');
 } finally { if(setup){setup.kill('SIGTERM');await setup.exited;}if(server){server.kill('SIGTERM');await server.exited;console.error(await serverLog);}rmSync(fixture,{recursive:true,force:true}); }

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { connect } from 'node:net';
 import { WebSocket } from 'ws';
+import { codexCommand } from '../config/codex-command.js';
 import { appServerConnection } from '../config/app-server.js';
 
 export const nativeRequestTimeout = (method: string) =>
@@ -100,7 +101,8 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
   function start() {
     if (stopping || child?.exitCode === null) return;
     if (connection.mode === 'shared') { startShared(); return; }
-    const proc = spawn('codex', ['app-server', '--stdio'], { cwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    const [binary, ...prefix] = codexCommand();
+    const proc = spawn(binary, [...prefix, 'app-server', '--stdio'], { cwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
     child = proc; buffer = '';
     proc.stdout.setEncoding('utf8');
     proc.stdout.on('data', chunk => {

@@ -1,6 +1,6 @@
 import { cp, mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-const root = new URL('..', import.meta.url).pathname;
+const root = resolve(import.meta.dir, '..');
 const checks = process.argv.includes('--check');
 for (const [entry, output, target] of [['public/app.js', checks ? '.artifacts/check/app.js' : 'public/app.bundle.js', 'browser'], ['scripts/setup.ts', checks ? '.artifacts/check/setup.js' : 'dist/setup.js', 'bun'], ['public/setup.js', checks ? '.artifacts/check/setup.bundle.js' : 'public/setup.bundle.js', 'browser'], ['src/server/index.ts', checks ? '.artifacts/check/server.js' : 'dist/server.js', 'bun']]) {
   const result = await Bun.build({ entrypoints: [resolve(root, entry)], naming: output.split('/').at(-1), outdir: resolve(root, output, '..'), target: target as 'browser' | 'bun', packages: target === 'bun' ? 'external' : 'bundle' });

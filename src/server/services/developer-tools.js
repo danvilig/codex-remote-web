@@ -1,3 +1,4 @@
+import { privateAccess } from '../config/private-access.js';
 import { constants, openSync, closeSync, fstatSync, readFileSync, writeFileSync, renameSync, unlinkSync, fsyncSync, lstatSync, mkdirSync, realpathSync, readdirSync, linkSync, rmdirSync } from 'node:fs';
 import { mkdir, readFile, writeFile, rename, rm, lstat, readdir, open } from 'node:fs/promises';
 import { join, dirname, relative, resolve, isAbsolute, sep } from 'node:path';
@@ -25,7 +26,7 @@ export function createDeveloperTools(options) {
   function directory(path, create = false, privateMode = false) {
     if (create) mkdirSync(path, { recursive: true, mode: 0o700 });
     const stat = lstatSync(path);
-    if (!stat.isDirectory() || stat.isSymbolicLink() || (privateMode && (stat.uid !== process.getuid?.() || stat.mode & 0o077))) throw fail('TOOLS_UNSAFE_PATH', 403);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || (privateMode && !privateAccess(stat, path))) throw fail('TOOLS_UNSAFE_PATH', 403);
     return realpathSync(path);
   }
   function initialize() { directory(root, true, true); }
@@ -100,7 +101,7 @@ export function createDeveloperTools(options) {
     initialize();
     try {
       const path = join(root, 'worktrees.json'), stat = await lstat(path);
-      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.mode & 0o077 || stat.uid !== process.getuid?.() || stat.size > 256 * 1024) throw fail('TOOLS_UNSAFE_PATH', 403);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || !privateAccess(stat, path) || stat.size > 256 * 1024) throw fail('TOOLS_UNSAFE_PATH', 403);
       const data = JSON.parse(await readFile(path, 'utf8'));
       if (!Array.isArray(data)) throw fail('TOOLS_UNSAFE_PATH', 403);
       return data;
@@ -174,7 +175,7 @@ export function createDeveloperTools(options) {
 
   function snapshot(path) {
     const stat = lstatSync(path);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.uid !== process.getuid?.() || stat.mode & 0o077) throw fail('TOOLS_UNSAFE_PATH', 403);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || !privateAccess(stat, path)) throw fail('TOOLS_UNSAFE_PATH', 403);
     return { size: stat.size, ino: stat.ino, dev: stat.dev, mtimeMs: stat.mtimeMs };
   }
   async function cleanupCandidates() {

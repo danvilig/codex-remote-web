@@ -1,0 +1,82 @@
+name: Native platform packages
+on:
+  push:
+    branches: [develop, main, 'release/**']
+  pull_request:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      revision:
+        type: string
+        required: true
+      tag:
+        type: string
+        required: true
+concurrency:
+  group: native-packages-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  packages:
+    name: package-${{ matrix.os }}-${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: x64
+            runner: ubuntu-24.04
+          - os: linux
+            arch: arm64
+            runner: ubuntu-24.04-arm
+          - os: darwin
+            arch: arm64
+            runner: macos-15
+          - os: win32
+            arch: x64
+            runner: windows-2025
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 25
+    env:
+      TARGET_OS: ${{ matrix.os }}
+      TARGET_ARCH: ${{ matrix.arch }}
+      RELEASE_TAG: ${{ inputs.tag || '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision || '' }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - name: Rebuild Unix terminal against pinned Node headers
+        if: runner.os != 'Windows'
+        shell: bash
+        run: npm_config_nodedir="$(node -p 'require("path").dirname(require("path").dirname(process.execPath))')" npm rebuild node-pty
+      - name: Rebuild Windows ConPTY against pinned Node
+        if: runner.os == 'Windows'
+        run: npm rebuild node-pty
+      - run: bun run check
+      - run: bun test tests/unit/distribution.test.ts
+      - name: Verify NTFS privacy boundaries
+        if: runner.os == 'Windows'
+        run: bun test tests/live/windows-acl.test.ts
+      - name: Install pinned MSI build tools
+        if: runner.os == 'Windows'
+        run: dotnet tool install --global wix --version 5.0.2
+      - name: Build and verify actual native archives
+        run: bun scripts/package-platform.ts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.os }}-${{ matrix.arch }}
+          path: |
+            .artifacts/release/*.tar.gz*
+            .artifacts/release/*.zip*
+            .artifacts/release/*.dmg*
+            .artifacts/release/*.msi*
+          if-no-files-found: error

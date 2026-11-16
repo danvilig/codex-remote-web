@@ -1,3 +1,4 @@
+import { privateAccess } from '../config/private-access.js';
 import { Database } from 'bun:sqlite';
 import { constants } from 'node:fs';
 import { open, realpath } from 'node:fs/promises';
@@ -11,7 +12,7 @@ async function privateFile(path, create = false) {
   const fd = await open(path, constants.O_RDWR | constants.O_NOFOLLOW | (create ? constants.O_CREAT : 0), 0o600);
   try {
     const stat = await fd.stat();
-    if (!stat.isFile() || stat.uid !== process.getuid?.() || (stat.mode & 0o077) || stat.size > 1024 * 1024 || (create && stat.nlink !== 1)) throw unsafe();
+    if (!stat.isFile() || !privateAccess(stat, path) || stat.size > 1024 * 1024 || (create && stat.nlink !== 1)) throw unsafe();
     return create ? null : JSON.parse(await fd.readFile('utf8'));
   } finally { await fd.close(); }
 }
