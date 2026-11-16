@@ -14,9 +14,12 @@ export function privateAccess(stat, path) {
   try {
     const link = lstatSync(path);
     if (link.isSymbolicLink() || link.ino !== stat.ino || link.dev !== stat.dev) return false;
-    const script = "$ErrorActionPreference='Stop'; $acl=Get-Acl -LiteralPath $env:CRW_ACL_PATH; $sid=[System.Security.Principal.SecurityIdentifier]; $user=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $owner=$acl.GetOwner($sid).Value; $allow=@($acl.GetAccessRules($true,$true,$sid) | Where-Object { $_.AccessControlType -eq 'Allow' } | ForEach-Object { $_.IdentityReference.Value }); @{ user=$user; owner=$owner; allow=$allow } | ConvertTo-Json -Compress";
-    const executable = join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
-    const output = execFileSync(executable, ['-NoProfile', '-NonInteractive', '-Command', script], { env: { ...process.env, CRW_ACL_PATH: path }, encoding: 'utf8', timeout: 10000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
-    return privateWindowsAcl(JSON.parse(output));
+    return privateWindowsAcl(inspectWindowsAcl(path));
   } catch { return false; }
+}
+export function inspectWindowsAcl(path) {
+  const script = "$ErrorActionPreference='Stop'; $acl=Get-Acl -LiteralPath $env:CRW_ACL_PATH; $sid=[System.Security.Principal.SecurityIdentifier]; $user=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $owner=$acl.GetOwner($sid).Value; $allow=@($acl.GetAccessRules($true,$true,$sid) | Where-Object { $_.AccessControlType -eq 'Allow' } | ForEach-Object { $_.IdentityReference.Value }); @{ user=$user; owner=$owner; allow=$allow } | ConvertTo-Json -Compress";
+  const executable = join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  const output = execFileSync(executable, ['-NoProfile', '-NonInteractive', '-Command', script], { env: { ...process.env, CRW_ACL_PATH: path }, encoding: 'utf8', timeout: 10000, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  return JSON.parse(output);
 }

@@ -3,12 +3,14 @@ import { mkdtempSync, writeFileSync, lstatSync, rmSync, symlinkSync, mkdirSync }
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { privateAccess } from '../../src/server/config/private-access.js';
+import { privateAccess, inspectWindowsAcl } from '../../src/server/config/private-access.js';
 
 test.skipIf(process.platform !== 'win32')('NTFS private state rejects broad access and junctions on the native host', () => {
   const directory=mkdtempSync(join(tmpdir(),'crw-acl-')),file=join(directory,'state.json');
   try {
     writeFileSync(file,'{}');
+    const acl=inspectWindowsAcl(file);
+    console.log('Native ACL diagnostic',JSON.stringify(acl));
     expect(privateAccess(lstatSync(file),file)).toBe(true);
     execFileSync('icacls',[file,'/grant','*S-1-1-0:R'],{stdio:'pipe'});
     expect(privateAccess(lstatSync(file),file)).toBe(false);

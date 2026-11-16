@@ -1,4 +1,4 @@
-import { cp, mkdir, readdir } from 'node:fs/promises';
+import { chmod, cp, mkdir, readdir } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 
 export function portableTarget(platform = process.platform, arch = process.arch) {
@@ -29,7 +29,7 @@ export async function copyPtyNative(source: string, destination: string, platfor
   async function copy(directory: string, target: string) {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
       if (entry.isDirectory()) { if (!/^(?:obj|obj\.target|\.deps)$/.test(entry.name)) await copy(join(directory, entry.name), join(target, entry.name)); }
-      else if (/\.(?:node|dll|exe)$/.test(entry.name) || entry.name === 'spawn-helper') { await mkdir(target, { recursive: true }); await cp(join(directory, entry.name), join(target, entry.name)); }
+      else if (/\.(?:node|dll|exe)$/.test(entry.name) || entry.name === 'spawn-helper') { await mkdir(target, { recursive: true }); await cp(join(directory, entry.name), join(target, entry.name)); if (entry.name === 'spawn-helper') await chmod(join(target, entry.name), 0o755); }
     }
   }
   await copy(folder, join(destination, 'build/Release'));
