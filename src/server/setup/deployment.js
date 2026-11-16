@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { mkdir, readFile, writeFile, rename, rm, chmod } from 'node:fs/promises';
@@ -17,7 +18,7 @@ const unitQuote = value => quote(String(value).replaceAll('%', '%%'));
 export class NativeDeployment {
   constructor({ env = process.env, root = applicationRoot(), run, probe = fetch } = {}) {
     this.env = env; this.root = root; this.probe = probe;
-    this.home = env.HOME;
+    this.home = env.HOME || homedir();
     this.directory = join(this.home, '.config/codex-remote-web');
     this.receiptPath = join(this.directory, 'setup-state.json');
     this.envPath = join(this.directory, 'remote.env');

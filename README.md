@@ -54,17 +54,34 @@ These screenshots show the current WebUI using an isolated demo project and simu
 
 ## Quick start
 
-### Download an executable (recommended)
+### Download an installer or executable (recommended)
 
-Download the archive for your Linux machine and its `.sha256` file from [Releases](https://github.com/danvilig/codex-remote-web/releases): `linux-x64` for x86_64, `linux-arm64` for aarch64. These packages include the executable, Bun/Node runtimes, web assets and a prebuilt terminal module; **no Bun/Node installation or compilation is required**. Keep the extracted directory intact. Requires a configured Codex CLI and Git; remote access also needs cloudflared. Supported native systems use glibc (validated on Ubuntu 24.04); 32-bit ARM and Alpine/musl are not supported.
+Download your package and its `.sha256` from [Releases](https://github.com/danvilig/codex-remote-web/releases). Each executable package includes Bun/Node, web assets and the native terminal module; **no runtime installation or compilation is required**. Keep the extracted directory intact. Install and configure Codex CLI and Git separately; remote access also requires cloudflared.
+
+| Platform | Package | Requirements |
+| --- | --- | --- |
+| Linux x64 / arm64 | `linux-x64.tar.gz` / `linux-arm64.tar.gz` | glibc; validated on Ubuntu 24.04 |
+| macOS Apple Silicon | `macos-arm64.dmg` (installer) / `.tar.gz` (portable) | macOS 15 or newer; Intel Macs are not supported |
+| Windows x64 | `windows-x64.msi` (installer) / `.zip` (portable) | Windows 11, NTFS, Windows PowerShell; ARM64 is not supported |
+
+For macOS, open the DMG, drag **Codex Remote Web.app** into Applications, and open it to start the gateway in Terminal and open your browser. For Windows, run the per-user MSI and use **Codex Remote Web** / **Open WebUI** in the Start menu; uninstall from Installed apps. Neither installer adds a background service. Close the Terminal/console or press Ctrl+C to stop the gateway. Portable archives remain available. macOS/Windows downloads are unsigned; review the checksum and source, and use your system's per-file approval only for a download you trust. Never disable Gatekeeper or SmartScreen globally. Linux 32-bit ARM and Alpine/musl are not supported.
 
 ```sh
-archive=codex-remote-web-0.2.0-alpha.2-linux-x64.tar.gz
-# For arm64 use codex-remote-web-0.2.0-alpha.2-linux-arm64.tar.gz
+archive=codex-remote-web-0.2.0-alpha.3-linux-x64.tar.gz
+# For arm64 use codex-remote-web-0.2.0-alpha.3-linux-arm64.tar.gz
 sha256sum -c "$archive.sha256"
 tar -xzf "$archive"
-cd codex-remote-web-0.2.0-alpha.2
+cd codex-remote-web-0.2.0-alpha.3
 CODEX_WEBUI_CWD=/path/to/your/project ./codex-remote-web
+```
+
+On macOS, extract the `macos-arm64` archive and run the same command. On Windows, extract the zip, open PowerShell in its folder, and run:
+
+```powershell
+# Compare with the hash in the adjacent .sha256 file before extracting.
+Get-FileHash .\codex-remote-web-0.2.0-alpha.3-windows-x64.zip -Algorithm SHA256
+$env:CODEX_WEBUI_CWD = 'C:\path\to\your\project'
+.\codex-remote-web.exe
 ```
 
 Open `http://127.0.0.1:8899` for the full WebUI. Use Settings → Remote access for public access; `./codex-remote-web setup` opens only the standalone setup wizard. `--help` and `--version` are available.
@@ -124,11 +141,11 @@ The terminal prints a local link with a one-time credential. API Token permissio
 
 ## Deployment and scope
 
-Native Linux services are the primary deployment method on x86_64 and arm64; Docker is an alternative. The wizard cannot configure host systemd from inside a container. The default image includes neither Codex nor cloudflared. macOS release support has not yet been validated.
+Native Linux services are the primary deployment method on x86_64 and arm64; Docker is an alternative. The wizard cannot configure host systemd from inside a container. The default image includes neither Codex nor cloudflared. macOS arm64 and Windows x64 executable packages are also available. The fixed-domain automatic service wizard requires Linux user systemd; on macOS/Windows configure Tunnel + Access manually and use `cloudflare-access` authentication. Protected temporary access is available on Linux/macOS; Windows temporary access is not supported. See [platform setup](docs/deployment/PLATFORMS.md).
 
 The server listens on loopback by default, with public access through a protected Tunnel. Access authentication operates separately from Codex command approvals, Linux permissions, and sandboxing.
 
-Sites deployment, image generation, cloud Library, plugin account OAuth, and full MCP interactions remain on the roadmap. See the [release notes](docs/releases/0.2.0-alpha.2.md#已知限制) for more limitations.
+Sites deployment, image generation, cloud Library, plugin account OAuth, and full MCP interactions remain on the roadmap. See the [release notes](docs/releases/0.2.0-alpha.3.md) for more limitations.
 
 ## Documentation and development
 
@@ -137,7 +154,7 @@ The detailed guides below are currently in Chinese.
 - [Configuration](docs/CONFIGURATION.md) / [Cloudflare deployment](docs/deployment/CLOUDFLARE.md)
 - [Development and testing](DEVELOPMENT.md) / [Contributing](CONTRIBUTING.md)
 - [Architecture](docs/ARCHITECTURE.md) / [Roadmap](docs/ROADMAP.md)
-- [Release process](docs/RELEASING.md) / [Acceptance report](docs/releases/0.2.0-alpha.2-acceptance.md) / [Changelog](CHANGELOG.md)
+- [Release process](docs/RELEASING.md) / [Acceptance report](docs/releases/0.2.0-alpha.3.md) / [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md) / [Git workflow](docs/GIT_WORKFLOW.md) / [Agent rules](AGENTS.md)
 - [Security](SECURITY.md)
 

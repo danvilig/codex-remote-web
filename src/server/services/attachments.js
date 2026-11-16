@@ -1,3 +1,4 @@
+import { privateAccess } from '../config/private-access.js';
 import {
   mkdir,
   open,
@@ -46,8 +47,7 @@ export function createAttachmentService(options) {
     if (
       !stat.isDirectory() ||
       stat.isSymbolicLink() ||
-      stat.uid !== process.getuid?.() ||
-      stat.mode & 0o077
+      !privateAccess(stat, path)
     )
       throw new Error("Unsafe attachment directory");
     return path;
@@ -74,8 +74,7 @@ export function createAttachmentService(options) {
       const stat = await fd.stat();
       if (
         !stat.isFile() ||
-        stat.uid !== process.getuid?.() ||
-        stat.mode & 0o077 ||
+        !privateAccess(stat, path) ||
         stat.size > limit
       )
         throw new Error("Unsafe attachment file");
@@ -274,8 +273,7 @@ export function createAttachmentService(options) {
       if (
         !stat.isFile() ||
         stat.size !== item.bytes ||
-        stat.uid !== process.getuid?.() ||
-        stat.mode & 0o077
+        !privateAccess(stat, path)
       )
         throw new Error("Unsafe attachment file");
       return { item, path, fd };

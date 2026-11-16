@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { nodeRuntime, quickWorkerPath } from '../config/paths.js';
 import { SetupError } from './cloudflare.js';
 const exec = promisify(execFile);
@@ -67,7 +67,7 @@ export function createQuickConnector({ binary, args, directory, env, onMessage, 
   return { closed, stop() { if (worker.connected) worker.send({ type: 'stop' }, () => {}); else worker.kill('SIGTERM'); } };
 }
 export class QuickTunnel {
-  constructor({ workspace, directory = join(process.env.HOME, '.config/codex-remote-web'), env = process.env, preflight = quickPreflight, validate = validateQuickConfiguration, connector = createQuickConnector, startupMs = 90000 } = {}) {
+  constructor({ workspace, directory = join(process.env.HOME || homedir(), '.config/codex-remote-web'), env = process.env, preflight = quickPreflight, validate = validateQuickConfiguration, connector = createQuickConnector, startupMs = 90000 } = {}) {
     this.workspace = workspace; this.directory = directory; this.env = env; this.preflight = preflight; this.validate = validate; this.connector = connector; this.startupMs = startupMs;
     this.state = { phase: 'stopped', publicOrigin: null, email: null, startedAt: null, error: null };
   }

@@ -1,9 +1,10 @@
 import { cp, mkdir, mkdtemp, readdir, readFile, rm, writeFile, access } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { resolve, join, basename } from 'node:path';
+import { pack } from './distribution.ts';
 import { documentationImages } from './documentation-assets.ts';
 
-const root = new URL('..', import.meta.url).pathname;
+const root = resolve(import.meta.dir, '..');
 const run = async (args: string[], cwd = root) => { const child = Bun.spawn(args, { cwd, stdout: 'pipe', stderr: 'pipe' }); const [output, error, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]); if (code) throw new Error(`${args[0]} failed: ${error}`); return output.trim(); };
 const pkg = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
 if (!/^\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?$/.test(pkg.version)) throw new Error('Invalid release version');
@@ -27,7 +28,7 @@ const files = [
   ...documentationImages,
   'dist/setup.js', 'public/setup.html', 'public/setup.bundle.js', 'public/remote-access.css', 'dist/server.js', 'dist/terminal-worker.js', 'dist/quick-worker.js', 'bun.lock', '.env.example', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'README-zh.md', 'CHANGELOG.md', 'SECURITY.md',
   'public/index.html', 'public/app.bundle.js', 'public/style.css', 'public/workspace.css', 'public/favicon.svg', 'public/auth-bootstrap.js', 'public/access-session.js', 'public/i18n.js', 'public/codex-brand.js',
-  'DEVELOPMENT.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'docs/ARCHITECTURE.md', 'docs/ROADMAP.md', 'docs/CONFIGURATION.md', 'docs/RELEASING.md', 'docs/deployment/CLOUDFLARE.md', 'docs/deployment/SETUP.md', 'ops/systemd/codex-remote-web.service.example', 'ops/systemd/environment.example', 'ops/cloudflare/ingress.yml.example',
+  'DEVELOPMENT.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'docs/ARCHITECTURE.md', 'docs/ROADMAP.md', 'docs/CONFIGURATION.md', 'docs/RELEASING.md', 'docs/deployment/CLOUDFLARE.md', 'docs/deployment/SETUP.md', 'docs/deployment/PLATFORMS.md', 'ops/systemd/codex-remote-web.service.example', 'ops/systemd/environment.example', 'ops/cloudflare/ingress.yml.example',
   'docs/licenses/BUN.md', 'AGENTS.md', 'docs/GIT_WORKFLOW.md',
   `docs/releases/${pkg.version}.md`, ...(await Bun.file(join(root, `docs/releases/${pkg.version}-acceptance.md`)).exists() ? [`docs/releases/${pkg.version}-acceptance.md`] : []), ...(provenance ? ['SOURCE_PROVENANCE.json'] : []),
 ];
@@ -58,7 +59,7 @@ try {
   const commit = await run(['git', 'rev-parse', 'HEAD']);
   await writeFile(join(stage, 'release.json'), JSON.stringify({ name: pkg.name, version: pkg.version, commit, developmentCommit: provenance?.developmentCommit || commit, source: provenance ? 'public-snapshot' : 'development', referenceProject: provenance?.referenceProject || provenance?.upstream || null, dirty, bun: '1.4.4', node: '24.22.2', codexTested: '0.164.0' }, null, 2) + '\n');
   const archive = join(outputDir, `${name}.tar.gz`);
-  await run(['tar', '--sort=name', '--mtime=@0', '--owner=0', '--group=0', '--numeric-owner', '-czf', archive, '-C', temp, name]);
+  await pack(stage, archive);
   const digest = createHash('sha256').update(await readFile(archive)).digest('hex');
   await writeFile(`${archive}.sha256`, `${digest}  ${basename(archive)}\n`);
   console.log(JSON.stringify({ archive, sha256: digest, dependencies: inventory.length, dirty }));

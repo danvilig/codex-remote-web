@@ -1,6 +1,6 @@
 # 本地 Alpha 发布流程
 
-目标版本为 `0.2.0-alpha.2`。本地脚本只准备候选或 CI Artifact，不自动推送、打标签、上传 GitHub Release 或重启服务。公开仓库为 `danvilig/codex-remote-web`，首次公开从独立快照开始，后续遵循 [Git 开发流程](GIT_WORKFLOW.md)：日常 PR 进入 `develop`，准备发版才创建 `release/<version>`，稳定后通过 PR 合入 `main`。标签指向已通过 Verify 的 `main` 提交，由维护者单独授权发布。
+目标版本为 `0.2.0-alpha.3`。本地脚本只准备候选或 CI Artifact，不自动推送、打标签、上传 GitHub Release 或重启服务。公开仓库为 `danvilig/codex-remote-web`，首次公开从独立快照开始，后续遵循 [Git 开发流程](GIT_WORKFLOW.md)：日常 PR 进入 `develop`，准备发版才创建 `release/<version>`，稳定后通过 PR 合入 `main`。标签指向已通过 Verify 的 `main` 提交，由维护者单独授权发布。
 
 ## 公开源码快照
 
@@ -88,10 +88,18 @@ bun run candidate:prepare
 
 两个工作流共享 `verify:release`，均执行依赖审计、临时访问、WebKit 预检和合成性能回归；有 cloudflared 时执行离线验证。验证后调用 `candidate:prepare`，导出并扫描干净独立快照后构建。手动流程只上传候选 CI Artifact，未调用公开发布 API。Artifact 的可见性由目标仓库设置决定。
 
-## Linux GitHub Release
+## 跨平台 GitHub Release
 
-`.github/workflows/release.yml` 独立于候选脚本。经维护者确认发布后，将版本标签（例如 `v0.2.0-alpha.2`）指向已经通过 Verify 的公开提交，再推送该标签；也可以针对已有标签手动触发工作流。工作流检查标签与 `package.json` 版本一致，并固定检出的提交，不能将未通过 Verify 的提交发布。
+Alpha.3 目标为 Linux x64/arm64、macOS Apple Silicon（macOS 15+）和 Windows x64（Windows 11）。不构建 Intel Mac、Windows ARM64 或 musl 包；现有 Alpha.2 标签和附件保持不变。
 
-构建矩阵使用原生 `ubuntu-24.04`（x64）和 `ubuntu-24.04-arm`（arm64）runner，各自完成冻结安装、PTY 重建、构建、单元测试，并验证两种实际归档。`deployment-linux-*` 是需安装依赖的 JS/静态资源部署包；`linux-*` 是包含编译程序、Bun/Node 运行时、静态资源和预编译终端模块的可执行包。`bun run release:portable -- --output-dir <new-directory>` 生成本机架构包；`bun run test:portable` 验证没有宿主机运行时/安装器/编译器时的完整运行。可用 `CODEX_WEBUI_PORTABLE_ARCHIVE` 指定待验收的实际归档。可执行包保留 `dist/portable.js` 和重链接说明、运行时许可证及版本来源。当前不声明支持 32 位 ARM 或 musl/Alpine 原生部署。
+`.github/workflows/platform-packages.yml` 在 PR 中生成可审阅 Artifact。发布工作流复用同一矩阵，使用原生 `ubuntu-24.04`、`ubuntu-24.04-arm`、`macos-15` 和 `windows-2025` runner。只有固定版本标签、受保护 main 历史和该提交成功的 main-push Verify 才能发布；不能使用未合并的 PR Artifact 冒充正式 Release。
 
-两端均通过后才创建 GitHub 预发布版本，上传四个归档（两种架构各有可执行包和 `deployment` 包）、各自使用纯文件名的 `.sha256` 和汇总 `SHA256SUMS`。仅下载一种架构时校验对应 `.sha256`；下载全部归档时可运行 `sha256sum -c SHA256SUMS`。GitHub 自动提供标签源码下载，无需再上传重复源码包。本流程不部署到现有服务，也不修改 Tunnel。
+每个平台校验冻结安装、构建、目标架构和实际便携归档。回归覆盖异目录启动、完整页面及静态资源、受限文件读取/编辑、私有回执及 UUID 去重、持久队列访问、真实终端。Linux/macOS 验证保护临时连接器；Windows 验证 Unix socket 临时访问明确失败，不降级为公开隧道。Linux 完整 Verify、依赖审计、浏览器和 Docker 验证继续运行。
+
+安装包使用已通过测试的便携包构建。macOS runner 挂载 DMG、复制 `.app` 到含空格路径、校验 Info.plist/启动脚本，并从安装目录运行回归。Windows 使用固定 WiX 5.0.2 构建 per-user MSI，实际静默安装到含空格路径、检查开始菜单、运行同样回归、卸载并确认程序和快捷方式清理。Windows 另验证 NTFS 宽泛 ACL 和 junction 拒绝。GUI 双击及 TCC/Gatekeeper/SmartScreen 提示仍需真实桌面人工验证，自动化不冒充人工验收。
+
+Alpha.3 共八个安装/归档文件：macOS DMG、Windows MSI、四个系统/架构的便携包，以及两种 Linux 架构的 JS 部署包。Windows 便携包为 zip，其余为 tar.gz；每个文件附带同名 `.sha256`，汇总 `SHA256SUMS` 共八项。下载一个包时只核对它的校验文件，下载全部包时可用 `sha256sum -c SHA256SUMS`。GitHub 自动提供源码下载，无需重复上传源码包。
+
+本机便携构建使用 `bun run release:portable -- --output-dir <new-directory>`，必须与目标系统及架构一致；`CODEX_WEBUI_PORTABLE_ARCHIVE` 指定待验收的实际归档，`bun run test:portable` 验证不依赖宿主机 Bun/Node、安装器或编译器。包保留运行时许可证、依赖声明、`dist/portable.js` 和重链接说明。不包含 Codex、cloudflared 或凭据。
+
+Mac/Windows 包暂未代码签名或公证。固定域名自动服务向导仍限 Linux systemd，其他平台手动配置 Tunnel + Access；安装器不配置系统服务、不改动凭据和工作区。安装、权限边界及限制见 [跨平台配置](deployment/PLATFORMS.md)。

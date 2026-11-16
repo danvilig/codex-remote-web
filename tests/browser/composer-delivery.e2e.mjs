@@ -10,7 +10,12 @@ await Promise.all([mkdir(home),mkdir(project)]);
 const port=await new Promise(resolve=>{const server=createServer();server.listen(0,'127.0.0.1',()=>{const p=server.address().port;server.close(()=>resolve(p));});}),base=`http://127.0.0.1:${port}`;
 const server=Bun.spawn(['bun','src/server/index.ts'],{cwd:root,stdout:'ignore',stderr:'ignore',env:{...process.env,HOST:'127.0.0.1',PORT:String(port),HOME:home,CODEX_HOME:home,CODEX_AUTH_PATH:join(home,'missing-auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_AUTH_MODE:'local',CODEX_WEBUI_APP_SERVER_MODE:'isolated',CODEX_WEBUI_FIXTURE_CONVERSATION_TOOLS:'true',CODEX_WEBUI_FIXTURE_TURN_DURATION_MS:'4500',CODEX_WEBUI_FIXTURE_LOG:log,PATH:join(root,'tests/fixtures')+delimiter+process.env.PATH}});
 let browser,page,phase='startup';
-const records=async()=>(await readFile(log,'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
+const records=async()=>{
+  const text=await readFile(log,'utf8');
+  // The fixture is still appending while we poll. Only newline-terminated
+  // records are committed; malformed complete records must still fail.
+  return text.slice(0,text.lastIndexOf('\n')+1).split('\n').filter(Boolean).map(JSON.parse);
+};
 const wait=async predicate=>{for(let i=0;!await predicate();i++){if(i>250)throw Error('Timed out: '+phase);await Bun.sleep(40);}};
 try{
   await wait(async()=>{try{return(await(await fetch(base+'/api/health')).json()).codex;}catch{return false;}});

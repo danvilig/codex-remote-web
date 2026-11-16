@@ -1,3 +1,5 @@
+import { syncDirectory } from '../config/durability.js';
+import { privateAccess } from '../config/private-access.js';
 import { acquirePrivateLock } from './private-lock.js';
 import { mkdir, open, lstat, readFile, rename, unlink } from 'node:fs/promises';
 import { readFileSync } from 'node:fs';
@@ -45,8 +47,7 @@ export function createDeliveryStore(privateRoot) {
     if (
       !stat.isFile() ||
       stat.isSymbolicLink() ||
-      stat.uid !== process.getuid?.() ||
-      stat.mode & 0o077 ||
+      !privateAccess(stat, path) ||
       stat.size > 8 * 1024 * 1024
     )
       throw new Error('Unsafe delivery queue state');
@@ -83,8 +84,7 @@ export function createDeliveryStore(privateRoot) {
     if (
       !stat.isDirectory() ||
       stat.isSymbolicLink() ||
-      stat.uid !== process.getuid?.() ||
-      stat.mode & 0o077
+      !privateAccess(stat, directory)
     )
       throw new Error('Unsafe delivery queue directory');
     const token = randomUUID();
@@ -110,12 +110,7 @@ export function createDeliveryStore(privateRoot) {
         }
         try {
           await rename(temporary, file);
-          const dir = await open(directory, 'r');
-          try {
-            await dir.sync();
-          } finally {
-            await dir.close();
-          }
+          await syncDirectory(directory);
         } finally {
           await unlink(temporary).catch(() => {});
         }
