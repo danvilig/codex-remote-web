@@ -42,6 +42,7 @@ jobs:
         env:
           CODEX_WEBUI_REQUIRE_CLOUDFLARED: '1'
       - run: bun run test:desktop
+      - run: bun tests/browser/macos-guide.e2e.mjs
       - run: docker build -t codex-remote-web:verify .
       - run: bun run test:docker
       - name: Use checked-out commit identity for the local snapshot

@@ -102,4 +102,4 @@ Beta.1 共十个安装/归档文件：macOS DMG、Windows MSI、两种 Linux 架
 
 本机便携构建使用 `bun run release:portable -- --output-dir <new-directory>`，必须与目标系统及架构一致；`CODEX_WEBUI_PORTABLE_ARCHIVE` 指定待验收的实际归档，`bun run test:portable` 验证不依赖宿主机 Bun/Node、安装器或编译器。包保留运行时许可证、依赖声明、`dist/portable.js` 和重链接说明。不包含 Codex、cloudflared 或凭据。
 
-桌面包暂未代码签名或公证。桌面应用在 macOS/Windows/Linux 管理固定域名网关与受保护临时访问；无桌面的自动部署仍使用 Linux 用户级 systemd。登录自启默认勾选，在首次保存时注册，注销后停止；应用不自动接管已有 headless/systemd 部署。升级前停止冲突网关并保留数据；macOS 删除应用前显式移除后台组件，Windows/Linux 卸载清理自有后台组件。安装、权限边界及限制见 [跨平台配置](deployment/PLATFORMS.md)。
+Mac 测试包在最终应用组装和权限归一化后，对全部 Mach-O、嵌套 bundle 与外层应用由内向外进行 ad-hoc 签名，再验证最终 DMG 内及复制后的签名；它仍无 Apple Developer ID 签名或公证，Windows 包也尚无发布者签名。不可将 ad-hoc 校验通过描述成 Gatekeeper 信任通过。安装窗口采用原生 Finder 固定布局，详细说明在带动效的 `Install Guide.html` 中。原生 CI 读取压缩成品的背景与图标位置并保留截图；Safari 下载与手动允许须在真实 Mac 验收。原始图标和背景由 `bun scripts/macos-artwork.ts` 使用锁定 Playwright Chromium 生成，构建仅取两个指定 PNG，不引入第三方品牌素材。桌面应用在 macOS/Windows/Linux 管理固定域名网关与受保护临时访问；无桌面的自动部署仍使用 Linux 用户级 systemd。登录自启默认勾选，在首次保存时注册，注销后停止；应用不自动接管已有 headless/systemd 部署。升级前停止冲突网关并保留数据；macOS 删除应用前显式移除后台组件，Windows/Linux 卸载清理自有后台组件。安装、权限边界及限制见 [跨平台配置](deployment/PLATFORMS.md)。

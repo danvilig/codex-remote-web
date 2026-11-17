@@ -6,7 +6,15 @@ The macOS DMG, Windows per-user MSI and Linux desktop DEB open a shared Electron
 
 双击应用后，在“网关设置”选择项目目录、端口及可选的 Codex/cloudflared 程序路径，检测依赖并保存，再启动网关。沿用当前用户的 Codex 账户和配置；桌面窗口不管理模型提供商/API 密钥。Codex 和 Git 必需，cloudflared 仅公网访问需要。网页终端默认关闭，开启后以当前用户权限运行。
 
-macOS 15+ 仅支持 Apple Silicon；Windows 11 仅支持 x64、NTFS 和 Windows PowerShell；Linux 桌面首轮基线为 Ubuntu 24.04 GNOME，提供 x64/arm64 DEB。Linux 原有服务器部署归档与便携 CLI 不变。桌面包尚未签名/公证；不要全局禁用 Gatekeeper、SmartScreen 或 Chromium 沙箱。Linux DEB 安装正确归属的 Chromium sandbox helper，无需修改主机 user namespace 策略。
+macOS 15+ 仅支持 Apple Silicon；Windows 11 仅支持 x64、NTFS 和 Windows PowerShell；Linux 桌面首轮基线为 Ubuntu 24.04 GNOME，提供 x64/arm64 DEB。Linux 原有服务器部署归档与便携 CLI 不变。桌面包尚无 Apple Developer ID 签名/公证或 Windows 发布者签名；不要全局禁用 Gatekeeper、SmartScreen 或 Chromium 沙箱。Linux DEB 安装正确归属的 Chromium sandbox helper，无需修改主机 user namespace 策略。
+
+### macOS 安装与首次打开
+
+打开 DMG，将左侧应用拖入右侧 Applications；等待复制完成，推出磁盘，再从“应用程序”启动。Finder 安装窗口使用静态背景，随包的 `Install Guide.html` 提供带轻量动画的中英指南，支持键盘和系统“减少动态效果”。Codex CLI、Git 须另行安装配置。
+
+新的 Mac 测试包在最终资源和权限确定后，对 Electron、网关/Bun、Node、PTY 及完整 `.app` 由内向外进行 ad-hoc 完整性签名，并强制校验。这不是 Apple Developer ID 签名或公证，首次仍可能被 Gatekeeper 阻止。先尝试打开，再按 [Apple 指引](https://support.apple.com/102445)进入“系统设置 → 隐私与安全性 → 仍要打开”并确认；只允许来源可信的构建。
+
+若仍提示“已损坏”，请保留安装包和 SHA-256，反馈原始提示、macOS 版本及芯片型号。不要通过全局禁用 Gatekeeper 或清除 quarantine 属性绕过错误。旧版本包不因本次修复而获得有效签名。原生 CI 验证签名、篡改拒绝、DMG 挂载后的 Finder 布局、复制后的签名及真实桌面运行；Safari 下载隔离与人工信任流程需在真实 Mac 上另行验收。
 
 “概览”提供启动、停止、重启和打开浏览器工作区。关闭设置窗口后隐藏到托盘；退出托盘只退出界面，网关继续运行。Linux 桌面若不支持托盘，关闭按钮会最小化到任务栏，也可从应用菜单重新打开设置。设置在网关停止时仍可打开；变更运行参数前先停止网关。
 

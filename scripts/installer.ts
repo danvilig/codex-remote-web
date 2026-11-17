@@ -1,10 +1,11 @@
 // Build native installers from the already-tested portable archive. No user
 // data, services, credentials, remote resources or host configuration is copied.
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { command, portableTarget, installerGuid } from './distribution.ts';
 import { desktopPackage } from './desktop-package.ts';
+import { createMacDmg } from './macos-dmg.ts';
 const root=resolve(import.meta.dir,'..'),target=portableTarget();
 if (!['darwin','win32'].includes(process.platform)) throw new Error('Native installers require macOS or Windows');
 const pkg=await Bun.file(join(root,'package.json')).json(),name=`${pkg.name}-${pkg.version}`;
@@ -20,14 +21,7 @@ try {
  const desktopOutput=join(temp,'desktop-output'); await mkdir(desktopOutput);
  const desktop=await desktopPackage(unpacked,desktopOutput);
  if(process.platform==='darwin') {
-  const image=join(temp,'image');await mkdir(image);
-  await cp(join(desktop,'Codex Remote Web.app'),join(image,'Codex Remote Web.app'),{recursive:true,verbatimSymlinks:true});
-  await symlink('/Applications',join(image,'Applications'));
-  await command(['plutil','-lint',join(image,'Codex Remote Web.app/Contents/Info.plist')],root);
-  const kilobytes=Number((await command(['du','-sk',image],root)).split(/\s+/)[0]);
-  if(!Number.isFinite(kilobytes)||kilobytes<=0)throw new Error('Cannot size DMG payload');
-  const megabytes=Math.max(512,Math.ceil(kilobytes/1024*1.35+64));
-  await command(['hdiutil','create','-size',`${megabytes}m`,'-fs','HFS+','-volname','Codex Remote Web','-srcfolder',image,'-ov','-format','UDZO',installer],root);
+  await createMacDmg(join(desktop,'Codex Remote Web.app'),installer,temp,root);
  } else {
   unpacked=desktop;
   const xml=(v:string)=>v.replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;').replaceAll('>','&gt;');

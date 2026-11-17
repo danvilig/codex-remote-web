@@ -63,6 +63,9 @@ jobs:
         run: npm rebuild node-pty
       - run: bun run check
       - run: bun test tests/unit/distribution.test.ts
+      - name: Verify macOS signature repair and tamper detection
+        if: runner.os == 'macOS'
+        run: bun test tests/live/macos-signing.test.ts
       - run: bun test tests/unit/desktop.test.ts tests/unit/desktop-session-recovery.test.ts tests/unit/desktop-uninstall.test.ts tests/unit/desktop-isolated.test.ts
       - name: Install Linux desktop runtime dependencies
         if: runner.os == 'Linux'
@@ -84,4 +87,5 @@ jobs:
             .artifacts/release/*.dmg*
             .artifacts/release/*.msi*
             .artifacts/release/*.deb*
+            .artifacts/macos-installer-native.png
           if-no-files-found: error

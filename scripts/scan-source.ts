@@ -2,7 +2,7 @@
 // paths and rule names only; never echo suspected credentials or file contents.
 import { resolve, join } from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { documentationImages } from './documentation-assets.ts';
+import { documentationImages, installerImages } from './documentation-assets.ts';
 
 const flag = process.argv.indexOf('--directory');
 if (flag !== -1 && !process.argv[flag + 1]) throw new Error('--directory requires a path');
@@ -56,7 +56,7 @@ for (const entry of objects.split('\n').filter(Boolean)) {
   if (type !== 'blob' && type !== 'commit') continue;
   if (type === 'blob') {
     blobs++;
-    if (path !== '.env.example' && !documentationImages.has(path) && forbiddenPath.test(path)) findings.push({ file: path, rule: 'forbidden-path' });
+    if (path !== '.env.example' && !documentationImages.has(path) && !installerImages.has(path) && forbiddenPath.test(path)) findings.push({ file: path, rule: 'forbidden-path' });
     const size = Number(await git(['cat-file', '-s', oid]));
     if (size > 8 * 1024 * 1024) { findings.push({ file: path, rule: 'oversized-source-blob' }); continue; }
   }
