@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, lstat, readFile, readlink, rm, writeFile } from 'node:fs/promises';
+import { mkdir, lstat, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -13,13 +13,14 @@ const xml = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', 
 const systemdQuote = value => '"' + String(value).replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('%', '%%').replaceAll('$', '$$') + '"';
 export function sessionDefinition({ platform = process.platform, home = homedir(), executable, args = [], env = process.env }) {
   for (const value of [executable, ...args]) if (typeof value !== 'string' || /[\0\r\n]/.test(value)) throw new Error('Invalid background launcher');
+  const launcher = { executable, args: [...args] };
   args = [...args, '--background-agent'];
   if (platform === 'darwin') return {
-    platform, path: join(home, 'Library/LaunchAgents', label + '.plist'),
+    ...launcher, platform, path: join(home, 'Library/LaunchAgents', label + '.plist'),
     content: `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>Label</key><string>${label}</string><key>ProgramArguments</key><array>${[executable, ...args].map(value => `<string>${xml(value)}</string>`).join('')}</array><key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict><key>ThrottleInterval</key><integer>20</integer></dict></plist>\n`,
   };
   if (platform === 'linux') return {
-    platform, path: join(home, '.config/systemd/user/codex-remote-web-desktop.service'),
+    ...launcher, platform, path: join(home, '.config/systemd/user/codex-remote-web-desktop.service'),
     content: `${marker}\n[Unit]\nDescription=Codex Remote Web desktop gateway\nPartOf=graphical-session.target\nAfter=graphical-session.target\nStartLimitIntervalSec=60\nStartLimitBurst=3\n[Service]\nExecStart=${[executable, ...args].map(systemdQuote).join(' ')}\n${['DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR'].filter(key => env[key] && !/[\r\n]/.test(env[key])).map(key => `Environment=${systemdQuote(key + '=' + env[key])}\n`).join('')}Restart=on-failure\nRestartSec=5\nTimeoutStopSec=15\nKillMode=control-group\nUMask=0077\n[Install]\nWantedBy=graphical-session.target\n`,
   };
   if (platform !== 'win32') throw new Error('Unsupported desktop system');
@@ -27,6 +28,60 @@ export function sessionDefinition({ platform = process.platform, home = homedir(
   const quote = value => '"' + String(value).replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/g, '$1$1') + '"';
   const name = 'Codex Remote Web Desktop ' + createHash('sha256').update(home).digest('hex').slice(0, 12);
   return { platform, name, executable, arguments: args.map(quote).join(' ') };
+}
+// Match the complete generated launcher, including legacy Unix records which
+// predate explicit executable metadata. Login environment values may change.
+export function sessionOwnedBy(saved, executable, options = {}) {
+  if (!saved || (saved.executable !== undefined && saved.executable !== executable)) return false;
+  const expected = sessionDefinition({ ...options, executable, env: {} });
+  if (saved.platform !== expected.platform) return false;
+  if (expected.platform === 'win32') return saved.executable === executable && saved.name === expected.name && saved.arguments === expected.arguments;
+  if (saved.path !== expected.path || typeof saved.content !== 'string') return false;
+  if (expected.platform !== 'linux') return saved.content === expected.content;
+  const boundary = expected.content.indexOf('\nRestart=on-failure\n') + 1;
+  const prefix = expected.content.slice(0, boundary), suffix = expected.content.slice(boundary);
+  if (!saved.content.startsWith(prefix) || !saved.content.endsWith(suffix)) return false;
+  const block = saved.content.slice(prefix.length, saved.content.length - suffix.length);
+  if (!block) return true;
+  if (!block.endsWith('\n')) return false;
+  const keys = ['DISPLAY', 'WAYLAND_DISPLAY', 'XAUTHORITY', 'XDG_RUNTIME_DIR'];
+  let previous = -1;
+  for (const line of block.slice(0, -1).split('\n')) {
+    const match = /^Environment="(DISPLAY|WAYLAND_DISPLAY|XAUTHORITY|XDG_RUNTIME_DIR)=((?:[^"\\]|\\["\\])*)"$/.exec(line);
+    const index = match ? keys.indexOf(match[1]) : -1;
+    if (index <= previous) return false;
+    previous = index;
+  }
+  return true;
+}
+async function enablement(expected) {
+  const wants = join(dirname(expected), 'graphical-session.target.wants');
+  const parent = await lstat(wants).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+  if (parent && (!parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== process.getuid())) throw new Error('Unsafe background enablement directory');
+  const link = join(wants, 'codex-remote-web-desktop.service');
+  const metadata = parent && await lstat(link).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+  const target = metadata && metadata.isSymbolicLink() ? await readlink(link) : null;
+  if (metadata && (!metadata.isSymbolicLink() || metadata.uid !== process.getuid() || resolve(wants, target) !== expected)) throw new Error('Background enablement changed; preserve it before continuing');
+  return { link, target };
+}
+async function removeOffline(spec, current, recordPath, saved, link, target) {
+  let recordRemoved = false, linkRemoved = false, unitRemoved = false;
+  try {
+    // Fail before touching startup if the private state directory is read-only.
+    await rm(recordPath); recordRemoved = true;
+    if (target !== null) { await rm(link); linkRemoved = true; }
+    if (current !== null) { await rm(spec.path); unitRemoved = true; }
+  } catch (error) {
+    const failures = [];
+    // Exclusive restoration must never overwrite a file installed meanwhile.
+    for (const restore of [
+      () => unitRemoved && writeFile(spec.path, current, { mode: 0o600, flag: 'wx' }),
+      () => linkRemoved && symlink(target, link),
+      () => recordRemoved && writeFile(recordPath, JSON.stringify(saved, null, 2) + '\n', { mode: 0o600, flag: 'wx' }),
+    ]) { try { await restore(); } catch (failure) { failures.push(failure); } }
+    if (failures.length) throw new AggregateError([error, ...failures], 'Background removal and rollback failed', { cause: error });
+    throw error;
+  }
 }
 async function powershell(script, env) {
   const binary = join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
@@ -37,8 +92,9 @@ export async function configureSession(enabled, options) {
   const run = options.run || exec;
   const saved = await readPrivate(recordPath);
   const restore = () => configureSession(!!saved, { ...options, definition: saved || definition });
-  if (enabled && JSON.stringify(saved) === JSON.stringify(definition)) return async () => {};
+  const unchanged = enabled && JSON.stringify(saved) === JSON.stringify(definition);
   if (definition.platform === 'win32') {
+    if (unchanged) return async () => {};
     const spec = enabled ? definition : saved;
     if (!spec) return async () => {};
     const payload = Buffer.from(JSON.stringify(spec)).toString('base64');
@@ -52,23 +108,15 @@ export async function configureSession(enabled, options) {
     if (metadata && (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.uid !== process.getuid())) throw new Error('Unsafe background registration; preserve it before continuing');
     const current = await readFile(spec.path, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
     if (current !== null && (!saved || current !== saved.content)) throw new Error('Background registration changed; preserve it before continuing');
+    const expected = sessionDefinition(options).path;
+    if (spec.path !== expected) throw new Error('Background registration path changed; preserve it before continuing');
+    const enabledLink = definition.platform === 'linux' ? await enablement(expected) : null;
+    if (unchanged && current === spec.content && (definition.platform !== 'linux' || enabledLink.target !== null)) return async () => {};
     if (!enabled && definition.platform === 'linux') {
-      const expected = join(options.home || homedir(), '.config/systemd/user/codex-remote-web-desktop.service');
-      if (spec.path !== expected) throw new Error('Background registration path changed; preserve it before continuing');
       const runtime = options.env?.XDG_RUNTIME_DIR || process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`;
       const bus = await lstat(join(runtime, 'bus')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
       if (!bus) {
-        // No logged-in manager: remove only our verified enablement link and
-        // unit. systemctl --user disable can itself require a live user bus.
-        const wants = join(dirname(expected), 'graphical-session.target.wants');
-        const parent = await lstat(wants).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
-        if (parent && (!parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== process.getuid())) throw new Error('Unsafe background enablement directory');
-        const link = join(wants, 'codex-remote-web-desktop.service');
-        const metadata = parent && await lstat(link).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
-        if (metadata && (!metadata.isSymbolicLink() || metadata.uid !== process.getuid() || resolve(wants, await readlink(link)) !== expected)) throw new Error('Background enablement changed; preserve it before continuing');
-        if (metadata) await rm(link);
-        await rm(spec.path, { force: true });
-        await rm(recordPath, { force: true });
+        await removeOffline(spec, current, recordPath, saved, enabledLink.link, enabledLink.target);
         return restore;
       }
     }

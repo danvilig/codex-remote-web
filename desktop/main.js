@@ -6,8 +6,9 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { desktopDirectory } from '../src/shared/desktop-config.js';
 import { agentRequest } from './client.js';
-import { privateDirectory, readPrivate } from '../src/server/desktop/private-store.js';
+import { privateDirectory } from '../src/server/desktop/private-store.js';
 import { configureSession } from './session.js';
+import { uninstallBackground } from './uninstall.js';
 
 const background = process.argv.includes('--background-agent');
 const uninstall = process.argv.includes('--uninstall-background');
@@ -84,13 +85,7 @@ else {
   trace('native application ready');
   if (uninstall) {
     try {
-      const registration = await readPrivate(join(directory, 'session.json'));
-      const descriptor = await readPrivate(join(directory, 'agent.json'));
-      if (registration?.executable === process.execPath || descriptor?.installation === process.execPath) {
-        await agentRequest(directory, 'stop').catch(() => {});
-        if (registration?.executable === process.execPath) await configureSession(false, sessionOptions);
-        await agentRequest(directory, 'shutdown').catch(() => {});
-      }
+      await uninstallBackground(sessionOptions, process.execPath);
       app.exit(0);
     } catch { app.exit(1); }
   } else if (background) {

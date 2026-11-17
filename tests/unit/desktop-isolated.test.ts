@@ -17,14 +17,14 @@ async function alive(pid) {
     return true;
   } catch (error) { if (['ESRCH', 'ENOENT'].includes(error.code)) return false; throw error; }
 }
-async function fixture(run, missing = false, closePipes = false) {
+async function fixture(run, missing = false, closePipes = false, missingRuntime = false) {
   const home = await mkdtemp(join(tmpdir(), 'desktop-isolated-')), pids = join(home, 'pids');
   const bridgePath = resolve(import.meta.dir, '../../src/server/bridge/app-server.ts');
   const code = `import {createAppServerBridge} from ${JSON.stringify(bridgePath)};
     const bridge=createAppServerBridge({cwd:process.cwd(),clientInfo:{name:'fixture',version:'0'},connection:{mode:'isolated'},onMessage:()=>{},onStatus:s=>console.log(JSON.stringify(s)),onHome:()=>{}});
     const {createInterface}=await import('node:readline');
     createInterface({input:process.stdin}).on('line',async line=>{if(line==='stop'){await bridge.stop();process.exit(0)}else if(line==='crash')bridge.send({method:'fixture/crash'});});bridge.start();`;
-  const child = spawn(process.execPath, ['--eval', code], { env: { ...process.env, HOME: home, CODEX_WEBUI_DESKTOP_CHILD: '1', CODEX_WEBUI_CODEX: missing ? join(home, 'missing-codex') : resolve(import.meta.dir, '../fixtures/desktop-isolated.mjs'), FIXTURE_PIDS: pids, FIXTURE_CLOSE_PIPES: closePipes ? '1' : '0' }, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--eval', code], { env: { ...process.env, HOME: home, CODEX_WEBUI_DESKTOP_CHILD: '1', ...(missingRuntime ? { CODEX_WEBUI_NODE: join(home, 'missing-node') } : {}), CODEX_WEBUI_CODEX: missing ? join(home, 'missing-codex') : resolve(import.meta.dir, '../fixtures/desktop-isolated.mjs'), FIXTURE_PIDS: pids, FIXTURE_CLOSE_PIPES: closePipes ? '1' : '0' }, detached: true, stdio: ['pipe', 'pipe', 'pipe'] });
   let output = '', errors = '', exited = false;
   child.stdout.on('data', data => { output += data; }); child.stderr.on('data', data => { errors += data; }); child.once('exit', () => { exited = true; });
   const records = async () => (await readFile(pids, 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(JSON.parse);
@@ -66,3 +66,27 @@ unix('gateway process-group SIGKILL also reaps tools that close their pipes', as
   await until(async () => !await alive(p.native) && !await alive(p.tool), 'closed-pipe orphan cleanup');
   expect(await alive(p.tool)).toBe(false);
 }, false, true), 20000);
+
+unix('supervisor-only SIGKILL is fully reaped before immediate gateway stop returns', async () => fixture(async f => {
+  await until(() => f.output().includes('connected'), 'initialize'); const [p] = await f.records();
+  process.kill(p.group, 'SIGKILL');
+  f.child.stdin.write('stop\n'); await until(f.exited, 'stop after supervisor kill');
+  expect(await alive(p.native)).toBe(false); expect(await alive(p.tool)).toBe(false);
+}, false, true), 20000);
+
+unix('supervisor-only SIGKILL reaps its old group without killing the reconnected server', async () => fixture(async f => {
+  await until(() => f.output().includes('connected'), 'initialize'); const [p] = await f.records();
+  process.kill(p.group, 'SIGKILL');
+  await until(async () => (await f.records()).length >= 2 && (f.output().match(/"status":"connected"/g) || []).length >= 2, 'supervisor reconnect');
+  await until(async () => !await alive(p.tool), 'old supervisor group escalation');
+  const [, replacement] = await f.records();
+  expect(await alive(p.native)).toBe(false); expect(await alive(replacement.native)).toBe(true); expect(await alive(replacement.tool)).toBe(true);
+  f.child.stdin.write('stop\n'); await until(f.exited, 'stop replacement');
+  expect(await alive(replacement.tool)).toBe(false);
+}, false, true), 20000);
+
+
+unix('missing supervisor runtime reports disconnected and remains stoppable', async () => fixture(async f => {
+  await until(() => f.output().includes('disconnected'), 'runtime spawn failure');
+  expect(f.exited()).toBe(false); f.child.stdin.write('stop\n'); await until(f.exited, 'stop after runtime spawn failure');
+}, false, false, true), 20000);

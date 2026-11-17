@@ -16,19 +16,10 @@ intact: public assets, runtime and terminal workers accompany the executable.
 Codex CLI is required; cloudflared is needed for remote access.`);
 } else if (command === 'uninstall-desktop') {
   const { desktopDirectory } = await import('../shared/desktop-config.js');
-  const { agentRequest } = await import('../../desktop/client.js');
-  const { configureSession } = await import('../../desktop/session.js');
-  const { readPrivate } = await import('./desktop/private-store.js');
-  const { join } = await import('node:path');
+  const { uninstallBackground } = await import('../../desktop/uninstall.js');
   const directory = desktopDirectory();
-  const registration = await readPrivate(join(directory, 'session.json'));
-  const descriptor = await readPrivate(join(directory, 'agent.json'));
   const installation = process.argv[3];
-  if (!installation || registration?.executable === installation || descriptor?.installation === installation) {
-    await agentRequest(directory, 'stop').catch(() => {});
-    if (!installation || registration?.executable === installation) await configureSession(false, { directory, executable: process.execPath });
-    await agentRequest(directory, 'shutdown').catch(() => {});
-  }
+  await uninstallBackground({ directory, executable: installation || process.execPath }, installation);
 } else if (command === 'agent') {
   const { startDesktopAgent } = await import('./desktop/agent.js');
   try { await startDesktopAgent(); }

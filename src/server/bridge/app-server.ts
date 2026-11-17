@@ -19,12 +19,28 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
   let restart: ReturnType<typeof setTimeout> | undefined;
   const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
   const rejectPending = (message: string) => { for (const item of pending.values()) item.reject(transportError(message, 'RPC_DISCONNECTED')); pending.clear(); };
-  function terminate(signal: NodeJS.Signals = 'SIGTERM') {
-    if (!child || child.exitCode !== null) return;
-    if (process.platform !== 'win32' && child.pid) {
-      try { process.kill(-child.pid, signal); return; } catch { /* wrapper fallback */ }
+  const lifecycles = new Set<Promise<void>>();
+  function terminateProc(proc: ChildProcessWithoutNullStreams, signal: NodeJS.Signals = 'SIGTERM') {
+    if (process.platform !== 'win32' && proc.pid) {
+      try { process.kill(-proc.pid, signal); return; } catch { /* wrapper fallback */ }
     }
-    child.kill(signal);
+    if (proc.exitCode === null && proc.signalCode === null) proc.kill(signal);
+  }
+  function terminate(signal: NodeJS.Signals = 'SIGTERM') {
+    if (child) terminateProc(child, signal);
+  }
+  async function reapGroup(proc: ChildProcessWithoutNullStreams) {
+    if (process.platform === 'win32' || !proc.pid) return;
+    // Capture the old group. Reconnect may already own a different child by
+    // the time escalation runs. Keep this timer alive even if stdio closes.
+    const group = -proc.pid;
+    try { process.kill(group, 'SIGTERM'); } catch { return; }
+    const deadline = Date.now() + 1500;
+    while (Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+      try { process.kill(group, 0); } catch { return; }
+    }
+    try { process.kill(group, 'SIGKILL'); } catch { /* group already gone */ }
   }
   function send(message: any) {
     if (stopping) throw transportError('Codex WebUI is shutting down', 'RPC_NOT_SENT', 'not-sent');
@@ -107,6 +123,16 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     const command = [binary, ...prefix, 'app-server', '--stdio'];
     const proc = spawn(supervised ? nodeRuntime() : binary, supervised ? [isolatedWorkerPath()] : command.slice(1), { cwd, env: process.env, stdio: supervised ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' }) as ChildProcessWithoutNullStreams;
     child = proc; buffer = '';
+    let finish: () => void;
+    const lifecycle = new Promise<void>(resolve => { finish = resolve; });
+    lifecycles.add(lifecycle);
+    void lifecycle.then(() => lifecycles.delete(lifecycle));
+    let reaping = false;
+    const reap = () => {
+      if (reaping) return;
+      reaping = true;
+      void reapGroup(proc).finally(finish);
+    };
     proc.stdin.on('error', () => { if (child === proc) terminate(); });
     proc.stdout.setEncoding('utf8');
     proc.stdout.on('data', chunk => {
@@ -119,41 +145,38 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     });
     proc.stderr.setEncoding('utf8');
     proc.stderr.on('data', data => console.error('[codex app-server]', String(data).trimEnd()));
-    proc.on('error', (error: NodeJS.ErrnoException) => console.error('[codex-webui] cannot start Codex app-server', error.code || 'UNKNOWN'));
-    proc.once('exit', () => {
-      // An unexpectedly exited stdio server can leave its own tool descendants
-      // holding its stdio pipes open, so waiting for `close` would deadlock
-      // recovery. Reap only our isolated group on `exit`, never shared daemons.
-      if (process.platform !== 'win32' && proc.pid) {
-        try { process.kill(-proc.pid, 'SIGTERM'); } catch { /* already exited */ }
-      }
+    proc.on('error', (error: NodeJS.ErrnoException) => {
+      console.error('[codex-webui] cannot start Codex app-server', error.code || 'UNKNOWN');
+      if (!proc.pid) reap();
     });
+    proc.once('exit', reap);
     proc.on('close', (code, signal) => {
       rejectPending('Codex app-server exited');
       if (child === proc) child = null;
       onStatus({ status: 'disconnected', code, signal });
       if (!stopping) restart = setTimeout(start, 1000);
     });
-    if (supervised) proc.send!({ type: 'start', command, cwd }, error => { if (error && child === proc) terminate(); });
+    if (supervised && typeof proc.send === 'function') proc.send({ type: 'start', command, cwd }, error => { if (error && child === proc) terminate(); });
     request('initialize', { clientInfo, capabilities: { experimentalApi: true } }).then(result => {
       if (child !== proc || stopping) return;
       send({ method: 'initialized', params: {} });
       if (typeof result?.codexHome === 'string') onHome(result.codexHome);
       onStatus({ status: 'connected' });
-    }).catch(() => { console.error('[codex-webui] initialize failed'); terminate(); });
+    }).catch(() => { console.error('[codex-webui] initialize failed'); if (child === proc) terminateProc(proc); });
   }
   async function stop() {
     stopping = true; clearTimeout(restart); rejectPending('Codex WebUI is shutting down');
     // The shared daemon and its turns belong to all connected Codex clients.
     // Gateway shutdown closes only this connection, never the daemon process.
     if (socket) { socket.close(); socket = null; }
-    if (!child) return;
     const proc = child;
-    await new Promise<void>(resolve => {
-      const timer = setTimeout(() => { terminate('SIGKILL'); resolve(); }, 4000);
+    if (proc) await new Promise<void>(resolve => {
+      const timer = setTimeout(() => { terminateProc(proc, 'SIGKILL'); resolve(); }, 4000);
       proc.once('close', () => { clearTimeout(timer); resolve(); });
-      terminate();
+      terminateProc(proc);
     });
+    // Includes exited supervisors whose old descendants outlived their pipes.
+    await Promise.all([...lifecycles]);
   }
   return { start, request, send, stop };
 }
