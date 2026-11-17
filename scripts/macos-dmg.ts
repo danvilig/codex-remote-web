@@ -52,7 +52,7 @@ export async function createMacDmg(app: string, installer: string, temp: string,
   // Retina pixels. A single 1x PNG gets enlarged and blurs all baked-in text.
   await command(['tiffutil', '-cathidpicheck', join(root, 'desktop/assets/dmg-background.png'), join(root, 'desktop/assets/dmg-background@2x.png'), '-out', join(image, '.background/installer.tiff')], root);
   await writeFile(join(image, 'Install Guide.html'), installationHelp);
-  await command(['plutil', '-lint', join(image, 'Codex Remote Web.app/Contents/Info.plist')], root);
+  await command(['plutil', '-lint', join(app, 'Contents/Info.plist')], root);
   const kilobytes = Number((await command(['du', '-sk', image], root)).split(/\s+/)[0]) + Number((await command(['du', '-sk', app], root)).split(/\s+/)[0]);
   if (!Number.isFinite(kilobytes) || kilobytes <= 0) throw new Error('Cannot size DMG payload');
   const megabytes = Math.max(512, Math.ceil(kilobytes / 1024 * 1.35 + 64));
