@@ -155,8 +155,8 @@ final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegat
         container.wantsLayer = true
         webView.frame = container.bounds; webView.autoresizingMask = [.width, .height]
         container.addSubview(webView)
-        let controller = NSViewController(); controller.view = container
-        window.contentViewController = controller; window.center()
+        let viewController = NSViewController(); viewController.view = container
+        window.contentViewController = viewController; window.center()
         webView.load(URLRequest(url: desktopURL))
     }
     func showSettings() { window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
