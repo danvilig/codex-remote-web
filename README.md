@@ -11,7 +11,7 @@ A self-hosted browser workspace using **Cloudflare Tunnel + Access**. Set up rem
 - **Public access, configured in your browser.** Connect your Cloudflare account, choose a domain and Tunnel, specify the allowed email address, then preview and deploy. No need to expose the WebUI port directly.
 - **No domain required.** Start a temporary HTTPS address protected by an email verification code. Copy the link or scan its QR code; no Cloudflare account or API Token required.
 - **Work across devices.** Desktop, tablet, and phone layouts; English and Chinese; light and dark themes; resizable sidebars and a maximizable right panel.
-- **Connect to native Codex.** Prefer the shared Desktop/CLI App Server to continue the same conversation, with streaming responses, tool progress, approvals, native temporary Side chat, and Fork.
+- **Connect to native Codex.** Join the shared Desktop/CLI App Server to continue the same conversation, with streaming responses, tool progress, approvals, native temporary Side chat, and Fork.
 - **Development tools in your browser.** A file tree, syntax highlighting, code editing, Markdown preview editing, attachments, plugin and skill management, project instructions, and Git worktrees.
 - **Clear sending feedback and recoverable queues.** Steer a running task or queue a message, with a persistent server queue, synchronization across tabs, and submission reconciliation. Uncertain results pause instead of being retried automatically.
 
@@ -105,7 +105,7 @@ bun run dev
 
 Open `http://127.0.0.1:8899`. `bun run start` runs the source server; for production, run `bun run build` followed by `bun run start:production`. Application resources resolve relative to the installation, independently of the directory you launch from.
 
-When used alongside Codex Desktop/CLI, the WebUI prefers an existing local shared App Server. Explicitly setting `CODEX_WEBUI_APP_SERVER_MODE=shared` is recommended. Without a shared service, the default mode supports an isolated process; two isolated processes cannot write to the same conversation simultaneously. See [shared server configuration](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话).
+The WebUI defaults to the local shared Desktop/CLI App Server and waits if its socket is not ready. Legacy `auto` mode also waits; it never starts a second writer based on startup order. Start the native daemon before use, or explicitly set `CODEX_WEBUI_APP_SERVER_MODE=isolated` for a standalone deployment. Two isolated processes cannot write the same conversation simultaneously. See [shared server configuration](docs/CONFIGURATION.md#与-codex-desktop--cli-共享会话).
 
 ## Set up public access
 

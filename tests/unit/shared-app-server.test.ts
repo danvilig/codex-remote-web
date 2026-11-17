@@ -2,15 +2,19 @@ import { test, expect } from 'bun:test';
 import { createServer } from 'node:http';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { WebSocketServer, WebSocket } from 'ws';
 import { appServerConnection } from '../../src/server/config/app-server.js';
 import { createAppServerBridge, nativeRequestTimeout } from '../../src/server/bridge/app-server.ts';
 
-test('connection selection preserves standalone compatibility and refuses invalid or implicit remote endpoints',()=>{
+test('connection selection waits for the shared daemon and derives paths from each user environment',()=>{
   const home=mkdtempSync('/tmp/crw-bridge-config-');
   try{
     const env={HOME:home},socket=join(home,'.codex/app-server-control/app-server-control.sock');
-    expect(appServerConnection(env)).toEqual({mode:'isolated',socket:null});
+    expect(appServerConnection(env)).toEqual({mode:'shared',socket});
+    expect(appServerConnection({...env,CODEX_WEBUI_APP_SERVER_MODE:'auto'})).toEqual({mode:'shared',socket});
+    expect(appServerConnection({...env,CODEX_HOME:join(home,'custom-state')})).toEqual({mode:'shared',socket:join(home,'custom-state/app-server-control/app-server-control.sock')});
+    expect(appServerConnection({})).toEqual({mode:'shared',socket:join(homedir(),'.codex/app-server-control/app-server-control.sock')});
     mkdirSync(join(home,'.codex/app-server-control'),{recursive:true});writeFileSync(socket,'fixture');
     expect(appServerConnection(env)).toEqual({mode:'shared',socket});
     expect(appServerConnection({...env,CODEX_WEBUI_APP_SERVER_MODE:'isolated'}).mode).toBe('isolated');
@@ -58,6 +62,39 @@ test('shared bridge rejoins one server, forwards approval IDs, and closes only i
     await a.bridge.stop();await b.bridge.stop();
     for(const client of wss.clients)client.terminate();
     wss.close();await new Promise<void>(resolve=>server.close(()=>resolve()));rmSync(home,{recursive:true,force:true});
+  }
+});
+
+test('a gateway started before the daemon waits, reconnects, and never replays rejected input', async () => {
+  const home = mkdtempSync('/tmp/crw-delayed-daemon-');
+  const connection = appServerConnection({ CODEX_HOME: home });
+  expect(connection.mode).toBe('shared'); // Fail before spawning anything on the old fallback behavior.
+  mkdirSync(join(home, 'app-server-control'));
+  const server = createServer(), wss = new WebSocketServer({ server });
+  const messages: any[] = [];
+  let connected!: () => void;
+  const ready = new Promise<void>(resolve => { connected = resolve; });
+  const bridge = createAppServerBridge({ cwd: home, connection, clientInfo: { name: 'late-daemon-fixture', version: '1' }, onHome: () => {}, onMessage: () => {}, onStatus: status => { if (status.status === 'connected') connected(); } });
+  wss.on('connection', ws => ws.on('message', raw => {
+    const message = JSON.parse(String(raw)); messages.push(message);
+    if (message.id !== undefined) ws.send(JSON.stringify({ id: message.id, result: message.method === 'initialize' ? { codexHome: home } : { data: [] } }));
+  }));
+  let deadline;
+  try {
+    bridge.start();
+    await expect(bridge.request('turn/start', { threadId: 'do-not-replay', input: [] })).rejects.toMatchObject({ code: 'RPC_NOT_SENT', dispatchState: 'not-sent' });
+    await new Promise(resolve => setTimeout(resolve, 30));
+    await new Promise<void>(resolve => server.listen(connection.socket!, resolve));
+    await Promise.race([ready, new Promise((_, reject) => { deadline = setTimeout(() => reject(Error('Delayed daemon was not joined')), 3500); })]);
+    expect(await bridge.request('thread/loaded/list')).toEqual({ data: [] });
+    expect(messages.some(message => message.method === 'turn/start')).toBe(false);
+    await bridge.stop();
+    expect(server.listening).toBe(true);
+  } finally {
+    clearTimeout(deadline); await bridge.stop();
+    for (const client of wss.clients) client.terminate();
+    wss.close(); if (server.listening) await new Promise<void>(resolve => server.close(() => resolve()));
+    rmSync(home, { recursive: true, force: true });
   }
 });
 

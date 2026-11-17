@@ -27,6 +27,16 @@
 
 服务重启会终止其管理的 App Server 和 PTY；先处理运行中的任务与审批，重启后重新读取会话，不自动重放请求。
 
+## 一个月登录与浏览器 Cookie
+
+固定域名向导新建应用（包括更换域名时的新应用）采用 `session_duration: 720h`，即固定 30 天。策略继承应用时长，Cookie 设置为 HttpOnly、SameSite=Lax；Secure 和 Cookie 签发由 Cloudflare HTTPS 边缘管理。常用设备保留浏览器 Cookie 后，可在有效期内再次访问，无需 WebUI 自建登录令牌。前端同源请求显式携带凭据，WebSocket/SSE 由浏览器自动携带 Cookie；源站继续只接受已验证的 Access JWT，伪造 Cookie 不能直连绕过认证。
+
+升级不会自动修改已有 Cloudflare 应用或现有浏览器 Cookie。已有部署需在 Zero Trust → Access controls → Applications → 对应应用中将 Session Duration 改为一个月，并启用 HttpOnly、设置 SameSite=Lax；检查匹配策略没有更短的有效期覆盖。新登录后检查 `CF_Authorization` 的到期时间。若需要更新 Global session duration，请在 Access settings 单独评估并设置，因为它影响账户下其他应用；本软件不修改该全局设置。浏览器清除 Cookie、无痕会话结束、主动退出、策略撤销或到期后仍需认证。
+
+托管向导会保护部署快照，手工修改云端资源后，后续迁移或删除可能提示配置已变更；应保留配置和私有部署记录，核对后再进行管理操作，不要删除保护记录或重新创建同域应用来绕过检查。
+
+参考：[Cloudflare 会话管理](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/)与[授权 Cookie](https://developers.cloudflare.com/cloudflare-one/access-controls/applications/http-apps/authorization-cookie/)。受保护 Quick Tunnel 的邮件登录由外部连接器管理，不使用此固定域名应用设置。
+
 ## 到期、重新登录和撤销
 
 网关在每个 HTTP 请求和 WS 握手验证身份。WS 消息继续检查连接租约；WS/SSE 最迟在 JWT 到期时关闭，或者五分钟后通过新握手重新授权。正常刷新使用 `AUTH_REFRESH`，到期使用 `AUTH_EXPIRED`。终端连接同样受约束，关闭时其独立 PTY 会结束。

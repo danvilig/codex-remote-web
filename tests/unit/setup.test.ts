@@ -35,6 +35,7 @@ test('preview is read-only; deployment preserves all other Tunnel routes and set
   expect(() => service.startApply(preview.id)).toThrow();
   await service.operation;
   expect(service.status().phase).toBe('complete'); expect(service.status().verification).toBe('login-required');
+  expect(state.apps[0]).toMatchObject({ session_duration: '720h', http_only_cookie: true, same_site_cookie: 'lax' });
   expect(state.config.ingress.filter(rule => rule.hostname !== INPUT.hostname)).toEqual(original.ingress);
   expect(state.config.originRequest).toEqual(original.originRequest); expect(state.config['warp-routing']).toEqual(original['warp-routing']);
   expect(state.config.ingress.find(rule => rule.hostname === INPUT.hostname).originRequest.access.required).toBe(true);
@@ -82,6 +83,7 @@ test('native installer writes private environment and unit, strips legacy passwo
     // Bind an ephemeral probe port so a real deployment on 8900 cannot affect this test.
     const receipt = { aud: 'aud-fixture' }; await deployment.preflight(0, false); await deployment.install(INPUT, { aud: receipt.aud, teamDomain: 'fixture.cloudflareaccess.com' }, receipt, async () => {});
     const text = await readFile(deployment.envPath, 'utf8'); expect(text).not.toContain('OLD_SECRET'); expect(text).toContain('/existing/state'); expect(text).toContain('/custom%bin'); expect((await stat(deployment.envPath)).mode & 0o777).toBe(0o600);
+    expect(text).toContain('CODEX_WEBUI_APP_SERVER_MODE="shared"');
     expect(calls.some(args => args.includes('enable'))).toBe(true);
     expect(receipt.local.unit).toContain(`EnvironmentFile=${deployment.envPath}\n`);
     expect(receipt.local.unit).not.toContain(`EnvironmentFile="${deployment.envPath}"`);
@@ -306,6 +308,7 @@ for (const [name,update] of Object.entries({
   expect(f.service.status().error).toBeNull();expect(f.service.status().phase).toBe('complete');
   const r=await f.receipt();expect(r.input).toEqual(input);expect(r.configurationChange).toBeUndefined();
   expect(f.state.apps.length).toBe(1);expect(f.state.apps[0].domain).toBe(input.hostname);
+  expect(f.state.apps[0]).toMatchObject({session_duration:'720h',http_only_cookie:true,same_site_cookie:'lax'});
   expect(f.state.apps[0].policies[0].include).toEqual([{email:{email:input.email}}]);
   expect(f.state.dns.length).toBe(1);expect(f.state.dns[0].name).toBe(input.hostname);expect(f.state.dns[0].content).toBe(`${input.tunnelId}.cfargotunnel.com`);
   expect((await f.service.diagnose()).checks.every(check=>check.ok)).toBe(true);

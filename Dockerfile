@@ -2,7 +2,7 @@ FROM oven/bun:1.4.4@sha256:1d22548f177f4ff38e0c15baa3c2c46c6c2060ba2d1bc573bb472
 FROM node:24.22.2-bookworm-slim@sha256:c86ecead9e55a5210ac1727de38a4ca840bf03dcaf34dc9749addbf383b1920c AS runtime-base
 COPY --from=bun-runtime /usr/local/bin/bun /usr/local/bin/bun
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates bubblewrap git openssh-client && rm -rf /var/lib/apt/lists/*
-ENV HOST=0.0.0.0 PORT=8899 CODEX_HOME=/home/node/.codex
+ENV HOST=0.0.0.0 PORT=8899 CODEX_HOME=/home/node/.codex CODEX_WEBUI_APP_SERVER_MODE=isolated
 WORKDIR /app
 
 FROM runtime-base AS build

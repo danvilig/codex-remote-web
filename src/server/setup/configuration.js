@@ -1,6 +1,7 @@
 // Durable migration of an existing installation. New hostnames get a separate
 // Access app; the old boundary is retained until the new service/route is ready.
 import { createHash, randomUUID } from 'node:crypto';
+import { accessSessionSettings } from './access-session.js';
 import { hostnameFor } from '../../shared/remote-address.js';
 import { SetupError, setupInput, resourceId, matchesHost } from './cloudflare.js';
 export const digest = value => {
@@ -168,7 +169,7 @@ export async function changeConfiguration(s,plan) {
   try {
     if(newHost) {
       change.appIntent=true;await persist();
-      const app=await client.result(appPath(next),'POST',{name:next.appName,type:'self_hosted',domain:next.input.hostname,session_duration:'1h',app_launcher_visible:false,policies:[{name:'Workspace owner',decision:'allow',precedence:1,include:[{email:{email:next.input.email}}]}]});
+      const app=await client.result(appPath(next),'POST',{name:next.appName,type:'self_hosted',domain:next.input.hostname,...accessSessionSettings,app_launcher_visible:false,policies:[{name:'Workspace owner',decision:'allow',precedence:1,include:[{email:{email:next.input.email}}]}]});
       next.appId=app.id;next.aud=app.aud;await persist();
       if(!next.appId || typeof next.aud!=='string' || !next.aud) conflict('Cloudflare did not return the Access audience.');
       const policies=await client.list(`${appPath(next)}/${next.appId}/policies`);
