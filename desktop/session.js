@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { remoteSession } from './session-client.js';
+import { windowsSession } from './windows-session.js';
 import { privateDirectory, readPrivate, writePrivate } from '../src/server/desktop/private-store.js';
 
 const exec = promisify(execFile);
@@ -84,9 +85,37 @@ async function removeOffline(spec, current, recordPath, saved, link, target) {
     throw error;
   }
 }
-async function powershell(script, env) {
-  const binary = join(process.env.SystemRoot || 'C:\\Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe');
-  return exec(binary, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: { ...process.env, ...env }, windowsHide: true, timeout: 20000 });
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const taskSnapshot = value => value === null || (value && typeof value === 'object' && typeof value.xml === 'string' && !!value.xml && typeof value.enabled === 'boolean');
+const windowsDefinition = value => value && value.platform === 'win32' && [value.name, value.executable, value.arguments].every(item => typeof item === 'string');
+const recoveryError = cause => Object.assign(new Error('Background task outcome is uncertain; preserve session-windows-pending.json and inspect the task before recovery', { cause }), { code: 'SESSION_RECOVERY_REQUIRED' });
+async function restoreWindowsRecord(recordPath, saved, intended) {
+  const current = await readPrivate(recordPath);
+  if (same(current, saved)) return;
+  if (!same(current, intended)) throw new Error('Background registration changed before rollback; preserve it');
+  if (saved) await writePrivate(recordPath, saved); else await rm(recordPath, { force: true });
+}
+async function recoverWindowsSession(options) {
+  const path = join(options.directory, 'session-windows-pending.json');
+  const missing = Symbol('missing pending registration');
+  const pending = await readPrivate(path, missing);
+  if (pending === missing) return;
+  try {
+    if (!pending || (options.platform || process.platform) !== 'win32' || pending.version !== 1 || typeof pending.enabled !== 'boolean'
+      || !windowsDefinition(pending.spec) || (pending.saved !== null && !windowsDefinition(pending.saved))
+      || (pending.saved && pending.saved.name !== pending.spec.name) || !taskSnapshot(pending.before)
+      || (Object.hasOwn(pending, 'after') && !taskSnapshot(pending.after))
+      || pending.spec.name !== sessionDefinition({ ...options, platform: 'win32' }).name) throw new Error('Invalid pending background registration');
+    const current = await windowsSession('snapshot', pending);
+    const matches = value => current === null || value === null ? current === value : current.xml === value.xml && current.enabled === value.enabled;
+    const recordPath = join(options.directory, 'session.json'), intended = pending.enabled ? pending.spec : null;
+    if (matches(pending.before)) {
+      await restoreWindowsRecord(recordPath, pending.saved, intended);
+    } else if (!Object.hasOwn(pending, 'after') || !matches(pending.after) || !same(await readPrivate(recordPath), intended)) {
+      throw new Error('Pending task differs from the confirmed original or committed state');
+    }
+    await rm(path);
+  } catch (error) { throw recoveryError(error); }
 }
 export async function configureSession(enabled, options) {
   // Electron delegates the whole transaction to its bundled Bun CLI. The
@@ -105,6 +134,9 @@ export async function configureSession(enabled, options) {
     if (Object.hasOwn(options, 'expectedGeneration') && generation !== options.expectedGeneration) {
       throw Object.assign(new Error('Background registration changed before rollback; preserve it'), { code: 'SESSION_CHANGED' });
     }
+    // Recover under the same lock and before absent-record/uninstall shortcuts.
+    // A lost helper reply must never turn an uncertain task into a silent no-op.
+    await recoverWindowsSession(options);
     const record = await readPrivate(recordPath, missing);
     const saved = record === missing ? null : record;
     const valid = saved && typeof saved === 'object' && !Array.isArray(saved)
@@ -138,13 +170,44 @@ async function mutateSession(enabled, options, saved) {
   const run = options.run || exec;
   const unchanged = enabled && JSON.stringify(saved) === JSON.stringify(definition);
   if (definition.platform === 'win32') {
-    if (unchanged) return;
     const spec = enabled ? definition : saved;
     if (!spec) return;
-    const payload = Buffer.from(JSON.stringify(spec)).toString('base64');
-    const previous = Buffer.from(JSON.stringify(saved || spec)).toString('base64');
-    const script = `$ErrorActionPreference='Stop'; $s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:CRW_TASK_SPEC))|ConvertFrom-Json; $old=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:CRW_TASK_PREVIOUS))|ConvertFrom-Json; $scheduler=New-Object -ComObject Schedule.Service; $scheduler.Connect(); $folder=$scheduler.GetFolder('\\'); $existing=$null; try{$existing=$folder.GetTask($s.name)}catch{}; ${saved ? '' : "if($existing){throw 'A background task with this name already exists'};"} if($existing -and ($existing.Definition.Actions.Count -ne 1 -or $existing.Definition.Actions.Item(1).Path -ne $old.executable -or $existing.Definition.Actions.Item(1).Arguments -ne $old.arguments)){throw 'The background task changed; preserve it'}; ` + (enabled ? `$task=$scheduler.NewTask(0); $task.RegistrationInfo.Description='Codex Remote Web desktop v1'; $task.Principal.LogonType=3; $task.Principal.RunLevel=0; $task.Settings.Enabled=$true; $task.Settings.DisallowStartIfOnBatteries=$false; $task.Settings.StopIfGoingOnBatteries=$false; $task.Settings.ExecutionTimeLimit='PT0S'; $task.Settings.MultipleInstances=2; $trigger=$task.Triggers.Create(9); $trigger.UserId=[Security.Principal.WindowsIdentity]::GetCurrent().Name; $action=$task.Actions.Create(0); $action.Path=$s.executable; $action.Arguments=$s.arguments; $null=$folder.RegisterTaskDefinition($s.name,$task,6,[Security.Principal.WindowsIdentity]::GetCurrent().Name,$null,3)` : `if($existing){$folder.DeleteTask($s.name,0)}`);
-    await powershell(script, { CRW_TASK_SPEC: payload, CRW_TASK_PREVIOUS: previous });
+    if (saved && (saved.platform !== 'win32' || saved.name !== spec.name)) throw new Error('Background task identity changed; preserve it');
+    const transaction = { spec, saved, enabled };
+    const before = await windowsSession('inspect', transaction);
+    if (unchanged && before?.enabled) return;
+    const pendingPath = join(options.directory, 'session-windows-pending.json');
+    const pending = { version: 1, ...transaction, before };
+    // Persist the actual original XML before any OS side effect. If the helper
+    // dies after mutation, retain this intent instead of losing task ownership.
+    await writePrivate(pendingPath, pending);
+    let after;
+    try {
+      after = await windowsSession('apply', { ...transaction, before });
+      if (enabled) await writePrivate(recordPath, definition); else await rm(recordPath, { force: true });
+      await writePrivate(pendingPath, { ...pending, after });
+      await rm(pendingPath);
+    } catch (error) {
+      if (after === undefined) {
+        // Clearing is safe only if full actual state proves no mutation. Any
+        // different/foreign result remains guarded by durable pending intent.
+        try { await recoverWindowsSession(options); } catch { throw recoveryError(error); }
+        throw error;
+      }
+      const failures = [];
+      try { await windowsSession('rollback', { ...transaction, before, after }); } catch (failure) { failures.push(failure); }
+      // A durable write can fail after rename. Restore the private record too,
+      // but never overwrite a record edited outside this transaction meanwhile.
+      try {
+        await restoreWindowsRecord(recordPath, saved, enabled ? definition : null);
+      } catch (failure) { failures.push(failure); }
+      if (failures.length) throw new AggregateError([error, ...failures], 'Background registration persistence and rollback failed', { cause: error });
+      // If permissions still forbid journal removal, retain it: the next locked
+      // request can prove the restored BEFORE state and remove it safely.
+      await rm(pendingPath, { force: true }).catch(() => {});
+      throw error;
+    }
+    return;
   } else {
     const spec = enabled ? definition : saved;
     if (!spec) return;
@@ -201,6 +264,4 @@ async function mutateSession(enabled, options, saved) {
     }
     return;
   }
-  if (enabled) await writePrivate(recordPath, definition); else await rm(recordPath, { force: true });
-  return;
 }
