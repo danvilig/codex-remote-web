@@ -55,7 +55,7 @@ bun run test:docker
 bun run source:scan
 ```
 
-`verify:release` 统一运行依赖审计、构建、单元、协议基础/执行保护、工作区/手机/设置/终端、WebKit 预检、合成长会话性能基线、Access、配置向导、临时访问、HOME 外项目和生产归档回归。检测到 cloudflared 时必须执行真实二进制离线校验；未安装时输出明确 SKIP。离线校验不注册 Tunnel、不发送邮件。默认测试均使用隔离目录、模拟 App Server/Cloudflare、本地 JWKS，不需要真实凭据或模型调用。
+`verify:release` 统一运行依赖审计、构建、单元、协议基础/执行保护、工作区/手机/设置/终端、WebKit 预检、合成长会话性能基线、Access、配置向导、临时访问、HOME 外项目和生产归档回归。Verify 与候选 CI 下载固定版本、经 SHA-256 校验的 cloudflared，并设置 `CODEX_WEBUI_REQUIRE_CLOUDFLARED=1`，缺少二进制时直接失败。普通本地运行检测到 cloudflared 时执行真实二进制离线校验，未安装且未要求该检查时输出明确 SKIP。离线校验不注册 Tunnel、不发送邮件。默认测试均使用隔离目录、模拟 App Server/Cloudflare、本地 JWKS，不需要真实凭据或模型调用。
 
 Docker 回归只挂载临时项目与协议替身，校验 `/workspace`、权限边界、静态资源和真实 PTY。Linux 原生为主，Docker 为备用；容器内不能自动配置宿主机 systemd，默认镜像不包含 Codex 或 cloudflared。需要 Docker sudo 的开发主机可仅对该检查设置 `CODEX_WEBUI_DOCKER_SUDO=1`。
 
@@ -86,7 +86,7 @@ bun run candidate:prepare
 3. 在 **Security → Advisories** 确认 **Report a vulnerability** 按钮，检查进入的是该仓库的私密报告表单；无需发送虚构漏洞。更新 SECURITY 的状态后再宣称渠道已启用。[GitHub 官方步骤](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)。
 4. 在目标仓库实际运行 Verify 与手动 prerelease 工作流，确认 Actions 权限、浏览器和镜像构建都通过，再决定标签和正式上传。
 
-两个工作流共享 `verify:release`，均执行依赖审计、临时访问、WebKit 预检和合成性能回归；有 cloudflared 时执行离线验证。验证后调用 `candidate:prepare`，导出并扫描干净独立快照后构建。手动流程只上传候选 CI Artifact，未调用公开发布 API。Artifact 的可见性由目标仓库设置决定。
+两个工作流共享 `verify:release`，均执行依赖审计、临时访问、WebKit 预检和合成性能回归，并强制执行真实 cloudflared 离线验证。cloudflared 仅作为 CI 工具下载，不加入产品包。验证后调用 `candidate:prepare`，导出并扫描干净独立快照后构建。手动流程只上传候选 CI Artifact，未调用公开发布 API。Artifact 的可见性由目标仓库设置决定。
 
 ## 跨平台 GitHub Release
 

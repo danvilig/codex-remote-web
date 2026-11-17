@@ -20,7 +20,13 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: npm_config_nodedir="$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")" npm rebuild node-pty
       - run: bunx playwright install --with-deps chromium webkit
+      - name: Provision checksum-pinned cloudflared for offline CLI validation
+        run: |
+          bun scripts/provision-ci-cloudflared.ts "$RUNNER_TEMP/crw-cloudflared"
+          echo "$RUNNER_TEMP/crw-cloudflared" >> "$GITHUB_PATH"
       - run: bun run verify:release
+        env:
+          CODEX_WEBUI_REQUIRE_CLOUDFLARED: '1'
       - run: docker build -t codex-remote-web:verify .
       - run: bun run test:docker
       - name: Use checked-out commit identity for the local snapshot

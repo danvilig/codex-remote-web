@@ -1,6 +1,9 @@
 // Identical offline release gates for local candidates and both GitHub workflows.
 // No model calls, real credentials, service restarts or Cloudflare mutations.
 const root = new URL('..', import.meta.url).pathname;
+if (process.env.CODEX_WEBUI_REQUIRE_CLOUDFLARED === '1' && !Bun.which('cloudflared')) {
+  throw new Error('This release gate requires the verified cloudflared binary; provision it before verification.');
+}
 async function run(args: string[]) {
   console.log(`\nVerifying: ${args.join(' ')}`);
   const child = Bun.spawn(args, { cwd: root, stdout: 'inherit', stderr: 'inherit' });

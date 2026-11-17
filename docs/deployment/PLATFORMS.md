@@ -31,6 +31,10 @@ macOS 15+ 仅支持 Apple Silicon；Windows 11 仅支持 x64、NTFS 和 Windows 
 
 Windows 突然断电时仍不承诺目录项 fsync；保留未知提交的回执并核对，不自动重放。安装包中网关资源位置变为 macOS `.app/Contents/Resources/gateway`、Windows/Linux `resources/gateway`；CLI 便携包目录结构不变。
 
+Windows 独立 App Server 模式使用隐藏的 Windows PowerShell Job 辅助进程，须允许 `Add-Type` 编译随包代码。它先建立系统进程归属，再启动 Codex；若系统策略不允许建立该边界，会拒绝启动并记录错误，不会回退为无监督运行。共享 daemon 不属于网关的 Job，停止网关不会停止共享任务。
+
+辅助进程的待写入输入最多积压 64 MiB 或 2,048 个数据块，先达到任一上限时关闭自有 Job；这也防止 Codex 停止读取输入后无限缓存。由此中断的未知执行仍须核对回执，不自动重试。
+
 ## 开发和验收
 
 `bun run desktop:dev` 构建并打开桌面界面；首次需要执行 `node node_modules/electron/install.js` 下载锁定的 Electron 运行时。`bun run test:desktop` 使用隔离项目、协议/Cloudflare fixture 验证设置交互和后台生命周期，不访问个人账户或模型。`tests/browser/desktop-native.e2e.mjs` 在各原生安装包上检查真实窗口沙箱、preload 隔离、退出界面后网关继续运行、重新连接和停止。
