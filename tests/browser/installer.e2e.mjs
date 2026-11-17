@@ -90,7 +90,11 @@ try {
   evidence.checks.finderLayoutAndBackground={positions:layout,backgroundPixel:[red,green,blue],screenshot:'macos-installer-native.png'};
   evidence.checks.mountedSize=await macAppSize(app);
   assert.ok(evidence.checks.mountedSize.allocatedBytes<evidence.checks.mountedSize.logicalBytes*0.8,'Installed payload must actually use transparent filesystem compression');
-  await command(['ditto','--rsrc','--extattr','--preserveHFSCompression',app,join(destination,'Codex Remote Web.app')],root,{timeoutMs:120_000});
+  await mkdir(destination);
+  const applePath=value=>'\"'+value.replaceAll('\\','\\\\').replaceAll('\"','\\\"')+'\"';
+  // Exercise Finder's real copy path, as used by drag-to-install. A ditto
+  // invocation forcing compression preservation would not prove user behavior.
+  await command(['osascript','-e',`tell application \"Finder\" to duplicate (POSIX file ${applePath(app)} as alias) to (POSIX file ${applePath(destination)} as alias)`],root,{timeoutMs:120_000});
   evidence.checks.installedSize=await macAppSize(join(destination,'Codex Remote Web.app'));
   assert.ok(evidence.checks.installedSize.allocatedBytes<evidence.checks.installedSize.logicalBytes*0.8,'Copying out of DMG must preserve the reduced disk allocation');
   await command(['hdiutil','detach',mount],root);mounted=false;
