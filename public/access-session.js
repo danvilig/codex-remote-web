@@ -33,7 +33,7 @@ export function installAccessSession(initialStatus, { translate = value => value
     if (checking) return checking;
     checking = (async () => {
       try {
-        const response = await rawFetch('/api/auth/status', { cache: 'no-store', redirect: 'manual', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+        const response = await rawFetch('/api/auth/status', { credentials: 'same-origin', cache: 'no-store', redirect: 'manual', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
         if (response.status >= 500) return false;
         if (response.type === 'opaqueredirect' || response.status === 401 || response.status === 403 || !response.headers.get('content-type')?.includes('application/json')) { requireAuthentication(); return true; }
         const next = await response.json();
@@ -50,7 +50,9 @@ export function installAccessSession(initialStatus, { translate = value => value
     if (required) throw Object.assign(new Error('Authentication required'), { code: 'AUTH_REQUIRED' });
     const headers = new Headers(init?.headers || (input instanceof Request ? input.headers : undefined)); headers.set('X-Requested-With', 'XMLHttpRequest');
     try {
-      const response = await rawFetch(input, { ...init, headers });
+      // Let the browser send the edge's HttpOnly Access cookie. JS never reads
+      // or persists it; the origin still requires a verified Access assertion.
+      const response = await rawFetch(input, { ...init, credentials: 'same-origin', headers });
       if (response.status === 401 || response.status === 403 || response.redirected || response.headers.get('content-type')?.includes('text/html')) await check();
       return response;
     } catch (error) { await check(); throw error; }

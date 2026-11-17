@@ -7,7 +7,7 @@ Bun 从当前工作目录读取 `.env`；生产服务用 systemd 的 `Environmen
 | `HOST` / `PORT` | `127.0.0.1` / `8899` |
 | `CODEX_WEBUI_CWD` | 初始项目，默认应用安装目录 |
 | `CODEX_HOME` / `CODEX_AUTH_PATH` | 沿用用户的 Codex 状态/认证来源 |
-| `CODEX_WEBUI_APP_SERVER_MODE` | 默认 `auto`：已有本机 daemon socket 时共享，否则使用独立 stdio；`shared` 强制共享、`isolated` 强制独立 |
+| `CODEX_WEBUI_APP_SERVER_MODE` | 默认 `shared`：等待并连接本机 daemon；旧值 `auto` 同样等待共享服务，不再按 socket 是否存在回退。`isolated` 显式启用独立 stdio |
 | `CODEX_WEBUI_APP_SERVER_SOCKET` | 可选的本机 Unix socket 绝对路径；默认 `$CODEX_HOME/app-server-control/app-server-control.sock` |
 | `CODEX_WEBUI_PROJECTLESS` | 默认关闭；开启时须明确 Review 根目录 |
 | `CODEX_WEBUI_REVIEW_ROOT` | 允许 Review 操作的准确 Git 根目录 |
@@ -30,17 +30,19 @@ Access 模式缺少必填项、Origin 格式不正确、Team Domain 格式不正
 
 ## 与 Codex Desktop / CLI 共享会话
 
-新版 Codex Desktop/CLI 使用本机共享 App Server。WebUI 默认检测同一 Codex home 的 daemon socket，并通过 Unix WebSocket 加入原生服务，避免再次启动写入同一会话的独立进程。两端使用同一会话 ID、原生 resume/start/steer 与事件流；不会复制会话或移除写入锁。停止 WebUI 只断开自己的连接，不停止共享 daemon 或它的任务。原生传输参考 [App Server 文档](https://developers.openai.com/codex/app-server)。
+新版 Codex Desktop/CLI 使用本机共享 App Server。WebUI 默认通过 Unix WebSocket 加入同一 Codex home 的 daemon，避免再次启动写入同一会话的独立进程。默认路径从 `CODEX_HOME` 推导；未设置时使用 `$HOME/.codex`，没有 `HOME` 时使用操作系统用户主目录，也可用 `CODEX_WEBUI_APP_SERVER_SOCKET` 覆盖绝对路径。没有固定用户名或安装目录。两端使用同一会话 ID、原生 resume/start/steer 与事件流；不会复制会话或移除写入锁。停止 WebUI 只断开自己的连接，不停止共享 daemon 或它的任务。原生传输参考 [App Server 文档](https://developers.openai.com/codex/app-server)。
 
-已有共享服务时推荐显式配置 `CODEX_WEBUI_APP_SERVER_MODE=shared`，必要时设置 `CODEX_WEBUI_APP_SERVER_SOCKET`，使首次启动没有 daemon 或连接异常时也不会另起写入进程。共享服务不可达时显示连接失败并重连，不降级为独立进程；需要先由 Desktop/CLI 启动原生 daemon，WebUI 不代为重启或修改它。原生 Unix 传输仍属实验能力，需要相容版本。独立 stdio 服务启动后不会在运行中自动迁移到后来出现的 daemon；若另一进程已经占用会话，应改为共享模式并重启该 WebUI，再继续使用。
+WebUI 比 daemon 先启动时等待并重连，旧配置 `auto` 也不再另起写入进程。需要由 Desktop/CLI 启动原生 daemon，或运行兼容版本的 `codex app-server --listen unix://`；WebUI 不代为启动或停止它。共享服务不可达时不会自动重发执行请求。没有共享 daemon 的独立部署应显式配置 `CODEX_WEBUI_APP_SERVER_MODE=isolated`，并避免与其他进程同时写同一会话。升级已有独立 stdio 部署时，先确认任务、审批和队列状态，再重启 WebUI 以释放原进程持有的会话；仅刷新网页不会切换后端连接。
 
-共享服务的 Codex 账户与原生配置由该服务管理；WebUI 的 HTTP/Access 认证仍独立生效。容器默认使用独立模式时不能同时写宿主机 Desktop 正在持有的同一会话；本轮不自动挂载宿主机 socket，也不支持跨主机绕过原生写入锁。
+共享服务的 Codex 账户与原生配置由该服务管理；WebUI 的 HTTP/Access 认证仍独立生效。Docker 镜像和 Compose 模板显式使用独立模式，不能同时写宿主机 Desktop 正在持有的同一会话；本轮不自动挂载宿主机 socket，也不支持跨主机绕过原生写入锁。
 
 项目浏览范围为用户主目录和 `CODEX_WEBUI_CWD` 指定的初始项目，支持 `/tmp`、`/srv` 或容器 `/workspace` 等主目录之外的位置。额外项目根目录不授权其父目录或相邻目录，目录内符号链接仍需满足真实路径范围检查。Customize、文件搜索、工作树、项目上下文与独立终端使用同一范围；下载敏感文件限制及 Review 独立根目录继续生效。
 
 `GET /api/auth/status` 保留原有 `authenticated`、`setupRequired` 和 `passwordRequired`，新增 `mode`、`expiresAt`。Access 模式还返回已验证身份的邮箱和同源 `loginUrl`；未授权返回 401/403 和 `AUTH_REQUIRED`、`AUTH_EXPIRED` 或 `AUTH_FORBIDDEN`，不返回 JWT。密码初始化/登录接口在 Access 模式返回 404。
 
 Access JWT 只从 `Cf-Access-Jwt-Assertion` 读取，校验 RS256 签名、issuer、audience、exp/iat/sub/email 及配置的邮箱。不从浏览器 cookie、邮箱头、Basic/Bearer 或 forwarded 头推断 Access 身份。允许的 Host 和浏览器 Origin 都以 `PUBLIC_ORIGIN` 为准，代理需保留公网 Host。
+
+固定域名向导创建的 Access 应用使用 30 天（`720h`）有效期、HttpOnly 和 SameSite=Lax Cookie。浏览器自动向同源请求、WebSocket 握手和 SSE 携带 Cloudflare 的 `CF_Authorization`，前端不读取或复制令牌到 localStorage/sessionStorage。旧应用不会仅因升级软件自动改变云端有效期；已有部署的迁移见 [Cloudflare 部署说明](deployment/CLOUDFLARE.md#一个月登录与浏览器-cookie)。
 
 ## 网页配置向导
 
@@ -101,3 +103,7 @@ Library 展示项目上传和近期会话中分享的附件，支持当前会话
 上传仅保存文件，点击发送才调用模型：普通文件以路径加入上下文，图片同时通过原生 `localImage` 输入；文件读取和模型行为仍受当前 Codex 权限限制。不选择项目时附件属于主目录。附件引用保存在当前标签页草稿；上传中切换会话时归入原草稿，失败/重新登录/刷新不自动重发执行请求。
 
 Customize 使用 Codex 原生插件目录和安装/卸载、版本化启停接口。可安装受信任的本机技能文件夹到 `$CODEX_HOME/skills`，必须包含合法 `name` 的 SKILL.md，最多 500 项/10 MiB，不复制隐藏文件/密钥，不执行安装脚本。启停使用原生 skills 配置；仅可删除直接位于用户/项目技能根目录的独立技能，内置或插件托管技能保留其归属。插件账户连接与 OAuth 仍需 Codex 原生支持。变更影响后续使用，不承诺正在运行的回合热更新。
+
+## 桌面管理配置
+
+桌面应用通过私有后台代理保存工作目录、端口、Codex/cloudflared 路径、网页终端、登录自启和外观选项，不修改现有 `.env` 或 Codex 账户配置。独立 loopback 控制面要求当前用户私有凭证；它不属于公网 WebUI API。`CODEX_WEBUI_CODEX` 和 `CODEX_WEBUI_CLOUDFLARED` 可为桌面子进程指定程序路径，仍通过 argv 启动，不经过 shell。详见[桌面平台说明](deployment/PLATFORMS.md)。

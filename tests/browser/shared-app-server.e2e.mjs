@@ -3,7 +3,7 @@ import { createServer as httpServer } from 'node:http';
 import { createServer as netServer } from 'node:net';
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { createInterface } from 'node:readline';
-import { join } from 'node:path';
+import { join, delimiter } from 'node:path';
 import { spawn } from 'node:child_process';
 import { WebSocket, WebSocketServer } from 'ws';
 import { chromium } from 'playwright';
@@ -19,15 +19,19 @@ const native=httpServer(),wss=new WebSocketServer({server:native}),routes=new Ma
 wss.on('connection',ws=>ws.on('message',raw=>{const message=JSON.parse(String(raw));if(message.method&&message.id!==undefined){const nativeId=++seq;routes.set(nativeId,{ws,id:message.id});message.id=nativeId;}fixture.stdin.write(JSON.stringify(message)+'\n');}));
 const lines=createInterface({input:fixture.stdout});
 lines.on('line',line=>{const message=JSON.parse(line),route=routes.get(message.id);if(route&&('result'in message||'error'in message)){routes.delete(message.id);if(route.ws.readyState===WebSocket.OPEN)route.ws.send(JSON.stringify({...message,id:route.id}));}else for(const ws of wss.clients)if(ws.readyState===WebSocket.OPEN)ws.send(line);});
-await new Promise(resolve=>native.listen(socket,resolve));
 const port=await new Promise(resolve=>{const probe=netServer();probe.listen(0,'127.0.0.1',()=>{const port=probe.address().port;probe.close(()=>resolve(port));});}),base=`http://127.0.0.1:${port}`;
-const gateway=Bun.spawn(['bun','src/server/index.ts'],{cwd:root,env:{...env,HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_APP_SERVER_MODE:'auto'},stdout:'ignore',stderr:'ignore'});
-const desktop=new WebSocket(`ws+unix://${socket}:/`),pending=new Map();let desktopId=0;
-desktop.on('message',raw=>{const message=JSON.parse(String(raw)),task=pending.get(message.id);if(task){pending.delete(message.id);message.error?task.reject(Error(message.error.message)):task.resolve(message.result);}});
+const gateway=Bun.spawn(['bun','src/server/index.ts'],{cwd:root,env:{...env,PATH:join(root,'tests/fixtures')+delimiter+process.env.PATH,HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_APP_SERVER_MODE:'auto'},stdout:'ignore',stderr:'ignore'});
+let desktop;const pending=new Map();let desktopId=0;
 const request=(method,params={})=>new Promise((resolve,reject)=>{const id=++desktopId;pending.set(id,{resolve,reject});desktop.send(JSON.stringify({id,method,params}));});
 let browser,page,phase='startup';
 const records=async()=>(await readFile(log,'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
 try{
+  // Reproduce boot order: the gateway is already serving HTTP before the daemon
+  // creates its socket. It must stay disconnected instead of spawning a writer.
+  for(let i=0;;i++){try{const health=await(await fetch(base+'/api/health')).json();assert.equal(health.codex,false,'A missing daemon must not select an isolated writer');break;}catch(error){if(error.code==='ERR_ASSERTION'||i>100)throw error;}await Bun.sleep(50);}
+  await new Promise(resolve=>native.listen(socket,resolve));
+  desktop=new WebSocket(`ws+unix://${socket}:/`);
+  desktop.on('message',raw=>{const message=JSON.parse(String(raw)),task=pending.get(message.id);if(task){pending.delete(message.id);message.error?task.reject(Error(message.error.message)):task.resolve(message.result);}});
   await new Promise((resolve,reject)=>{desktop.once('open',resolve);desktop.once('error',reject);});
   await request('initialize',{clientInfo:{name:'desktop-fixture',version:'1'},capabilities:{experimentalApi:true}});
   desktop.send(JSON.stringify({method:'initialized'}));
@@ -66,8 +70,8 @@ try{
   console.log('PASS: full WebUI auto-attaches to existing native Unix socket, resumes/steers a Desktop-owned running thread, starts next turn on the same thread and detaches without closing Desktop');
 }catch(error){console.error('FAIL phase:',phase);if(page)await page.screenshot({path:artifact('shared-app-server-failure.png')}).catch(()=>{});throw error;}
 finally{
-  await browser?.close();gateway.kill();await gateway.exited;desktop.terminate();
-  for(const ws of wss.clients)ws.terminate();wss.close();await new Promise(resolve=>native.close(resolve));
+  await browser?.close();gateway.kill();await gateway.exited;desktop?.terminate();
+  for(const ws of wss.clients)ws.terminate();wss.close();if(native.listening)await new Promise(resolve=>native.close(resolve));
   lines.close();const closed=fixture.exitCode!==null?Promise.resolve():new Promise(resolve=>fixture.once('close',resolve));fixture.kill();await closed;
   await rm(temp,{recursive:true,force:true});
 }

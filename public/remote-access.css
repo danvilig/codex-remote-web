@@ -59,3 +59,22 @@
 .remote-quick-qr { width:192px;max-width:100%;border-radius:12px;padding:8px;background:#fff;color:#000; }.remote-quick-qr svg { display:block;width:100%;height:auto; }
 .remote-card button:disabled { cursor:default;opacity:.5; }
 @media(max-width:760px){.remote-access-choices{grid-template-columns:minmax(0,1fr);}.remote-quick-address .remote-actions{justify-content:flex-start;}}
+
+/* Use the same rounded surfaces and neutral action hierarchy as settings. */
+.remote-access-wizard .remote-card { border-radius:20px; background:var(--workspace-card); }
+.remote-access-wizard button:not(.primary), .remote-access-wizard .remote-open:not(.primary) { background:var(--app-main); }
+.remote-access-wizard button:hover:not(:disabled):not(.primary) { background:var(--app-hover); }
+.remote-access-wizard button:disabled { cursor:default; opacity:.45; }
+.remote-steps li>span { transition:background-color 160ms ease,color 160ms ease,border-color 160ms ease; }
+.remote-steps li { position:relative; min-width:0; }
+.remote-steps li:not(:last-child)::after { content:""; position:absolute; top:14px; left:40px; right:0; height:1px; background:var(--app-border-default); }
+.remote-access-choice { background:var(--app-main); border-radius:16px; }
+.remote-access-choice:focus-within { border-color:var(--app-text-tertiary); }
+.remote-message.error { border-color:color-mix(in srgb,var(--app-danger) 30%,var(--app-border-default)); }
+.remote-access-wizard .remote-footer button { background:transparent; }
+.remote-access-wizard [data-stage=running]:not([hidden]) h2::before { content:""; display:inline-block; width:8px; height:8px; margin-right:10px; border-radius:50%; background:var(--app-text-secondary); animation:settings-wait 1s ease-in-out infinite alternate; }
+@media(max-width:760px) { .remote-steps li:not(:last-child)::after { left:34px; } }
+@media(prefers-reduced-motion:reduce) {
+  .remote-steps li>span { transition:none; }
+  .remote-access-wizard [data-stage=running] h2::before { animation:none; }
+}

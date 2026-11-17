@@ -2,7 +2,7 @@
 
 ## 运行边界
 
-Codex Remote Web 是单人浏览器工作区。Codex App Server 负责模型和工具执行；网关负责访问身份、浏览器协议边界、连接与状态协调；前端根据真实事件呈现界面。浏览器断开不拥有执行进程的生命周期。默认已有本机 daemon 时通过 Unix WebSocket 共享，否则管理独立 stdio 进程；网关停止只关闭自己的连接或自己启动的子进程，不停止共享 daemon。
+Codex Remote Web 是单人浏览器工作区。Codex App Server 负责模型和工具执行；网关负责访问身份、浏览器协议边界、连接与状态协调；前端根据真实事件呈现界面。浏览器断开不拥有执行进程的生命周期。默认通过 Unix WebSocket 等待并连接本机共享 daemon，旧值 `auto` 同样不回退到独立进程；只有显式 `isolated` 才管理独立 stdio 进程。网关停止只关闭自己的连接或自己启动的子进程，不停止共享 daemon。
 
 ## 模块
 

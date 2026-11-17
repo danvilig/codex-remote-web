@@ -99,7 +99,7 @@ export class NativeDeployment {
   async install(input, access, receipt, persist) {
     if (existsSync(join(this.root, 'scripts/build.ts'))) await this.run([process.execPath, 'run', 'build']);
     // Inherit workspace/feature settings without changing the user's Codex files.
-    const values = { HOME: this.home, PATH: this.env.PATH, CODEX_HOME: this.env.CODEX_HOME || join(this.home, '.codex') };
+    const values = { HOME: this.home, PATH: this.env.PATH, CODEX_HOME: this.env.CODEX_HOME || join(this.home, '.codex'), CODEX_WEBUI_APP_SERVER_MODE: this.env.CODEX_WEBUI_APP_SERVER_MODE || 'shared' };
     for (const [key, value] of Object.entries(this.env)) if (key === 'CODEX_AUTH_PATH' || key.startsWith('CODEX_WEBUI_')) {
       if (!['CODEX_WEBUI_PASSWORD', 'CODEX_WEBUI_ACCESS_TOKEN', 'CODEX_WEBUI_AUTH_STORE'].includes(key)) values[key] = value;
     }

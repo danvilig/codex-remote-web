@@ -1,11 +1,12 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { nodeRuntime, quickWorkerPath } from '../config/paths.js';
 import { SetupError } from './cloudflare.js';
+import { privateDirectory } from '../desktop/private-store.js';
 const exec = promisify(execFile);
 export function quickEmail(value) {
   const email = String(value || '').trim().toLowerCase();
@@ -22,13 +23,12 @@ export function connectorEnvironment(env, directory) {
   return result;
 }
 export async function quickPreflight(env = process.env) {
-  if (process.platform === 'win32') throw new SetupError('Temporary access requires a Unix socket on Linux or macOS.');
-  const binary = Bun.which('cloudflared', { PATH: env.PATH });
+  const binary = env.CODEX_WEBUI_CLOUDFLARED || Bun.which('cloudflared', { PATH: env.PATH });
   if (!binary) throw new SetupError('Install cloudflared to use temporary access.');
   let stdout;
   try { ({ stdout } = await exec(binary, ['tunnel','--help'], { env: connectorEnvironment(env, tmpdir()), timeout: 5000, maxBuffer: 150000 })); }
   catch { throw new SetupError('Unable to check cloudflared. Check its installation.'); }
-  if (!stdout.includes('--allowed-mail') || !stdout.includes('--unix-socket')) throw new SetupError('Update cloudflared to a version supporting protected Quick Tunnels.');
+  if (!stdout.includes('--allowed-mail') || (process.platform !== 'win32' && !stdout.includes('--unix-socket'))) throw new SetupError('Update cloudflared to a version supporting protected Quick Tunnels.');
   return binary;
 }
 export function quickConnectorArgs(directory, email) {
@@ -59,7 +59,7 @@ export function quickFailure(code) {
 export function createQuickConnector({ binary, args, directory, env, onMessage, onExit }) {
   const node = nodeRuntime(env);
   if (!node) throw new SetupError('Node.js is required to supervise temporary access.');
-  const worker = spawn(node, [quickWorkerPath()], { env: connectorEnvironment(env, directory), stdio: ['ignore','ignore','ignore','ipc'] });
+  const worker = spawn(node, [quickWorkerPath()], { env: connectorEnvironment(env, directory), windowsHide: true, stdio: ['ignore','ignore','ignore','ipc'] });
   const closed = new Promise(resolve => { worker.once('exit', resolve); worker.once('error', resolve); });
   worker.on('message', onMessage); worker.once('exit', onExit);
   worker.once('error', () => onMessage({ type: 'error', code: 'launch' }));
@@ -67,8 +67,9 @@ export function createQuickConnector({ binary, args, directory, env, onMessage, 
   return { closed, stop() { if (worker.connected) worker.send({ type: 'stop' }, () => {}); else worker.kill('SIGTERM'); } };
 }
 export class QuickTunnel {
-  constructor({ workspace, directory = join(process.env.HOME || homedir(), '.config/codex-remote-web'), env = process.env, preflight = quickPreflight, validate = validateQuickConfiguration, connector = createQuickConnector, startupMs = 90000 } = {}) {
+  constructor({ workspace, directory = join(process.env.HOME || homedir(), '.config/codex-remote-web'), env = process.env, preflight = quickPreflight, validate = validateQuickConfiguration, connector = createQuickConnector, startupMs = 90000, platform = process.platform } = {}) {
     this.workspace = workspace; this.directory = directory; this.env = env; this.preflight = preflight; this.validate = validate; this.connector = connector; this.startupMs = startupMs;
+    this.platform = platform;
     this.state = { phase: 'stopped', publicOrigin: null, email: null, startedAt: null, error: null };
   }
   status() { return { ...this.state, running: !!this.runtime, available: !!this.workspace }; }
@@ -100,10 +101,17 @@ export class QuickTunnel {
     const binary = await this.preflight(this.env); this.active(runtime);
     await this.acquire(runtime); this.active(runtime);
     runtime.directory = await mkdtemp(join(tmpdir(), 'codex-quick-')); this.active(runtime);
-    await writeFile(join(runtime.directory, 'config.yml'), JSON.stringify({ ingress:[{service:`unix:${join(runtime.directory,'origin.sock')}`}] })+'\n', { mode: 0o600 }); this.active(runtime);
+    if (this.platform === 'win32') {
+      await privateDirectory(runtime.directory);
+      const privateHost = randomBytes(24).toString('hex') + '.localhost';
+      runtime.origin = await this.workspace({ privateHost, email }); this.active(runtime);
+      await writeFile(join(runtime.directory, 'config.yml'), JSON.stringify({ ingress: [{ service: `http://127.0.0.1:${runtime.origin.port}`, originRequest: { httpHostHeader: privateHost } }] }) + '\n', { mode: 0o600 });
+    } else {
+      await writeFile(join(runtime.directory, 'config.yml'), JSON.stringify({ ingress:[{service:`unix:${join(runtime.directory,'origin.sock')}`}] })+'\n', { mode: 0o600 });
+      runtime.origin = await this.workspace({ socketPath: join(runtime.directory, 'origin.sock'), email }); this.active(runtime);
+    }
     const args = quickConnectorArgs(runtime.directory, email);
     await this.validate(binary,args,this.env,runtime.directory); this.active(runtime);
-    runtime.origin = await this.workspace({ socketPath: join(runtime.directory, 'origin.sock'), email }); this.active(runtime);
     let ready;
     const started = new Promise((resolve,reject) => {
       const fail = code => reject(quickFailure(code));
