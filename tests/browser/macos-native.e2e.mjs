@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { mkdtemp, mkdir, cp, writeFile, readFile, access, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { desktopConfig, desktopDirectory } from '../../src/shared/desktop-config.js';
@@ -88,7 +88,25 @@ try {
   // Capture a normal production launch before injecting the external driver.
   // This distinguishes an OS/host rendering failure from instrumentation.
   const productionEnv = { ...env }; delete productionEnv.DYLD_INSERT_LIBRARIES;
-  const production = spawn(executable, [], { env: productionEnv, stdio: 'ignore' });
+  const production = spawn('swift', ['-e', `import AppKit
+    let configuration = NSWorkspace.OpenConfiguration()
+    configuration.createsNewApplicationInstance = true
+    configuration.allowsRunningApplicationSubstitution = false
+    configuration.environment = ProcessInfo.processInfo.environment.filter { ["HOME","PATH","CODEX_HOME","CODEX_AUTH_PATH","CODEX_WEBUI_APP_SERVER_MODE"].contains($0.key) }
+    var application: NSRunningApplication?
+    NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: CommandLine.arguments[1]), configuration: configuration) { running, error in
+      DispatchQueue.main.async {
+        guard let running = running else { fputs(String(describing:error),stderr); exit(1) }
+        application = running; print(running.processIdentifier); fflush(stdout)
+      }
+    }
+    while application == nil || !application!.isTerminated { RunLoop.current.run(until: Date(timeIntervalSinceNow:0.05)) }
+  `, dirname(dirname(dirname(executable)))], { env: productionEnv, stdio: ['ignore','pipe','inherit'] });
+  const productionPID = await new Promise((resolve,reject) => {
+    const timer = setTimeout(()=>reject(new Error('LaunchServices did not return the production app PID')),30000);
+    createInterface({input:production.stdout}).once('line', line => {clearTimeout(timer);resolve(Number(line));});
+    production.once('error',error=>{clearTimeout(timer);reject(error)});
+  });
   try {
     await waitFor(async () => {
       assert.equal(production.exitCode, null);
@@ -97,7 +115,7 @@ try {
     await delay(2000);
     await command(['screencapture', '-x', join(root, '.artifacts/macos-desktop-production-launch.png')], root);
   } finally {
-    production.kill('SIGTERM');
+    process.kill(productionPID, 'SIGTERM');
     for (let i=0; production.exitCode===null && production.signalCode===null && i<100; i++) await delay(50);
     assert.ok(production.exitCode!==null || production.signalCode!==null, 'Production-launch probe must exit before interaction test');
   }
