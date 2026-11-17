@@ -52,6 +52,10 @@ These screenshots show the current WebUI using an isolated demo project and simu
 
 </details>
 
+## Desktop gateway
+
+The macOS DMG, Windows MSI and Linux desktop DEB provide the same initialization/settings window, background gateway controls, login startup, remote access and diagnostics. Closing the window or quitting the tray leaves the gateway running until logout, without a terminal. Portable CLI packages remain available for headless use. See [desktop platform setup](docs/deployment/PLATFORMS.md).
+
 ## Quick start
 
 ### Download an installer or executable (recommended)

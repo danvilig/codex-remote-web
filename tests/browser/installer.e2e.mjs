@@ -29,22 +29,24 @@ try {
   await command(['hdiutil','attach','-nobrowse','-readonly','-mountpoint',mount,installer],root);mounted=true;
   const app=join(mount,'Codex Remote Web.app');
   await command(['plutil','-lint',join(app,'Contents/Info.plist')],root);
-  await cp(app,join(destination,'Codex Remote Web.app'),{recursive:true});
+  await cp(app,join(destination,'Codex Remote Web.app'),{recursive:true,verbatimSymlinks:true});
   await command(['hdiutil','detach',mount],root);mounted=false;
   const contents=join(destination,'Codex Remote Web.app/Contents');
-  await command(['/bin/sh','-n',join(contents,'MacOS/launch')],root);
+  process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(contents,'MacOS/Codex Remote Web');
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=join(contents,'Resources/gateway');
  } else if(process.platform==='win32') {
   await msi(['/i',installer,`INSTALLFOLDER=${destination}`]);installed=true;
-  await access(join(destination,'Start Codex Remote Web.cmd'));
+  await access(join(destination,'Codex Remote Web.exe'));
   await access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk'));
-  process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=destination;
+  process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=join(destination,'resources/gateway');
+  process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(destination,'Codex Remote Web.exe');
  } else throw new Error('Native installer test requires macOS or Windows');
  await command(['bun','run','test:portable'],root,{stream:true,timeoutMs:240_000});
+ await command(['node','tests/browser/desktop-native.e2e.mjs'],root,{stream:true,timeoutMs:240_000});
  if(installed) {
   await msi(['/x',installer]);installed=false;
   const uninstallLog=await readFile(join(temp,'uninstall.log'),'utf8');
-  await assert.rejects(access(join(destination,'codex-remote-web.exe')),`Installed executable remained after uninstall: ${uninstallLog}`);
+  await assert.rejects(access(join(destination,'Codex Remote Web.exe')),`Installed executable remained after uninstall: ${uninstallLog}`);
   await assert.rejects(access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk')),'Start menu shortcut remained after uninstall');
  }
  console.log('PASS: exact native installer, installation into a path with spaces, installed gateway/files/submissions/PTY and MSI uninstall');

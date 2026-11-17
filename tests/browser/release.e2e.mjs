@@ -76,12 +76,11 @@ try {
   }
   const port = await new Promise(resolve=>{const probe=createServer();probe.listen(0,'127.0.0.1',()=>{const value=probe.address().port;probe.close(()=>resolve(value));});});
   const quickBin=join(fixture,'quick-bin');mkdirSync(quickBin);
-  if (!windows) {
   copyFileSync(join(root,'tests/fixtures/quick-cloudflared.mjs'),join(quickBin,'quick-cloudflared.mjs'));
   const quickPort=await new Promise(resolve=>{const probe=createServer();probe.listen(0,'127.0.0.1',()=>{const value=probe.address().port;probe.close(()=>resolve(value));});});
   writeFileSync(join(quickBin,'quick-fixture.json'),JSON.stringify({port:quickPort,state:join(fixture,'quick-state.json')}));
-  writeFileSync(join(quickBin,'cloudflared'),`#!/bin/sh\nexec '${nodePath.replaceAll("'","'\\''")}' '${join(quickBin,'quick-cloudflared.mjs').replaceAll("'","'\\''")}' "$@"\n`,{mode:0o700});
-  }
+  if (windows) await run(['bun','build',join(quickBin,'quick-cloudflared.mjs'),'--compile','--outfile',join(quickBin,'cloudflared.exe')]);
+  else writeFileSync(join(quickBin,'cloudflared'),`#!/bin/sh\nexec '${nodePath.replaceAll("'","'\\''")}' '${join(quickBin,'quick-cloudflared.mjs').replaceAll("'","'\\''")}' "$@"\n`,{mode:0o700});
   const poisonLog=join(fixture,'unexpected-runtime');
   if (portable && !windows) {
     copyFileSync(join(root,'tests/fixtures/codex'),join(quickBin,'codex-fixture.mjs'));
@@ -141,17 +140,19 @@ try {
     const data=await response.json();assert.ok(response.ok,JSON.stringify(data));return {response,data};
   };
   let session=await setupRequest('launch',{});session=await setupRequest('session',{key:session.data.key});csrf=session.data.csrf;setupCookie=session.response.headers.get('set-cookie').split(';')[0];
-  if (!windows) {
   await setupRequest('quick/start',{email:'owner@example.test'});
   for(let attempt=0;;attempt++){const {data}=await setupRequest('quick/status');if(data.phase==='ready')break;if(data.phase==='failed'||attempt>100)throw new Error(data.error||'Packaged temporary origin failed');await Bun.sleep(50);}
   const quickState=JSON.parse(readFileSync(join(fixture,'quick-state.json'),'utf8'));assert.equal(quickState.email,'owner@example.test');
+  if (windows) {
+    assert.match(quickState.privateHost,/^[a-f0-9]{48}\.localhost$/);
+    assert.equal(JSON.stringify((await setupRequest('quick/status')).data).includes(quickState.privateHost),false);
+    assert.equal((await fetch(`http://127.0.0.1:${quickState.port}/api/health`)).status,403);
+    assert.equal((await fetch(`http://127.0.0.1:${quickPort}/api/health`,{redirect:'manual'})).status,302);
+    assert.equal((await fetch(`http://127.0.0.1:${quickPort}/api/health`,{headers:{cookie:'fixture_quick_login=owner',origin:'https://evil.example'}})).status,403);
+    assert.equal((await fetch(`http://127.0.0.1:${quickPort}/api/health`,{headers:{cookie:'fixture_quick_login=owner',origin:'https://fixture-quick.trycloudflare.com'}})).status,200);
+  }
   await setupRequest('quick/stop',{});
   for(let attempt=0;;attempt++){if((await setupRequest('quick/status')).data.phase==='stopped')break;if(attempt>400)throw new Error('Packaged temporary connector did not stop');await Bun.sleep(30);}
-  } else {
-    const response=await fetch(base+'/api/setup/quick/start',{method:'POST',headers:{origin:base,'x-setup-request':'1','content-type':'application/json','x-setup-csrf':csrf,cookie:setupCookie},body:JSON.stringify({email:'owner@example.test'})});
-    assert.equal(response.status,202);
-    for (let attempt=0;;attempt++) { const {data}=await setupRequest('quick/status'); if(data.phase==='failed'){assert.match(data.error,/Unix socket/);break;} if(attempt>100)throw new Error('Unsupported Windows quick tunnel did not fail closed');await Bun.sleep(50); }
-  }
   server.kill('SIGTERM');await server.exited;assert.equal((await serverError).includes('Frontend build failed'),false);server=null;
   if (portable) assert.equal(existsSync(poisonLog),false,'Executable must not use a host runtime, installer or compiler');
   console.log(portable ? 'PASS: native executable, bundled runtime/license/relink bundle, no host runtime/install/compiler use, outside-HOME and foreign-cwd gateway/setup, assets, restricted project APIs, real PTY and platform-appropriate remote-access checks' : 'PASS: allowlisted archive, checksum, dependency notices, frozen production install, outside-HOME production installation, restricted project APIs, foreign-cwd gateway/setup startup and packaged PTY/temporary-connector workers');

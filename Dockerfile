@@ -12,7 +12,7 @@ RUN bun install --frozen-lockfile && npm_config_nodedir=/usr/local npm rebuild n
 COPY scripts/build.ts scripts/setup.ts scripts/
 COPY src/ src/
 COPY public/ public/
-RUN bun run build && bun install --production --frozen-lockfile
+RUN bun run build --headless && bun install --production --frozen-lockfile
 
 FROM runtime-base AS production
 COPY --from=build --chown=node:node /app/node_modules ./node_modules

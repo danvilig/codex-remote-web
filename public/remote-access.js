@@ -1,7 +1,7 @@
 import { mountTemporaryAccess } from './temporary-access.js';
 import { hostnameFor } from '../src/shared/remote-address.js';
 // Shared by settings and standalone setup. Credentials stay on the server; browsers never store them.
-export function mountRemoteAccess(root, { t = value => value, standalone = false } = {}) {
+export function mountRemoteAccess(root, { t = value => value, standalone = false, transport = null } = {}) {
   const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
   const text = value => escape(value);
   const permissions = [['Account','Account Settings','Read'],['Account','Cloudflare Tunnel','Edit'],['Account','Access: Apps and Policies','Edit'],['Account','Access: Organizations, Identity Providers, and Groups','Read'],['Zone','Zone','Read'],['Zone','DNS','Edit']];
@@ -99,13 +99,17 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
   function setMessage(value = '', error = false) { message.textContent = t(value); message.classList.toggle('error', error); }
   function buttons(disabled) { for (const button of root.querySelectorAll('button')) button.disabled = disabled; }
   async function request(path, body) {
+    if (transport) return transport(path, body);
     const response = await fetch(`/api/setup/${path}`, { method: body === undefined ? 'GET' : 'POST', cache: 'no-store', headers: { 'X-Setup-Request': '1', ...(csrf ? { 'X-Setup-Csrf': csrf } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     const data = await response.json();
     if (!response.ok) throw Object.assign(new Error(data.error || 'Setup request failed.'), { status: response.status, details: data.details });
     return data;
   }
   async function perform(fn) {
-    if (busy) return; busy = true; buttons(true); setMessage();
+    if (busy) return;
+    const focused = root.contains(document.activeElement) ? document.activeElement : null;
+    const trigger = focused?.closest('button') || focused?.closest('form')?.querySelector('button[type=submit]');
+    busy = true; buttons(true); setMessage(); root.setAttribute('aria-busy', 'true'); trigger?.setAttribute('aria-busy', 'true');
     try { await fn(); } catch (error) {
       setMessage(error instanceof TypeError || error instanceof SyntaxError ? 'Remote access could not be loaded. Retry or refresh this page.' : error.message || 'Setup request failed.', true);
       if (error.details) {
@@ -116,7 +120,7 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
         message.append(context, permission, hint);
       }
       if (error.status === 401 || error.status === 403) { csrf = ''; show('locked'); } }
-    finally { busy = false; buttons(false); }
+    finally { busy = false; buttons(false); root.removeAttribute('aria-busy'); trigger?.removeAttribute('aria-busy'); }
   }
   function options(select, items, empty) {
     if (!Array.isArray(items)) throw new Error('Cloudflare returned incomplete resource data. Retry loading.');
