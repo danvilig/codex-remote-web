@@ -1,10 +1,13 @@
 {
   "name": "codex-remote-web",
-  "version": "0.2.0-alpha.3",
+  "version": "0.2.0-beta.1",
   "private": true,
   "license": "MIT",
   "type": "module",
   "scripts": {
+    "desktop:build": "bun scripts/desktop.ts",
+    "desktop:dev": "bun run build && bun scripts/desktop.ts --run",
+    "test:desktop": "bun test tests/unit/desktop.test.ts && bun tests/browser/desktop-settings.e2e.mjs",
     "start": "bun run src/server/index.ts",
     "dev": "bun run scripts/dev.ts",
     "build": "bun scripts/build.ts",
@@ -68,7 +71,9 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@electron/packager": "20.3.0",
     "@types/ws": "^8.18.1",
+    "electron": "45.3.3",
     "jsdom": "^26.1.0",
     "jsqr": "1.4.0",
     "playwright": "^1.61.1"

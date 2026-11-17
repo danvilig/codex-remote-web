@@ -23,18 +23,20 @@ let edgeToken = await token();
 let blocked = false;
 let navigationSite = null;
 const sockets = new Set();
+const cookieValue = 'fixture-access-cookie';
+const hasCookie = req => String(req.headers.cookie || '').split(';').some(value => value.trim() === `CF_Authorization=${cookieValue}`);
 // Local HTTPS edge fixture injects a signed identity; it is never used by production code.
 const edge = httpsServer({ key: readFileSync(join(fixture, 'key.pem')), cert: readFileSync(join(fixture, 'cert.pem')) }, (req, res) => {
-  if (req.url === '/login-return') { res.writeHead(200, { 'content-type':'text/html' }); res.end('<a id="finish" href="/login-complete">Finish sign-in</a>'); return; }
-  if (req.url === '/login-complete') { res.writeHead(302, { location: origin }); res.end(); return; }
+  if (req.url === '/login-return') { res.writeHead(200, { 'content-type':'text/html' }); res.end(`<a id="finish" href="${origin}/login-complete">Finish sign-in</a>`); return; }
+  if (req.url === '/login-complete') { res.writeHead(302, { location: origin, 'set-cookie': `CF_Authorization=${cookieValue}; Max-Age=2592000; Path=/; HttpOnly; Secure; SameSite=Lax` }); res.end(); return; }
   if (req.url === '/' && req.headers['sec-fetch-mode'] === 'navigate') navigationSite = req.headers['sec-fetch-site'];
-  if (blocked) { res.writeHead(401, { 'content-type': 'text/html' }); res.end('Access login required'); return; }
+  if (blocked || !hasCookie(req)) { res.writeHead(401, { 'content-type': 'text/html' }); res.end('Access login required'); return; }
   const upstream = httpRequest({ host: '127.0.0.1', port: serverPort, path: req.url, method: req.method, headers: { ...req.headers, host: `localhost:${edgePort}`, 'cf-access-jwt-assertion': edgeToken } }, reply => { res.writeHead(reply.statusCode, reply.headers); reply.pipe(res); });
   upstream.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); }); req.pipe(upstream);
 });
 edge.on('connection', socket => { sockets.add(socket); socket.on('close', () => sockets.delete(socket)); });
 edge.on('upgrade', (req, socket, head) => {
-  if (blocked) { socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'); return; }
+  if (blocked || !hasCookie(req)) { socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'); return; }
   const upstream = connect(serverPort, '127.0.0.1', () => {
     const headers = { ...req.headers, host: `localhost:${edgePort}`, 'cf-access-jwt-assertion': edgeToken };
     upstream.write(`${req.method} ${req.url} HTTP/1.1\r\n${Object.entries(headers).map(([name,value])=>`${name}: ${value}`).join('\r\n')}\r\n\r\n`);
@@ -59,7 +61,7 @@ async function deniedSocket(path, extra = {}) {
 try {
   for (let attempt=0;;attempt++) { try { const response = await signed('/api/health'); if ((await response.json()).codex) break; } catch {} if (attempt>100) throw new Error('Access fixture startup failed'); await Bun.sleep(50); }
   for (const path of ['/', '/app.bundle.js', '/api/config', '/api/conversation/goal', '/api/conversation/fork', '/api/composer/tools', '/api/events', '/api/customize', '/api/schedules', '/api/library', '/api/library/preview', '/api/files/document', '/api/attachments', '/api/attachments/file', '/api/attachments/preview', '/api/account', '/api/remote-access/status']) assert.equal((await request(path)).status, 401, path);
-  assert.equal((await request('/api/config', { headers: { authorization: 'Bearer must-not-bypass-access', cookie: 'codex_webui_session=fake', 'cf-access-authenticated-user-email': 'owner@example.test' } })).status, 401);
+  assert.equal((await request('/api/config', { headers: { authorization: 'Bearer must-not-bypass-access', cookie: 'codex_webui_session=fake; CF_Authorization=forged', 'cf-access-authenticated-user-email': 'owner@example.test' } })).status, 401);
   assert.equal((await signed('/setup')).status, 403);
   assert.equal((await fetch(base + '/api/setup/ready')).status, 403);
   const ready = await fetch(base + '/api/setup/ready', { headers: { 'x-setup-probe': 'fixture-private-ready-nonce' } });
@@ -108,6 +110,19 @@ try {
   const [returned] = await Promise.all([page.waitForNavigation({waitUntil:'domcontentloaded'}), page.locator('#finish').click()]);
   assert.equal(navigationSite, 'cross-site'); assert.equal(returned.status(), 200);
   await page.waitForFunction(()=>globalThis.__codexWebuiDebug?.state.connected);
+  const accessCookie = (await context.cookies(origin)).find(cookie => cookie.name === 'CF_Authorization');
+  assert.equal(accessCookie.httpOnly, true); assert.equal(accessCookie.secure, true); assert.equal(accessCookie.sameSite, 'Lax');
+  assert(Math.abs(accessCookie.expires - Date.now()/1000 - 30*86400) < 10);
+  assert.equal(await page.evaluate(() => document.cookie.includes('CF_Authorization')), false);
+  // Restore the persistent cookie in a fresh browser context, as after a browser restart.
+  const remembered = await context.storageState();
+  const reopenedContext = await browser.newContext({ ignoreHTTPSErrors: true, storageState: remembered });
+  const reopened = await reopenedContext.newPage();
+  await reopened.goto(origin, { waitUntil: 'domcontentloaded' });
+  await reopened.waitForFunction(()=>globalThis.__codexWebuiDebug?.state.connected);
+  assert.equal(await reopened.locator('#accessGate').isVisible(), false);
+  assert.equal(await reopened.evaluate(() => JSON.stringify({ ...localStorage, ...sessionStorage }).includes('fixture-access-cookie')), false);
+  await reopenedContext.close();
   await page.waitForFunction(()=>document.querySelector('#accountAvatar').textContent==='O');
   assert.equal(await page.locator('#accountButton').getAttribute('title'),'owner@example.test');
   const setupRequests = [];
@@ -158,7 +173,7 @@ try {
   assert.equal(await page.locator('#prompt').inputValue(),'Keep this draft, do not execute it');
   assert.deepEqual(errors,[]);
   await context.close();
-  const fallbackContext = await browser.newContext({ ignoreHTTPSErrors:true });
+  const fallbackContext = await browser.newContext({ ignoreHTTPSErrors:true, storageState: remembered });
   await fallbackContext.addInitScript(() => { globalThis.WebSocket = class { constructor() { throw new Error('Fixture blocks WS'); } }; });
   const fallback = await fallbackContext.newPage(); fallback.setDefaultTimeout(10000);
   edgeToken = await token(8);

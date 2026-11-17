@@ -10,4 +10,10 @@ if (!checks) {
   await mkdir(resolve(root, 'dist'), { recursive: true });
   await cp(resolve(root, 'src/server/terminal/worker.js'), resolve(root, 'dist/terminal-worker.js'));
   await cp(resolve(root, 'src/server/setup/quick-worker.js'), resolve(root, 'dist/quick-worker.js'));
+  await cp(resolve(root, 'src/server/desktop/connector-worker.js'), resolve(root, 'dist/desktop-connector-worker.js'));
+  await cp(resolve(root, 'src/server/bridge/isolated-worker.js'), resolve(root, 'dist/isolated-worker.js'));
+}
+if (!process.argv.includes('--headless')) {
+  const { buildDesktop } = await import('./desktop.ts');
+  await buildDesktop(resolve(root, '.artifacts', checks ? 'check/desktop' : 'desktop-dev'));
 }

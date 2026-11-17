@@ -19,7 +19,7 @@ async function loadApp(){
 async function start(){
   let status;
   try{
-    const response=await fetch('/api/auth/status',{cache:'no-store'});
+    const response=await fetch('/api/auth/status',{credentials:'same-origin',cache:'no-store'});
     status=await response.json();
     if(!response.ok && !['cloudflare-access','quick-tunnel'].includes(status.mode))throw new Error(`Authentication status failed (${response.status})`);
   }catch(reason){console.error('[codex-webui] authentication status failed',reason);return}

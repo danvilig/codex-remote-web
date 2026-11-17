@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Deterministic app-server fixture. Never invokes an LLM or executes a tool.
 import { createInterface } from 'node:readline';
-import { readdirSync, readFileSync, appendFileSync } from 'node:fs';
+import { readdirSync, readFileSync, appendFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
 const send = message => process.stdout.write(JSON.stringify(message) + '\n');
 const cwd = process.env.CODEX_WEBUI_CWD;
 let questionEmitted = false;
@@ -73,7 +74,13 @@ for await (const line of createInterface({ input: process.stdin })) {
   setTimeout(() => {
     send({ id: message.id, result });
     if((resources||conversationTools)&&message.method==='turn/interrupt'){const saved=histories.get(message.params.threadId)?.find(turn=>turn.id===message.params.turnId);if(saved)saved.status='interrupted';send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{id:message.params.turnId,status:'interrupted',items:[]}}});}
-    if((resources||conversationTools)&&message.method==='turn/start'&&!message.params.input.some(item=>/\[(wait|approval|question)\]/.test(item.text||'')))setTimeout(()=>{const saved=histories.get(message.params.threadId)?.find(turn=>turn.id===result.turn.id);if(saved)saved.status='completed';send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{...result.turn,status:'completed',...(saved?{items:saved.items}:{})}}});},Number(process.env.CODEX_WEBUI_FIXTURE_TURN_DURATION_MS)||100);
+    if((resources||conversationTools)&&message.method==='turn/start'&&!message.params.input.some(item=>/\[(wait|approval|question)\]/.test(item.text||''))){
+      const complete=()=>{const saved=histories.get(message.params.threadId)?.find(turn=>turn.id===result.turn.id);if(saved)saved.status='completed';send({method:'turn/completed',params:{threadId:message.params.threadId,turn:{...result.turn,status:'completed',...(saved?{items:saved.items}:{})}}});};
+      // Opt-in test control keeps queue assertions independent of elapsed time.
+      const completionDirectory=process.env.CODEX_WEBUI_FIXTURE_COMPLETION_DIR;
+      if(completionDirectory){const timer=setInterval(()=>{if(existsSync(join(completionDirectory,result.turn.id))){clearInterval(timer);complete();}},40);timer.unref();}
+      else setTimeout(complete,Number(process.env.CODEX_WEBUI_FIXTURE_TURN_DURATION_MS)||100);
+    }
     if(conversationTools&&message.method==='turn/start'&&message.params.input.some(item=>/\[(approval|question)\]/.test(item.text||''))){
       const id=`side-request-${result.turn.id}`,p={threadId:message.params.threadId,turnId:result.turn.id,itemId:'side-tool'};sideRequests.set(id,p);
       const question=message.params.input.some(item=>item.text?.includes('[question]'));

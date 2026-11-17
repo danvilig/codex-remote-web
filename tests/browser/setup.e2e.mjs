@@ -4,6 +4,7 @@ import { join, delimiter } from 'node:path';
 import { createServer } from 'node:net';
 import { chromium } from 'playwright';
 import { startSetupServer } from '../../src/server/setup/http.js';
+import { writePrivate } from '../../src/server/desktop/private-store.js';
 import { SetupService } from '../../src/server/setup/service.js';
 import { setupFixture, INPUT, TOKEN } from '../helpers/setup-fixture.js';
 import { root, artifact, launchOptions } from '../helpers/browser-runtime.mjs';
@@ -21,10 +22,29 @@ try {
   await page.locator('[data-stage=account]:visible').waitFor();
   assert.equal(new URL(page.url()).hash,'');
   assert.equal(await page.locator('[data-stage=account]').textContent().then(value=>/saved.*future|future management|future visits/i.test(value)),false);
-  await page.screenshot({ path: artifact('setup-connect-dark.png') });
+  assert.equal(await page.locator('[data-stage=account]').evaluate(node=>getComputedStyle(node).animationName),'settings-enter');
+  await page.emulateMedia({ reducedMotion:'reduce' });
+  assert.equal(await page.locator('[data-stage=account]').evaluate(node=>getComputedStyle(node).animationName),'none');
+  await page.emulateMedia({ reducedMotion:'no-preference' });
+  await page.screenshot({ path: artifact('setup-connect-dark.png'), animations:'disabled' });
+  // Hold a real fixture request to verify feedback lasts until the response arrives.
+  let releaseConnect;
+  const connectGate = new Promise(resolve=>{ releaseConnect=resolve; });
+  await page.route('**/api/setup/connect',async route=>{ await connectGate; await route.continue(); });
   await page.locator('[name=token]').fill(TOKEN);
-  await page.locator('[data-stage=account] button[type=submit]').click();
+  const connect = page.locator('[data-stage=account] button[type=submit]');
+  await connect.click();
+  assert.equal(await connect.getAttribute('aria-busy'),'true');
+  assert.equal(await connect.isDisabled(),true);
+  assert.equal(await connect.evaluate(node=>getComputedStyle(node,'::after').animationName),'settings-spin');
+  await page.emulateMedia({ reducedMotion:'reduce' });
+  assert.equal(await connect.evaluate(node=>getComputedStyle(node,'::after').animationName),'none');
+  assert.equal(await connect.getAttribute('aria-busy'),'true','Reduced motion preserves operation feedback');
+  releaseConnect();
   await page.locator('[data-stage=address]:visible').waitFor();
+  await page.waitForFunction(()=>!document.querySelector('[data-stage=account] button[type=submit]').hasAttribute('aria-busy'));
+  await page.unroute('**/api/setup/connect');
+  await page.emulateMedia({ reducedMotion:'no-preference' });
   await page.locator('[name=tunnelId] option[value="tunnel-12345"]').waitFor({ state:'attached' });
   assert.equal(await page.locator('[name=token]').inputValue(),'');
   assert.match(await page.locator('[name=tunnelId] option:checked').textContent(),/Connected to this machine/);
@@ -216,6 +236,38 @@ try {
   await shell.screenshot({path:artifact('setup-settings-edit-preview-zh-mobile.png'),fullPage:true});
   await shell.locator('[data-action=back]').click();await shell.locator('[data-action=cancelConfiguration]').click();
   await shell.locator('[data-stage=ready]:visible').waitFor();
+
+  // Desktop workspaces expose the desktop receipt, never launch the CLI's
+  // separate deployment manager. Exercise real HTTP routes and the full shell.
+  await shellContext.close(); gateway.kill('SIGTERM'); await gateway.exited;
+  gateway = Bun.spawn(['bun','src/server/index.ts'], { cwd: root, env: { ...process.env, HOME:home, CODEX_HOME:home, CODEX_AUTH_PATH:join(home,'auth.json'), HOST:'127.0.0.1', PORT:String(port), CODEX_WEBUI_AUTH_MODE:'local', CODEX_WEBUI_CWD:home, CODEX_WEBUI_REVIEW_ROOT:home, CODEX_WEBUI_CODEX:join(root,'tests/fixtures/codex'), CODEX_WEBUI_DESKTOP_CHILD:'1', CODEX_WEBUI_ENABLE_TERMINAL:'false' }, stdout:'ignore', stderr:'ignore' });
+  for(let attempt=0;;attempt++){ try { if((await (await fetch(base+'/api/health')).json()).codex)break; } catch {} if(attempt>100)throw new Error('Desktop workspace fixture did not start'); await Bun.sleep(50); }
+  const desktopContext=await browser.newContext({viewport:{width:1280,height:1000},colorScheme:'dark'});
+  await desktopContext.addInitScript(()=>{if(window===window.top&&!localStorage.getItem('codex-webui-locale'))localStorage.setItem('codex-webui-locale','en');});
+  const desktop=await desktopContext.newPage(), managementRequests=[];
+  desktop.on('pageerror',error=>errors.push(error.message));
+  desktop.on('request',req=>{if(new URL(req.url()).pathname.startsWith('/api/setup/'))managementRequests.push(req.url());});
+  await desktop.goto(base+'/settings/remote-access'); await desktop.locator('[data-stage=overview]:visible').waitFor();
+  assert.deepEqual(await (await fetch(base+'/api/remote-access/status')).json(),{configured:false,management:'desktop',canManage:false});
+  assert.equal(await desktop.locator('[data-remote=managementHint]').textContent(),'Manage remote access in the desktop app.');
+  for(const selector of ['[data-action=manageLocal]','[data-action=quickOverview]','[data-action=unlock]','[data-remote=overviewLink]'])assert.equal(await desktop.locator(selector).isVisible(),false);
+  await desktop.screenshot({path:artifact('desktop-browser-unconfigured-en.png'),fullPage:true});
+  const desktopReceipt=join(savedDirectory,'desktop/setup-state.json');
+  await writePrivate(desktopReceipt,{phase:'complete',input:{...INPUT,hostname:'desktop.example.com'},teamDomain:'fixture.cloudflareaccess.com',aud:'fixture-private-aud',probe:'fixture-private-probe',connector:{token:'fixture-private-token'}});
+  await desktop.reload();await desktop.locator('[data-stage=overview]:visible').waitFor();
+  assert.match(await desktop.locator('[data-remote=overviewSummary]').textContent(),/desktop\.example\.com/);
+  assert.equal(await desktop.locator('[data-remote=overviewLink]').getAttribute('href'),'https://desktop.example.com');
+  for(const selector of ['[data-action=manageLocal]','[data-action=quickOverview]','[data-action=unlock]'])assert.equal(await desktop.locator(selector).isVisible(),false);
+  const safeStatus=await (await fetch(base+'/api/remote-access/status')).json();assert.equal(safeStatus.canManage,false);assert.equal(JSON.stringify(safeStatus).includes('fixture-private-'),false);
+  for(const width of [1280,768,390]){await desktop.setViewportSize({width,height:900});await desktop.screenshot({path:artifact(`desktop-browser-configured-en-${width}.png`),fullPage:true});assert.equal(await desktop.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);}
+  await desktop.evaluate(()=>localStorage.setItem('codex-webui-locale','zh-CN'));await desktop.reload();await desktop.locator('[data-stage=overview]:visible').waitFor();
+  assert.equal(await desktop.locator('[data-remote=managementHint]').textContent(),'请在桌面应用中管理远程访问。');
+  await desktop.screenshot({path:artifact('desktop-browser-configured-zh-mobile.png'),fullPage:true});
+  await writePrivate(desktopReceipt,{phase:'removed'});await desktop.reload();await desktop.locator('[data-stage=overview]:visible').waitFor();
+  assert.equal(await desktop.locator('[data-remote=overviewLink]').isVisible(),false);assert.equal(await desktop.locator('[data-remote=overviewSummary]').textContent(),'');
+  assert.deepEqual(managementRequests,[],'Desktop browser must not create a second deployment manager');
+  const blocked=await fetch(base+'/api/setup/launch',{method:'POST',headers:{origin:base,'x-setup-request':'1','content-type':'application/json'},body:'{}'});assert.equal(blocked.status,409);
+  await desktopContext.close();
 
   const rpc=await readFile(join(home,'rpc.log'),'utf8').catch(error=>{if(error.code==='ENOENT')return '';throw error;}); assert.equal(rpc.includes('turn/start'),false);
   assert.deepEqual(errors,[]);

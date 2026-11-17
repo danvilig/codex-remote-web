@@ -1,7 +1,7 @@
 import { mountTemporaryAccess } from './temporary-access.js';
 import { hostnameFor } from '../src/shared/remote-address.js';
 // Shared by settings and standalone setup. Credentials stay on the server; browsers never store them.
-export function mountRemoteAccess(root, { t = value => value, standalone = false } = {}) {
+export function mountRemoteAccess(root, { t = value => value, standalone = false, transport = null } = {}) {
   const escape = value => String(value).replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[char]));
   const text = value => escape(value);
   const permissions = [['Account','Account Settings','Read'],['Account','Cloudflare Tunnel','Edit'],['Account','Access: Apps and Policies','Edit'],['Account','Access: Organizations, Identity Providers, and Groups','Read'],['Zone','Zone','Read'],['Zone','DNS','Edit']];
@@ -99,13 +99,17 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
   function setMessage(value = '', error = false) { message.textContent = t(value); message.classList.toggle('error', error); }
   function buttons(disabled) { for (const button of root.querySelectorAll('button')) button.disabled = disabled; }
   async function request(path, body) {
+    if (transport) return transport(path, body);
     const response = await fetch(`/api/setup/${path}`, { method: body === undefined ? 'GET' : 'POST', cache: 'no-store', headers: { 'X-Setup-Request': '1', ...(csrf ? { 'X-Setup-Csrf': csrf } : {}), ...(body === undefined ? {} : { 'content-type': 'application/json' }) }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
     const data = await response.json();
     if (!response.ok) throw Object.assign(new Error(data.error || 'Setup request failed.'), { status: response.status, details: data.details });
     return data;
   }
   async function perform(fn) {
-    if (busy) return; busy = true; buttons(true); setMessage();
+    if (busy) return;
+    const focused = root.contains(document.activeElement) ? document.activeElement : null;
+    const trigger = focused?.closest('button') || focused?.closest('form')?.querySelector('button[type=submit]');
+    busy = true; buttons(true); setMessage(); root.setAttribute('aria-busy', 'true'); trigger?.setAttribute('aria-busy', 'true');
     try { await fn(); } catch (error) {
       setMessage(error instanceof TypeError || error instanceof SyntaxError ? 'Remote access could not be loaded. Retry or refresh this page.' : error.message || 'Setup request failed.', true);
       if (error.details) {
@@ -116,7 +120,7 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
         message.append(context, permission, hint);
       }
       if (error.status === 401 || error.status === 403) { csrf = ''; show('locked'); } }
-    finally { busy = false; buttons(false); }
+    finally { busy = false; buttons(false); root.removeAttribute('aria-busy'); trigger?.removeAttribute('aria-busy'); }
   }
   function options(select, items, empty) {
     if (!Array.isArray(items)) throw new Error('Cloudflare returned incomplete resource data. Retry loading.');
@@ -243,6 +247,17 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
       const response = await fetch('/api/remote-access/status', { cache: 'no-store' });
       if (!response.ok) throw new Error('Remote access status is unavailable. Try again.');
       const data = await response.json();
+      const desktopManaged = data.management === 'desktop';
+      if (desktopManaged && !data.configured) {
+        $('[data-remote="overviewSummary"]').replaceChildren();
+        $('[data-remote=overviewTitle]').textContent = t('Remote access');
+        $('[data-remote=managementHint]').textContent = t('Manage remote access in the desktop app.');
+        $('[data-remote=overviewState]').textContent = t('Manage remote access in the desktop app.');
+        $('[data-remote=overviewLink]').hidden = true;
+        $('[data-action=manageLocal]').hidden = true;
+        $('[data-action=quickOverview]').hidden = true;
+        show('overview'); return true;
+      }
       if (!data.configured) return false;
       const address = new URL(data.publicOrigin);
       if (address.protocol !== 'https:' || address.origin !== data.publicOrigin) throw new Error('Remote access status is unavailable. Try again.');
@@ -251,12 +266,13 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
       $('[data-remote=overviewTitle]').textContent=t(quickMode?'Temporary access without a domain':'Remote access is configured');
       const values = [['Public hostname', address.hostname], ['Authentication', quickMode?'Email verification':'Cloudflare Access'], ['Allowed email', data.allowedEmail]];
       if(data.teamDomain)values.push(['Team Domain',data.teamDomain]);
-      $('[data-remote=managementHint]').textContent=t(quickMode?'This temporary address is managed from the local WebUI. Stopping it closes its remote connections and terminals.':'To change or remove this deployment, open Remote access on the server using its local address. No API token is needed to view this configuration.');
+      $('[data-remote=managementHint]').textContent=t(desktopManaged ? 'Manage remote access in the desktop app.' : quickMode?'This temporary address is managed from the local WebUI. Stopping it closes its remote connections and terminals.':'To change or remove this deployment, open Remote access on the server using its local address. No API token is needed to view this configuration.');
       if (data.identity?.email) values.push(['Signed in as', data.identity.email]);
       if (data.expiresAt) values.push(['Session expires', new Date(data.expiresAt).toLocaleString()]);
       for (const [label,value] of values) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = t(label); dd.textContent = t(value); dd.dataset.i18nIgnore = ''; summary.append(dt,dd); }
       $('[data-remote="overviewState"]').textContent = t(data.mode==='quick-tunnel' ? 'This address works only while temporary access is running.' : data.recoveryRequired ? 'A configuration change needs recovery. Recover it before making other changes.' : data.active ? 'Cloudflare Access protection is active for this workspace.' : 'Your deployment configuration is saved. Open the public address to access the protected workspace.');
       $('[data-remote="overviewLink"]').href = address.origin;
+      $('[data-remote="overviewLink"]').hidden = false;
       $('[data-action="manageLocal"]').hidden = !data.canManage;
       $('[data-action=quickOverview]').hidden = !data.canManage;
       show('overview'); return true;

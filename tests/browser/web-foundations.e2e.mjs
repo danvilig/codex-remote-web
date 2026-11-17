@@ -6,6 +6,8 @@ import { delimiter, join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import WebSocket from 'ws';
 
+process.env.CODEX_WEBUI_APP_SERVER_MODE = 'isolated';
+
 const root = resolve(import.meta.dirname, '../..');
 const fixture = mkdtempSync(join(tmpdir(), 'codex-remote-web-test-'));
 const rpcLog = join(fixture, 'turns.jsonl');

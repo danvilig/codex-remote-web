@@ -2,7 +2,7 @@
 import {createServer,request} from 'node:http';
 import {connect} from 'node:net';
 import {writeFileSync,readFileSync} from 'node:fs';
-import {dirname,join} from 'node:path';
+import {dirname,join,basename} from 'node:path';
 const args=process.argv.slice(2);
 if(args.includes('--help')) { console.log('--allowed-mail --unix-socket');process.exit(0); }
 const values=new Set(['--config','--output','--loglevel','--protocol','--allowed-mail','--metrics','--grace-period']);
@@ -12,25 +12,30 @@ for(let i=1;i<args.length;i++) {
   if(flags.has(args[i]) || args[i]==='ingress' || args[i]==='validate')continue;
   console.error('Incorrect Usage. flag provided but not defined: '+args[i]);process.exit(1);
 }
-const get=name=>args[args.indexOf(name)+1], configPath=get('--config'), socketPath=JSON.parse(readFileSync(configPath,'utf8')).ingress[0].service.slice(5), email=get('--allowed-mail');
-if(!socketPath || !args.includes('--hello-world') || get('--output')!=='json')throw new Error('Expected private Unix ingress and JSON output');
+const get=name=>args[args.indexOf(name)+1], configPath=get('--config'), ingress=JSON.parse(readFileSync(configPath,'utf8')).ingress[0], email=get('--allowed-mail');
+const socketPath=ingress.service.startsWith('unix:')?ingress.service.slice(5):null;
+const privateHost=ingress.originRequest?.httpHostHeader;
+const target=socketPath?{socketPath}:{host:'127.0.0.1',port:Number(new URL(ingress.service).port)};
+if((!socketPath && (!/^http:\/\/127\.0\.0\.1:\d+$/.test(ingress.service) || !/^[a-f0-9]{48}\.localhost$/.test(privateHost||''))) || !args.includes('--hello-world') || get('--output')!=='json')throw new Error('Expected a private ingress and JSON output');
 if(args.includes('validate')){console.log('OK');process.exit(0);}
-const config=JSON.parse(readFileSync(join(dirname(process.argv[1]),'quick-fixture.json'),'utf8'));
-writeFileSync(config.state,JSON.stringify({pid:process.pid,socketPath,email,args}));
+const fixtureDirectory=basename(process.execPath).toLowerCase()==='cloudflared.exe'?dirname(process.execPath):dirname(process.argv[1]);
+const config=JSON.parse(readFileSync(join(fixtureDirectory,'quick-fixture.json'),'utf8'));
+writeFileSync(config.state,JSON.stringify({pid:process.pid,socketPath,privateHost,port:target.port,email,args}));
 const sockets=new Set();
 const edge=createServer((req,res)=>{
   if(req.url==='/fixture-login') {res.writeHead(200,{'set-cookie':'fixture_quick_login=owner; HttpOnly; Path=/; SameSite=Lax','content-type':'text/html'});res.end('<a href="/">Continue</a>');return;}
   if(!req.headers.cookie?.includes('fixture_quick_login=owner')) {
     res.writeHead(req.method==='GET'?302:401,{'location':'/fixture-login','content-type':'text/html'});res.end('Fixture email verification');return;
   }
-  const upstream=request({socketPath,path:req.url,method:req.method,headers:req.headers},reply=>{res.writeHead(reply.statusCode,reply.headers);reply.pipe(res);});
+  const upstream=request({...target,path:req.url,method:req.method,headers:{...req.headers,...(privateHost?{host:privateHost}:{})}},reply=>{res.writeHead(reply.statusCode,reply.headers);reply.pipe(res);});
   upstream.on('error',()=>{if(!res.headersSent)res.writeHead(502);res.end();});req.pipe(upstream);
 });
 edge.on('connection',socket=>{sockets.add(socket);socket.on('close',()=>sockets.delete(socket));});
 edge.on('upgrade',(req,socket,head)=>{
   if(!req.headers.cookie?.includes('fixture_quick_login=owner')){socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');return;}
-  const upstream=connect(socketPath,()=>{
-    upstream.write(`${req.method} ${req.url} HTTP/1.1\r\n${Object.entries(req.headers).map(([key,value])=>`${key}: ${value}`).join('\r\n')}\r\n\r\n`);
+  const upstream=connect(socketPath||target,()=>{
+    const headers={...req.headers,...(privateHost?{host:privateHost}:{})};
+    upstream.write(`${req.method} ${req.url} HTTP/1.1\r\n${Object.entries(headers).map(([key,value])=>`${key}: ${value}`).join('\r\n')}\r\n\r\n`);
     upstream.write(head);upstream.pipe(socket);socket.pipe(upstream);
   });upstream.on('error',()=>socket.destroy());socket.on('error',()=>upstream.destroy());socket.on('close',()=>upstream.destroy());
 });

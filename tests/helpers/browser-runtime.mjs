@@ -2,6 +2,10 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+// Offline browser fixtures own a disposable stdio server. Shared-server tests
+// override this explicitly; production defaults must never start another writer.
+process.env.CODEX_WEBUI_APP_SERVER_MODE ||= 'isolated';
+
 export const root = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const artifacts = resolve(root, '.artifacts');
 mkdirSync(artifacts, { recursive: true });

@@ -1,4 +1,5 @@
 import { SetupCredentials } from './credentials.js';
+import { accessSessionSettings } from './access-session.js';
 import { localConnectorIds, connectorSummary } from './connectors.js';
 import { hostnameFor } from '../../shared/remote-address.js';
 import { randomUUID } from 'node:crypto';
@@ -149,7 +150,7 @@ export class SetupService {
         await this.waitConnector(input);
         this.step('Dedicated Tunnel connected to this machine');
       }
-      const app = await client.result(`${base}/access/apps`, 'POST', { name: receipt.appName, type: 'self_hosted', domain: input.hostname, session_duration: '1h', app_launcher_visible: false, policies: [{ name: 'Workspace owner', decision: 'allow', precedence: 1, include: [{ email: { email: input.email } }] }] });
+      const app = await client.result(`${base}/access/apps`, 'POST', { name: receipt.appName, type: 'self_hosted', domain: input.hostname, ...accessSessionSettings, app_launcher_visible: false, policies: [{ name: 'Workspace owner', decision: 'allow', precedence: 1, include: [{ email: { email: input.email } }] }] });
       receipt.appId = app.id; receipt.aud = app.aud; receipt.teamDomain = snapshot.teamDomain; await persist();
       if (!app.id || typeof app.aud !== 'string' || !app.aud) throw new SetupError('Cloudflare did not return the Access audience.');
       const policies = await client.list(`${base}/access/apps/${app.id}/policies`);
