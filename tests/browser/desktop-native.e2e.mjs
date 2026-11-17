@@ -79,7 +79,7 @@ try {
   for (;;) {
     const health = await (await fetch(state.url + '/api/health', { signal: AbortSignal.timeout(10000) })).json();
     if (health.codex) break;
-    assert.ok(Date.now() < deadline, 'Native fixture must connect before tray exit');
+    assert.ok(Date.now() < deadline, 'Native fixture must connect before tray exit: ' + JSON.stringify((await agentRequest(directory, 'status')).events));
     await delay(100);
   }
   console.error('Verifying tray exit preserves gateway');

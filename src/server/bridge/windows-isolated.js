@@ -103,15 +103,19 @@ public static class CodexIsolatedJob {
     }
 
     public static int Run(string[] command, string directory) {
+        string phase = "job-create";
         try {
+            Console.Error.WriteLine("[codex-isolated:" + phase + "]");
             ownedJob = CreateJobObject(IntPtr.Zero, null);
             if (ownedJob == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "CreateJobObject failed");
             ExtendedLimits limits = new ExtendedLimits();
             limits.Basic.Flags = 0x00002000; // JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE only: no breakaway.
+            phase = "job-limits"; Console.Error.WriteLine("[codex-isolated:" + phase + "]");
             if (!SetInformationJobObject(ownedJob, 9, ref limits, (uint)Marshal.SizeOf(typeof(ExtendedLimits))))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "SetInformationJobObject failed");
             // No native process exists until ownership succeeds. An inherited
             // outer job is retained; unsupported nesting fails closed.
+            phase = "job-assign"; Console.Error.WriteLine("[codex-isolated:" + phase + "]");
             if (!AssignProcessToJobObject(ownedJob, GetCurrentProcess()))
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "AssignProcessToJobObject failed");
 
@@ -125,6 +129,7 @@ public static class CodexIsolatedJob {
             spec.CreateNoWindow = true;
             spec.RedirectStandardInput = spec.RedirectStandardOutput = spec.RedirectStandardError = true;
             Process native = new Process(); native.StartInfo = spec;
+            phase = "native-start"; Console.Error.WriteLine("[codex-isolated:" + phase + "]");
             if (!native.Start()) throw new InvalidOperationException("Native server did not start");
 
             // Stream bytes directly: preserve UTF-8 and do not send PowerShell
@@ -139,10 +144,13 @@ public static class CodexIsolatedJob {
             });
             // Wait only for the root, never the output pumps: a tool may hold
             // those pipes open, or close them and keep silently running.
+            phase = "native-wait"; Console.Error.WriteLine("[codex-isolated:" + phase + "]");
             while (!native.WaitForExit(1000)) { }
             return native.ExitCode;
         }
         catch (Exception error) {
+            Win32Exception nativeError = error as Win32Exception;
+            Console.Error.WriteLine("[codex-isolated:" + phase + ":" + (nativeError == null ? 0 : nativeError.NativeErrorCode) + "]");
             Console.Error.WriteLine("[codex-isolated] " + error.Message);
             return 1;
         }
@@ -151,14 +159,16 @@ public static class CodexIsolatedJob {
 }
 `;
 
-export const windowsIsolatedScript = `$ErrorActionPreference='Stop'; try {
+export const windowsIsolatedScript = `$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; $phase='compile'; try {
+[Console]::Error.WriteLine('[codex-isolated:compile]');
 Add-Type -Language CSharp -TypeDefinition @'
 ${windowsIsolatedSource}
 '@
+$phase='spec'; [Console]::Error.WriteLine('[codex-isolated:spec]');
 $spec=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:CODEX_WEBUI_ISOLATED_SPEC))|ConvertFrom-Json;
 Remove-Item Env:CODEX_WEBUI_ISOLATED_SPEC;
 [Environment]::Exit([CodexIsolatedJob]::Run([string[]]$spec.command,[string]$spec.cwd));
-} catch { [Console]::Error.WriteLine('[codex-isolated] '+$_.Exception.Message); exit 1 }`;
+} catch { [Console]::Error.WriteLine('[codex-isolated:'+$phase+':0]'); [Console]::Error.WriteLine('[codex-isolated] '+$_.Exception.Message); exit 1 }`;
 
 export function windowsIsolatedProcess(command, cwd, env = process.env) {
   if (!Array.isArray(command) || !command.length || command.some(value => typeof value !== 'string' || value.includes('\0')) || !command[0]

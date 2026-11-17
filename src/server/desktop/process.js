@@ -16,7 +16,23 @@ export class GatewayProcess {
   }
   async launch({ env, cwd }) {
     const [binary, ...args] = this.command;
-    const child = spawn(binary, args, { env: { ...env, CODEX_WEBUI_DESKTOP_CHILD: '1' }, cwd, windowsHide: true, detached: process.platform !== 'win32', serialization: 'json', stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    const child = spawn(binary, args, { env: { ...env, CODEX_WEBUI_DESKTOP_CHILD: '1' }, cwd, windowsHide: true, detached: process.platform !== 'win32', serialization: 'json', stdio: ['ignore', 'ignore', 'pipe', 'ipc'] });
+    // Retain only fixed helper phase codes. Native stderr may contain private
+    // session data, so neither raw output nor arbitrary error text is logged.
+    let diagnostic = '';
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', chunk => {
+      diagnostic = (diagnostic + chunk).slice(-2048);
+      const marker = /\[codex-isolated:(compile|spec|job-create|job-limits|job-assign|native-start|native-wait)(?::([0-9]{1,10}))?\]/g;
+      let match;
+      while ((match = marker.exec(diagnostic))) {
+        if (match[2] && Number(match[2]) > 2147483647) continue;
+        this.log('native-helper:' + match[1] + (match[2] ? ':' + Number(match[2]) : ''));
+      }
+      // Keep only a possible marker split across stream chunks.
+      diagnostic = diagnostic.slice(diagnostic.lastIndexOf('[')).slice(0, 128);
+      if (diagnostic.includes(']')) diagnostic = '';
+    });
     this.child = child;
     const closed = new Promise(resolve => { child.once('exit', resolve); child.once('error', resolve); });
     this.closed = closed;
