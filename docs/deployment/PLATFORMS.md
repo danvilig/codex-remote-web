@@ -1,52 +1,38 @@
-# macOS / Windows
+# Desktop gateway / 桌面网关
 
-## 本地使用
+The macOS DMG, Windows per-user MSI and Linux desktop DEB open a shared Electron settings window. The standalone archives remain command-line distributions for headless use. Desktop packages include the existing Bun/Node gateway and native terminal; Codex CLI, Git and cloudflared are external prerequisites. Electron is pinned in the lockfile, and its MIT/Chromium notices accompany each desktop package.
 
-Release 包包含命令行网关、Bun、Node 和原生终端模块；同时提供 macOS DMG 和 Windows MSI 安装包。macOS 仅 Apple Silicon，最低 macOS 15；Windows 仅 x64，验收基线 Windows 11，需 NTFS 和内置 Windows PowerShell。不包含 Codex CLI、Git 或 cloudflared。
+## 初始化与日常使用
 
-macOS 打开 DMG，将 `.app` 拖入 Applications；双击应用会打开 Terminal 并在网关就绪后打开浏览器。关闭 Terminal/Ctrl+C 停止网关；把 `.app` 移到废纸篓即可移除程序。Windows MSI 安装到当前用户 LocalAppData/Programs，提供开始菜单的启动和浏览器入口，并在“已安装的应用”中卸载，无需管理员权限。两种安装器均不配置后台自启动，不安装或删除 Codex/Cloudflare 凭据、项目、队列和回执。升级前先停止当前网关。
+双击应用后，在“网关设置”选择项目目录、端口及可选的 Codex/cloudflared 程序路径，检测依赖并保存，再启动网关。沿用当前用户的 Codex 账户和配置；桌面窗口不管理模型提供商/API 密钥。Codex 和 Git 必需，cloudflared 仅公网访问需要。网页终端默认关闭，开启后以当前用户权限运行。
 
-便携归档可解压到用户可写目录（路径允许空格），保留整个文件夹。先核对对应 `.sha256`；macOS 使用 `shasum -a 256 <archive>`，Windows 使用 `Get-FileHash <archive> -Algorithm SHA256`。包未经过 Apple Developer ID/公证或 Authenticode 签名。仅对已核对的可信下载按系统提示单独批准；不全局禁用 Gatekeeper/SmartScreen。
+macOS 15+ 仅支持 Apple Silicon；Windows 11 仅支持 x64、NTFS 和 Windows PowerShell；Linux 桌面首轮基线为 Ubuntu 24.04 GNOME，提供 x64/arm64 DEB。Linux 原有服务器部署归档与便携 CLI 不变。桌面包尚未签名/公证；不要全局禁用 Gatekeeper、SmartScreen 或 Chromium 沙箱。Linux DEB 安装正确归属的 Chromium sandbox helper，无需修改主机 user namespace 策略。
 
-macOS：
+“概览”提供启动、停止、重启和打开浏览器工作区。关闭设置窗口后隐藏到托盘；退出托盘只退出界面，网关继续运行。Linux 桌面若不支持托盘，关闭按钮会最小化到任务栏，也可从应用菜单重新打开设置。设置在网关停止时仍可打开；变更运行参数前先停止网关。
 
-```sh
-export CODEX_WEBUI_CWD="$HOME/my-project"
-./codex-remote-web
-```
-
-Windows PowerShell：
-
-```powershell
-$env:CODEX_WEBUI_CWD = 'C:\Users\you\my-project'
-.\codex-remote-web.exe
-```
-
-打开 http://127.0.0.1:8899。默认使用当前用户的 Codex 配置。Windows npm 安装的 `codex.cmd` 通过内置 Node 启动官方 JS 入口，不需要另装 Node 运行 WebUI；原生 `codex.exe` 也可使用。终端默认使用 Windows PowerShell，macOS 使用 zsh。
-
-Windows 私有状态检查使用 NTFS owner/DACL，允许当前用户、SYSTEM、Administrators；拒绝其他账户可访问的目录、链接及无法确认的 ACL。不要在 FAT/exFAT 或多人共享目录保存私有状态。若权限检查失败，检查目录安全属性，不要取消服务端权限检查。Unix 继续校验 uid、mode、真实路径与链接。
+后台代理与界面分离，登录期间以当前用户运行：macOS 使用 LaunchAgent，Windows 使用交互用户登录任务，Linux 使用绑定 graphical-session.target 的 systemd 用户服务。登录自启默认勾选，在首次保存时注册；注销后停止，不是注销后仍在线的系统服务。禁用登录自启不停止当前运行的网关。Windows 任务不设运行时限，不因切换电池而停止。
 
 ## 公网访问
 
-固定域名自动部署向导依赖 Linux user systemd；macOS/Windows 不提供 launchd/Windows Service 自动安装。可手动运行 cloudflared，或将长期部署放在 Linux 上。
+先初始化并启动本地网关，再进入统一的“远程访问”页面：
 
-1. 在 Cloudflare 创建 Tunnel 和 Access 自托管应用，配置自己的 hostname、Team Domain、应用 AUD，并仅允许指定邮箱。确保 Access 覆盖整个 hostname。
-2. Tunnel ingress 指向 `http://127.0.0.1:8899`，网关保持 loopback。
-3. 在网关进程配置以下环境变量（以 [配置文档](../CONFIGURATION.md) 中实际名称为准）：
+- 临时访问：填写唯一允许邮箱，显式启动受保护的临时 HTTPS 地址；停止或重新登录后需重新生成，不自动公开新地址。
+- 固定域名：复用现有 Cloudflare Tunnel + Access 向导，支持新建专用 Tunnel、已有 Tunnel、预览、应用、调整、诊断和移除。桌面代理管理独立的 Access 网关与自有连接器；就绪检查通过后才添加公网路由。
+- 本地网关和固定域名网关使用不同端口。公网管理 API 不进入 Tunnel，Access、Origin、文件范围和审批边界继续由服务端校验。
+- Windows 临时访问使用专用 loopback 端口及每次运行重新生成的随机 Host 凭据，只有受邮箱保护的 cloudflared 连接器掌握该凭据；HTTP 和 WebSocket 均校验。不会退化为可直接访问的无认证源站。
 
-```sh
-CODEX_WEBUI_AUTH_MODE=cloudflare-access
-CODEX_WEBUI_PUBLIC_ORIGIN=https://your-hostname.example
-CODEX_WEBUI_CF_ACCESS_TEAM_DOMAIN=your-team.cloudflareaccess.com
-CODEX_WEBUI_CF_ACCESS_AUD=your-application-aud
-CODEX_WEBUI_CF_ACCESS_ALLOWED_EMAIL=you@example.com
-```
+仅恢复已完成的固定域名部署；未完成/需恢复的事务显示错误并由用户处理。停止网关会关闭自有公网连接和终端；共享 Codex daemon 不属于本应用，停止网关不会停止它。不要同时运行争用相同端口和 Codex 状态的旧版网关；桌面应用不自动接管现有 headless/systemd 部署。
 
-使用本机终端环境或私有 `.env`，不要把令牌、Tunnel 凭据或实际身份提交到仓库。启用 Access 模式后，本地浏览器也需要经受保护的公网域名访问；这是认证入口的预期行为，不要通过关闭认证解决。
+## 数据、升级与卸载
 
-4. 启动网关及连接器，从公网确认出现 Access 登录、身份验证通过后才能访问，错误邮箱和直接访问源站均被拒绝。参考 [Cloudflare 部署](CLOUDFLARE.md) 配置与回滚。
+桌面私有状态位于用户主目录的 `.config/codex-remote-web/desktop/`，包含配置、部署回执、管理令牌及稳定 SQLite 实例锁。Unix 检查 uid/mode，Windows 检查 NTFS owner/DACL；链接、共享或无法确认的权限会被拒绝。控制凭证不进入网页、URL、日志或发布包；诊断只显示有限的进程生命周期记录，不含会话内容。
 
-受保护的无域名临时访问依赖 Unix socket，支持 Linux/macOS；Windows 暂不支持，不会降级为无认证临时隧道。命令行进程停止后网关/临时连接器结束；后台自启动需用户自行配置，本版不提供安装服务按钮。
+升级前停止网关。Windows MSI 卸载和 Linux DEB 移除调用归属检查后的后台清理，保留项目、Codex 配置/凭据、队列与回执。macOS 移到废纸篓前，在“诊断”点击“停止并移除后台组件”。三端均可先用该按钮显式清理登录项。维护时也可运行随包网关的 `uninstall-desktop`；它不删除用户数据或云端资源。移除 Cloudflare 资源须先在远程向导执行“移除托管部署”。
 
+Windows 突然断电时仍不承诺目录项 fsync；保留未知提交的回执并核对，不自动重放。安装包中网关资源位置变为 macOS `.app/Contents/Resources/gateway`、Windows/Linux `resources/gateway`；CLI 便携包目录结构不变。
 
-Windows 文件内容在原子替换前执行 flush，但 Node/Bun 不提供目录 fsync，因此不承诺突然断电时目录项的落盘保证；保留回执、队列及 SQLite 状态，恢复时核对未知结果，不自动重放。多用户共享存储和跨主机队列不属于支持范围。
+## 开发和验收
+
+`bun run desktop:dev` 构建并打开桌面界面；首次需要执行 `node node_modules/electron/install.js` 下载锁定的 Electron 运行时。`bun run test:desktop` 使用隔离项目、协议/Cloudflare fixture 验证设置交互和后台生命周期，不访问个人账户或模型。`tests/browser/desktop-native.e2e.mjs` 在各原生安装包上检查真实窗口沙箱、preload 隔离、退出界面后网关继续运行、重新连接和停止。
+
+原生 CI 构建并测试 DMG/MSI/DEB；GUI 人工操作、系统信任提示、注销/登录真实桌面会话与真实公网邮箱验证需要单独报告，不能由 fixture 测试代替。保留源码、锁文件、第三方许可证与 Electron 的 Chromium 通知，签名、公证和正式发布单独进行。

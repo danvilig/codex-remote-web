@@ -102,7 +102,7 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     if (stopping || child?.exitCode === null) return;
     if (connection.mode === 'shared') { startShared(); return; }
     const [binary, ...prefix] = codexCommand();
-    const proc = spawn(binary, [...prefix, 'app-server', '--stdio'], { cwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' });
+    const proc = spawn(binary, [...prefix, 'app-server', '--stdio'], { cwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' && process.env.CODEX_WEBUI_DESKTOP_CHILD !== '1' });
     child = proc; buffer = '';
     proc.stdout.setEncoding('utf8');
     proc.stdout.on('data', chunk => {

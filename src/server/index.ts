@@ -259,6 +259,7 @@ if (!standalone && import.meta.dir !== resolve(appRoot, 'dist')) {
 await submissions.recover();
 bridge.start();
 server.listen(port, host, () => {
+  if (process.env.CODEX_WEBUI_DESKTOP_CHILD === '1' && process.connected) process.send?.({ type: 'desktop-ready' });
   console.log(`Codex Remote Web listening on http://${host}:${port}`);
   if (localAuth?.setupRequired()) console.warn(`[codex-webui] LAN password setup is required; the first LAN visitor will create it in ${managedPasswordPath}`);
   if (!localhostOnly) {
@@ -280,3 +281,20 @@ function shutdown() {
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+if (process.env.CODEX_WEBUI_DESKTOP_CHILD === '1' && process.connected) {
+  process.on('disconnect', shutdown);
+  process.on('message', async (message: any) => {
+    if (message?.type !== 'desktop-control') return;
+    if (message.action === 'shutdown') { shutdown(); return; }
+    try {
+      let result;
+      if (message.action === 'quick/status') result = quick.status();
+      else if (message.action === 'quick/start') { quick.start(message.body?.email); result = quick.status(); }
+      else if (message.action === 'quick/stop') result = await quick.stop();
+      else throw new Error('Unknown gateway control');
+      if (process.connected) process.send?.({ type: 'desktop-result', id: message.id, result });
+    } catch (error: any) {
+      if (process.connected) process.send?.({ type: 'desktop-result', id: message.id, error: error.message });
+    }
+  });
+}

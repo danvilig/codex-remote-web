@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Codex Remote Web</title>
+  <link rel="stylesheet" href="style.css"><link rel="stylesheet" href="workspace.css"><link rel="stylesheet" href="remote-access.css"><link rel="stylesheet" href="desktop.css">
+  <script type="module" src="renderer.js"></script>
+</head>
+<body class="remote-workspace desktop-workspace">
+  <aside class="desktop-sidebar">
+    <div class="desktop-brand"><span id="brand" aria-hidden="true"></span><div><strong>Codex Remote Web</strong><span data-text="Desktop gateway"></span></div></div>
+    <nav aria-label="Settings">
+      <button data-page="overview" aria-current="page"><span class="icon-slot" data-icon="sites" aria-hidden="true"></span><span data-text="Overview"></span></button>
+      <button data-page="configuration"><span class="icon-slot" data-icon="wrench" aria-hidden="true"></span><span data-text="Gateway settings"></span></button>
+      <button data-page="remote"><span class="icon-slot" data-icon="globe" aria-hidden="true"></span><span data-text="Remote access"></span></button>
+      <button data-page="diagnostics"><span class="icon-slot" data-icon="list" aria-hidden="true"></span><span data-text="Diagnostics"></span></button>
+    </nav>
+    <footer><div class="desktop-agent-status"><span class="status-dot" id="sidebarDot"></span><span id="sidebarStatus"></span></div><span data-text="Runs in your login session"></span></footer>
+  </aside>
+  <main class="desktop-main">
+    <div class="desktop-content">
+      <header class="desktop-heading"><div><p class="eyebrow" data-text="Your gateway, in the background."></p><h1 id="pageTitle"></h1></div><button class="settings-action" id="openWorkspace"><span data-text="Open workspace"></span><span class="icon-slot" data-icon="arrowRight" aria-hidden="true"></span></button></header>
+      <p id="message" role="status" aria-live="polite" aria-atomic="true"></p>
+      <section data-panel="overview" aria-labelledby="pageTitle">
+        <article class="desktop-card hero" id="gatewayCard">
+          <div class="hero-top"><span class="hero-mark icon-slot" data-icon="monitor" aria-hidden="true"></span><span class="gateway-badge"><span class="status-dot" id="gatewayDot"></span><span data-text="Local gateway"></span></span></div>
+          <h2 id="gatewayState"></h2><p id="gatewayDescription"></p>
+          <div class="desktop-actions"><button class="settings-action primary" id="start"><span class="icon-slot" data-icon="arrowRight" aria-hidden="true"></span><span data-text="Start gateway"></span></button><button class="settings-action" id="stop"><span class="icon-slot" data-icon="square" aria-hidden="true"></span><span data-text="Stop gateway"></span></button><button class="settings-action" id="restart"><span class="icon-slot" data-icon="refreshCw" aria-hidden="true"></span><span data-text="Restart"></span></button></div>
+          <dl class="gateway-details"><div><dt><span class="icon-slot" data-icon="globe" aria-hidden="true"></span><span data-text="Local address"></span></dt><dd><code id="localAddress"></code></dd></div><div><dt><span class="icon-slot" data-icon="folder" aria-hidden="true"></span><span data-text="Project directory"></span></dt><dd id="projectDirectory" data-i18n-ignore></dd></div></dl>
+        </article>
+        <aside class="desktop-session-note"><span class="icon-slot" data-icon="info" aria-hidden="true"></span><div><h2 data-text="Always available while you are signed in"></h2><p data-text="Close this window or quit the tray: your gateway keeps running. Signing out stops the background service."></p><button class="settings-action" id="initialize" data-text="Initialize gateway"></button></div></aside>
+      </section>
+      <section data-panel="configuration" aria-labelledby="pageTitle" hidden>
+        <p class="settings-description" data-text="Stop the gateway before changing its settings. Your existing Codex account and configuration are used."></p>
+        <form id="configuration">
+          <h2 class="desktop-section-title" data-text="Gateway connection"></h2>
+          <div class="desktop-card settings-group-card desktop-fields">
+            <label for="projectPath"><span data-text="Project directory"></span><div class="path-field"><input id="projectPath" name="cwd" required autocomplete="off" spellcheck="false"><button class="settings-action" type="button" data-choose="chooseDirectory" data-field="cwd"><span class="icon-slot" data-icon="folderOpen" aria-hidden="true"></span><span data-text="Browse"></span></button></div></label>
+            <label for="localPort"><span data-text="Local port"></span><input id="localPort" type="number" name="port" min="1024" max="65535" required></label>
+            <label for="codexPath"><span data-text="Codex executable (optional)"></span><div class="path-field"><input id="codexPath" name="codex" autocomplete="off" spellcheck="false" placeholder="Auto-detect"><button class="settings-action" type="button" data-choose="chooseCodex" data-field="codex"><span class="icon-slot" data-icon="folderOpen" aria-hidden="true"></span><span data-text="Browse"></span></button></div></label>
+            <label for="cloudflaredPath"><span data-text="cloudflared executable (optional)"></span><div class="path-field"><input id="cloudflaredPath" name="cloudflared" autocomplete="off" spellcheck="false" placeholder="Auto-detect"><button class="settings-action" type="button" data-choose="chooseCloudflared" data-field="cloudflared"><span class="icon-slot" data-icon="folderOpen" aria-hidden="true"></span><span data-text="Browse"></span></button></div></label>
+          </div>
+          <h2 class="desktop-section-title" data-text="Appearance"></h2>
+          <div class="desktop-card settings-group-card">
+            <label class="settings-row settings-select-row"><span><strong data-text="Language"></strong></span><select class="settings-select" id="desktopLanguage" name="language" aria-label="Language"><option value="system" data-text="System"></option><option value="en">English</option><option value="zh">简体中文</option></select></label>
+            <label class="settings-row settings-select-row"><span><strong data-text="Theme"></strong></span><select class="settings-select" id="desktopTheme" name="theme" aria-label="Theme"><option value="system" data-text="System"></option><option value="light" data-text="Light"></option><option value="dark" data-text="Dark"></option></select></label>
+          </div>
+          <h2 class="desktop-section-title" data-text="Background and terminal"></h2>
+          <div class="desktop-card settings-group-card">
+            <label class="settings-row settings-toggle-row"><span><strong data-text="Start gateway at login"></strong></span><input type="checkbox" name="autostart"><span class="settings-switch" aria-hidden="true"></span></label>
+            <label class="settings-row settings-toggle-row"><span><strong data-text="Enable web terminal"></strong><small data-text="The web terminal runs with your user permissions. Enable it only when needed."></small></span><input type="checkbox" name="terminal"><span class="settings-switch" aria-hidden="true"></span></label>
+          </div>
+          <div class="settings-save-bar desktop-save-bar"><button class="settings-action primary" type="submit" id="save"><span class="icon-slot" data-icon="check" aria-hidden="true"></span><span data-text="Save settings"></span></button><button class="settings-action" type="button" id="checkDependencies"><span class="icon-slot" data-icon="refreshCw" aria-hidden="true"></span><span data-text="Check dependencies"></span></button></div>
+        </form>
+        <section class="desktop-dependencies" aria-labelledby="dependencyTitle"><h2 class="desktop-section-title" id="dependencyTitle" data-text="Dependencies"></h2><p class="settings-description" data-text="Codex and Git are required. cloudflared is required only for remote access. Install missing tools or select their executable paths, then check again."></p><ul id="dependencies"></ul><div class="desktop-tool-links"><a href="https://developers.openai.com/codex/cli" target="_blank" rel="noreferrer">Codex CLI ↗</a><a href="https://git-scm.com/downloads" target="_blank" rel="noreferrer">Git ↗</a><a href="https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/" target="_blank" rel="noreferrer">cloudflared ↗</a></div></section>
+      </section>
+      <section data-panel="remote" aria-labelledby="pageTitle" hidden><div id="remoteAccess"></div></section>
+      <section data-panel="diagnostics" aria-labelledby="pageTitle" hidden>
+        <h2 class="desktop-section-title" data-text="Background activity"></h2><p class="settings-description" data-text="Lifecycle events only. Credentials and conversation contents are never shown here."></p><ol class="desktop-card desktop-events" id="events" tabindex="0" aria-label="Background activity"></ol>
+        <section class="desktop-danger-zone"><span class="icon-slot" data-icon="triangleAlert" aria-hidden="true"></span><div><h2 data-text="Background component"></h2><p data-text="Remove login startup and stop this application's background processes. Projects and credentials are preserved."></p><button class="settings-action danger" id="removeBackground" data-text="Stop and remove background component"></button></div></section>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

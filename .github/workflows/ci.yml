@@ -35,6 +35,7 @@ jobs:
       - run: npm_config_nodedir="$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")" npm rebuild node-pty
       - run: bunx playwright install --with-deps chromium webkit
       - run: bun run verify:release
+      - run: bun run test:desktop
       - run: docker build -t codex-remote-web:verify .
       - run: bun run test:docker
       - name: Use checked-out commit identity for the local snapshot

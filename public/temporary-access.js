@@ -48,9 +48,12 @@ export function mountTemporaryAccess(root, { request, ensureSession, back, t = v
     schedule();
   }
   async function action(fn) {
-    if(busy)return;busy=true;for(const button of root.querySelectorAll('button'))button.disabled=true;
+    if(busy)return;
+    const focused=root.contains(document.activeElement)?document.activeElement:null;
+    const trigger=focused?.closest('button') || focused?.closest('form')?.querySelector('button[type=submit]');
+    busy=true;root.setAttribute('aria-busy','true');trigger?.setAttribute('aria-busy','true');for(const button of root.querySelectorAll('button'))button.disabled=true;
     try {await fn();}catch(error){message(error.message || 'Temporary access could not start. Check the network and try again.',true);}
-    finally {busy=false;for(const button of root.querySelectorAll('button'))button.disabled=false;if(status){$('start').disabled=!status.available;$('stop').disabled=status.phase==='stopping';}}
+    finally {busy=false;root.removeAttribute('aria-busy');trigger?.removeAttribute('aria-busy');for(const button of root.querySelectorAll('button'))button.disabled=false;if(status){$('start').disabled=!status.available;$('stop').disabled=status.phase==='stopping';}}
   }
   $('form').onsubmit=event=>{event.preventDefault();void action(async()=>{render(await request('quick/start',{email:input.value}));schedule();});};
   $('stop').onclick=()=>void action(async()=>{render(await request('quick/stop',{}));schedule();});

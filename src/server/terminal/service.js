@@ -50,6 +50,7 @@ export function createTerminalSession({ cwd, cols = 100, rows = 24, onData, onEx
   try {
     session = spawn(nodeRuntime() || 'node', [worker, cwd, String(cols), String(rows)], {
       cwd,
+      windowsHide: true,
       env: process.env,
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
     });

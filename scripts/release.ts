@@ -26,7 +26,7 @@ const temp = await mkdtemp(join(outputDir, '.stage-'));
 const name = `${pkg.name}-${pkg.version}`, stage = join(temp, name);
 const files = [
   ...documentationImages,
-  'dist/setup.js', 'public/setup.html', 'public/setup.bundle.js', 'public/remote-access.css', 'dist/server.js', 'dist/terminal-worker.js', 'dist/quick-worker.js', 'bun.lock', '.env.example', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'README-zh.md', 'CHANGELOG.md', 'SECURITY.md',
+  'dist/setup.js', 'public/setup.html', 'public/setup.bundle.js', 'public/remote-access.css', 'dist/server.js', 'dist/terminal-worker.js', 'dist/quick-worker.js', 'dist/desktop-connector-worker.js', 'bun.lock', '.env.example', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'README-zh.md', 'CHANGELOG.md', 'SECURITY.md',
   'public/index.html', 'public/app.bundle.js', 'public/style.css', 'public/workspace.css', 'public/favicon.svg', 'public/auth-bootstrap.js', 'public/access-session.js', 'public/i18n.js', 'public/codex-brand.js',
   'DEVELOPMENT.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'docs/ARCHITECTURE.md', 'docs/ROADMAP.md', 'docs/CONFIGURATION.md', 'docs/RELEASING.md', 'docs/deployment/CLOUDFLARE.md', 'docs/deployment/SETUP.md', 'docs/deployment/PLATFORMS.md', 'ops/systemd/codex-remote-web.service.example', 'ops/systemd/environment.example', 'ops/cloudflare/ingress.yml.example',
   'docs/licenses/BUN.md', 'AGENTS.md', 'docs/GIT_WORKFLOW.md',
