@@ -180,3 +180,50 @@ test('built native bootstrap registers lifecycle state synchronously from its ap
     expect(calls).toEqual(['application-path', ['userData', join(root, 'desktop')], 'lock', 'quit']);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('logged-out Linux unregister removes only its verified unit and enablement without a user bus', async () => {
+  if (process.platform === 'win32') return;
+  const home = await mkdtemp(join(tmpdir(), 'desktop-offline-'));
+  const options = { home, directory: join(home, 'desktop'), platform: 'linux', executable: '/fixture/application', env: { XDG_RUNTIME_DIR: join(home, 'no-runtime') }, run: async () => { throw new Error('offline cleanup must not call systemctl'); } };
+  const definition = sessionDefinition(options), wants = join(home, '.config/systemd/user/graphical-session.target.wants'), link = join(wants, 'codex-remote-web-desktop.service');
+  try {
+    await mkdir(wants, { recursive: true });
+    await Bun.write(definition.path, definition.content); await writePrivate(join(options.directory, 'session.json'), definition);
+    await symlink('../codex-remote-web-desktop.service', link);
+    await symlink('/fixture/unrelated.service', join(wants, 'unrelated.service'));
+    await configureSession(false, options);
+    expect(await Bun.file(definition.path).exists()).toBe(false);
+    expect(await readPrivate(join(options.directory, 'session.json'))).toBeNull();
+    const { lstat, readlink } = await import('node:fs/promises');
+    await expect(lstat(link)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readlink(join(wants, 'unrelated.service'))).toBe('/fixture/unrelated.service');
+    await configureSession(false, options); // Repeated uninstall is harmless.
+    await Bun.write(definition.path, definition.content); await writePrivate(join(options.directory, 'session.json'), definition);
+    await symlink('/fixture/foreign.service', link);
+    await expect(configureSession(false, options)).rejects.toThrow('changed');
+    expect(await Bun.file(definition.path).text()).toBe(definition.content);
+    expect(await readPrivate(join(options.directory, 'session.json'))).toEqual(definition);
+    expect(await readlink(link)).toBe('/fixture/foreign.service');
+    await rm(link); await rm(wants, { recursive: true });
+    await symlink(home, wants);
+    await expect(configureSession(false, options)).rejects.toThrow('Unsafe background enablement directory');
+    expect(await Bun.file(definition.path).text()).toBe(definition.content);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});
+test('Linux unregister preserves online manager failures and restores the previous startup state', async () => {
+  if (process.platform === 'win32') return;
+  const home = await mkdtemp(join(tmpdir(), 'desktop-online-'));
+  const runtime = join(home, 'runtime'); await mkdir(runtime); await Bun.write(join(runtime, 'bus'), 'fixture bus marker');
+  const options = { home, directory: join(home, 'desktop'), platform: 'linux', executable: '/fixture/application', env: { XDG_RUNTIME_DIR: runtime }, run: async () => ({ stdout: '' }) };
+  const definition = sessionDefinition(options); let failed = false; const calls = [];
+  try {
+    await configureSession(true, options);
+    await expect(configureSession(false, { ...options, run: async (_command, args) => {
+      calls.push(args); if (args.includes('daemon-reload') && !failed) { failed = true; throw new Error('manager permission denied'); } return { stdout: '' };
+    } })).rejects.toThrow('manager permission denied');
+    expect(await Bun.file(definition.path).text()).toBe(definition.content);
+    expect(await readPrivate(join(options.directory, 'session.json'))).toEqual(definition);
+    expect(calls.some(args => args.includes('enable'))).toBe(true);
+    expect(calls.filter(args => args.includes('daemon-reload')).length).toBe(2);
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

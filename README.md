@@ -127,7 +127,7 @@ The WebUI defaults to the local shared Desktop/CLI App Server and waits if its s
 
 ## Set up public access
 
-Open **Remote access** in the desktop app, or **Settings → Remote access** in the full local WebUI. Initialize and start the local gateway first, then choose an option based on whether you own a domain:
+For a desktop-managed gateway, open **Remote access** in the desktop app; its browser settings show deployment status and direct management back to the app. For a CLI/headless gateway, open **Settings → Remote access** in the full local WebUI. Initialize and start the local gateway first, then choose an option based on whether you own a domain:
 
 | | Fixed domain | Temporary access without a domain |
 | --- | --- | --- |

@@ -35,3 +35,9 @@ export function quickWorkerPath() {
   const source = join(root, 'src/server/setup/quick-worker.js');
   return existsSync(source) ? source : join(root, 'dist/quick-worker.js');
 }
+
+export function isolatedWorkerPath() {
+  const root = applicationRoot();
+  const source = join(root, 'src/server/bridge/isolated-worker.js');
+  return existsSync(source) ? source : join(root, 'dist/isolated-worker.js');
+}

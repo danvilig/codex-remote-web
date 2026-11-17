@@ -3,6 +3,7 @@ import { connect } from 'node:net';
 import { WebSocket } from 'ws';
 import { codexCommand } from '../config/codex-command.js';
 import { appServerConnection } from '../config/app-server.js';
+import { isolatedWorkerPath, nodeRuntime } from '../config/paths.js';
 
 export const nativeRequestTimeout = (method: string) =>
   ['thread/read', 'thread/turns/list', 'thread/resume'].includes(method) ? 90000 : 30000;
@@ -102,8 +103,11 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     if (stopping || child?.exitCode === null) return;
     if (connection.mode === 'shared') { startShared(); return; }
     const [binary, ...prefix] = codexCommand();
-    const proc = spawn(binary, [...prefix, 'app-server', '--stdio'], { cwd, env: process.env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' && process.env.CODEX_WEBUI_DESKTOP_CHILD !== '1' });
+    const supervised = process.platform !== 'win32' && process.env.CODEX_WEBUI_DESKTOP_CHILD === '1';
+    const command = [binary, ...prefix, 'app-server', '--stdio'];
+    const proc = spawn(supervised ? nodeRuntime() : binary, supervised ? [isolatedWorkerPath()] : command.slice(1), { cwd, env: process.env, stdio: supervised ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' }) as ChildProcessWithoutNullStreams;
     child = proc; buffer = '';
+    proc.stdin.on('error', () => { if (child === proc) terminate(); });
     proc.stdout.setEncoding('utf8');
     proc.stdout.on('data', chunk => {
       buffer += chunk;
@@ -130,6 +134,7 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
       onStatus({ status: 'disconnected', code, signal });
       if (!stopping) restart = setTimeout(start, 1000);
     });
+    if (supervised) proc.send!({ type: 'start', command, cwd }, error => { if (error && child === proc) terminate(); });
     request('initialize', { clientInfo, capabilities: { experimentalApi: true } }).then(result => {
       if (child !== proc || stopping) return;
       send({ method: 'initialized', params: {} });

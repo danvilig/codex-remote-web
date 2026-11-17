@@ -42,3 +42,26 @@ test('interrupted configuration changes stay visible in local settings and commi
     status=await remoteAccessStatus({mode:'local'},home,null);expect(status.publicOrigin).toBe('https://new.example.com');expect(status.allowedEmail).toBe('new@example.com');expect(JSON.stringify(status)).not.toContain('private-');
   }finally{await rm(home,{recursive:true,force:true});}
 });
+
+test('desktop browser status reads the private desktop receipt separately from CLI deployment and redacts recovery secrets', async () => {
+  const { desktopDirectory } = await import('../../src/shared/desktop-config.js');
+  const { writePrivate } = await import('../../src/server/desktop/private-store.js');
+  const home = await mkdtemp(join(tmpdir(), 'crw-desktop-status-')), path = join(desktopDirectory(home), 'setup-state.json');
+  const read = () => remoteAccessStatus({ mode: 'local' }, home, null, { desktopManaged: true });
+  try {
+    expect(await read()).toEqual({ configured: false, management: 'desktop' });
+    const receipt = { phase: 'complete', input: { hostname: 'desktop.example.com', email: 'owner@example.com' }, teamDomain: 'team.cloudflareaccess.com', aud: 'private-aud', probe: 'private-probe', local: { environment: 'private-env' }, connector: { token: 'private-token' } };
+    await writePrivate(path, receipt);
+    expect(await remoteAccessStatus({ mode: 'local' }, home, null)).toEqual({ configured: false });
+    await writeFile(join(home, '.config/codex-remote-web/setup-state.json'), JSON.stringify({ ...receipt, input: { ...receipt.input, hostname: 'cli.example.com' } }));
+    expect((await remoteAccessStatus({ mode: 'local' }, home, null)).publicOrigin).toBe('https://cli.example.com');
+    expect(await read()).toMatchObject({ configured: true, management: 'desktop', active: false, publicOrigin: 'https://desktop.example.com' });
+    expect(JSON.stringify(await read())).not.toContain('private-');
+    const candidate = { ...receipt, input: { ...receipt.input, hostname: 'changed.example.com' } };
+    await writePrivate(path, { ...receipt, phase: 'change-recovery-required', configurationChange: { candidate, committed: true } });
+    expect(await read()).toMatchObject({ configured: true, recoveryRequired: true, publicOrigin: 'https://changed.example.com', management: 'desktop' });
+    expect(JSON.stringify(await read())).not.toContain('private-');
+    await writePrivate(path, { ...receipt, phase: 'removed' });
+    expect(await read()).toEqual({ configured: false, management: 'desktop' });
+  } finally { await rm(home, { recursive: true, force: true }); }
+});

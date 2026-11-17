@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { mkdir, lstat, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, lstat, readFile, readlink, rm, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readPrivate, writePrivate } from '../src/server/desktop/private-store.js';
 
@@ -52,9 +52,30 @@ export async function configureSession(enabled, options) {
     if (metadata && (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.uid !== process.getuid())) throw new Error('Unsafe background registration; preserve it before continuing');
     const current = await readFile(spec.path, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
     if (current !== null && (!saved || current !== saved.content)) throw new Error('Background registration changed; preserve it before continuing');
+    if (!enabled && definition.platform === 'linux') {
+      const expected = join(options.home || homedir(), '.config/systemd/user/codex-remote-web-desktop.service');
+      if (spec.path !== expected) throw new Error('Background registration path changed; preserve it before continuing');
+      const runtime = options.env?.XDG_RUNTIME_DIR || process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`;
+      const bus = await lstat(join(runtime, 'bus')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+      if (!bus) {
+        // No logged-in manager: remove only our verified enablement link and
+        // unit. systemctl --user disable can itself require a live user bus.
+        const wants = join(dirname(expected), 'graphical-session.target.wants');
+        const parent = await lstat(wants).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+        if (parent && (!parent.isDirectory() || parent.isSymbolicLink() || parent.uid !== process.getuid())) throw new Error('Unsafe background enablement directory');
+        const link = join(wants, 'codex-remote-web-desktop.service');
+        const metadata = parent && await lstat(link).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
+        if (metadata && (!metadata.isSymbolicLink() || metadata.uid !== process.getuid() || resolve(wants, await readlink(link)) !== expected)) throw new Error('Background enablement changed; preserve it before continuing');
+        if (metadata) await rm(link);
+        await rm(spec.path, { force: true });
+        await rm(recordPath, { force: true });
+        return restore;
+      }
+    }
     try {
       if (enabled) { await mkdir(dirname(spec.path), { recursive: true, mode: 0o700 }); await writeFile(spec.path, spec.content, { mode: 0o600 }); }
-      else if (definition.platform === 'linux') await run('systemctl', ['--user', 'disable', 'codex-remote-web-desktop.service'], { timeout: 15000 });
+      // Reload after removing the unit, so the manager sees the final state.
+      else if (definition.platform === 'linux') await run('systemctl', ['--user', '--no-reload', 'disable', 'codex-remote-web-desktop.service'], { timeout: 15000 });
       if (!enabled) await rm(spec.path, { force: true });
       if (definition.platform === 'linux') {
         await run('systemctl', ['--user', 'daemon-reload'], { timeout: 15000 });
@@ -74,8 +95,8 @@ export async function configureSession(enabled, options) {
       if (current === null) await rm(spec.path, { force: true });
       else await writeFile(spec.path, current, { mode: 0o600 });
       if (definition.platform === 'linux') {
+        await run('systemctl', ['--user', '--no-reload', saved ? 'enable' : 'disable', 'codex-remote-web-desktop.service'], { timeout: 15000 });
         await run('systemctl', ['--user', 'daemon-reload'], { timeout: 15000 });
-        await run('systemctl', ['--user', saved ? 'enable' : 'disable', 'codex-remote-web-desktop.service'], { timeout: 15000 });
       } else {
         const domain = `gui/${process.getuid()}`;
         await run('launchctl', [saved ? 'enable' : 'disable', `${domain}/${label}`], { timeout: 15000 });

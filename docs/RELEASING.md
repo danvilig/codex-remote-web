@@ -94,7 +94,7 @@ Beta.1 目标为 Linux x64/arm64、macOS Apple Silicon（macOS 15+）和 Windows
 
 `.github/workflows/platform-packages.yml` 在 PR 中生成可审阅 Artifact。发布工作流复用同一矩阵，使用原生 `ubuntu-24.04`、`ubuntu-24.04-arm`、`macos-15` 和 `windows-2025` runner。只有固定版本标签、受保护 main 历史和该提交成功的 main-push Verify 才能发布；不能使用未合并的 PR Artifact 冒充正式 Release。
 
-每个平台校验冻结安装、构建、目标架构和实际便携归档。回归覆盖异目录启动、完整页面及静态资源、受限文件读取/编辑、私有回执及 UUID 去重、持久队列访问、真实终端。Linux/macOS 验证受保护的临时连接器；Windows 便携 CLI 仍明确拒绝 Unix socket 临时访问，桌面入口使用独立 loopback 端口及每次运行的随机 Host 凭据，并校验 HTTP/WebSocket 边界，不降级为可公开访问的无认证源站。Linux 完整 Verify、依赖审计、浏览器和 Docker 验证继续运行。
+每个平台校验冻结安装、构建、目标架构和实际便携归档。回归覆盖异目录启动、完整页面及静态资源、受限文件读取/编辑、私有回执及 UUID 去重、持久队列访问、真实终端。Linux/macOS 验证受保护的临时连接器；Windows 的 CLI/便携包和桌面入口均使用独立 loopback 端口及每次运行的随机 Host 凭据，并校验 HTTP/WebSocket 边界，不降级为可公开访问的无认证源站。Linux 完整 Verify、依赖审计、浏览器和 Docker 验证继续运行。
 
 桌面安装包使用已通过测试的便携网关资源和锁定 Electron 构建。macOS runner 挂载 DMG、复制 `.app` 到含空格路径并运行真实桌面窗口/后台生命周期回归。Windows 使用固定 WiX 5.0.2 构建 per-user MSI，实际静默安装、检查开始菜单、运行回归、卸载并确认自有程序和快捷方式清理；另验证 NTFS 宽泛 ACL 和 junction 拒绝。Linux 两种架构安装实际 DEB，在 Xvfb 中验证沙箱窗口、退出托盘后网关继续运行、重新连接及停止，再移除 DEB。GUI 人工操作、TCC/Gatekeeper/SmartScreen 提示、真实注销/登录与公网邮箱验证仍需单独验收，自动化不冒充人工验收。
 

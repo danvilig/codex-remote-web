@@ -8,6 +8,7 @@
 - Default to the shared Codex Desktop/CLI App Server, wait/reconnect without an isolated fallback, and preserve the shared daemon and its tasks when stopping the gateway; standalone deployments explicitly select isolated mode.
 - Use 30-day application sessions with HttpOnly/SameSite=Lax cookies for new fixed-domain Access apps; retain existing app settings and document deliberate migration and shorter-session limits.
 - Document desktop initialization, startup/logout/uninstall boundaries, Windows protected temporary access and upgrades from Alpha.3 in both READMEs.
+- Reap isolated desktop App Server tools after native exits or gateway crashes; clean live and logged-out Linux desktop installations, and show desktop-managed remote access without opening a second browser deployment.
 
 ## Unreleased
 

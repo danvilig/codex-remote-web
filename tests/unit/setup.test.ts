@@ -404,3 +404,21 @@ test('native configuration changes preserve unrelated environment/unit/probe and
     try{await expect(deployment.availablePort(occupied.address().port)).rejects.toThrow('in use');}finally{await new Promise(resolve=>occupied.close(resolve));}
   } finally {await rm(home,{recursive:true,force:true});}
 });
+
+test('desktop browser management fails before setup side effects but preserves authorized readiness', async () => {
+  const calls = [], service = new Proxy({ busy: false }, { get(target, name) { return name in target ? target[name] : () => { calls.push(name); }; } });
+  const { server, url } = await startSetupServer({ service, desktopManaged: true, probeToken: 'fixture-probe', readiness: () => ({ mode: 'cloudflare-access' }) });
+  const base = new URL(url).origin, headers = { origin: base, 'content-type': 'application/json', 'x-setup-request': '1' };
+  try {
+    for (const [method, path] of [['POST', 'launch'], ['POST', 'session'], ['POST', 'connect'], ['POST', 'preview'], ['POST', 'apply'], ['POST', 'remove'], ['POST', 'quick/start'], ['GET', 'session'], ['GET', 'status']]) {
+      const res = await fetch(base + '/api/setup/' + path, { method, headers, ...(method === 'POST' ? { body: '{}' } : {}) });
+      expect(res.status).toBe(409); expect((await res.json()).error).toBe('Manage remote access in the desktop app.');
+    }
+    expect(calls).toEqual([]);
+    expect((await fetch(base + '/api/setup/ready')).status).toBe(403);
+    const ready = await fetch(base + '/api/setup/ready', { headers: { 'x-setup-probe': 'fixture-probe' } });
+    expect(ready.status).toBe(200); expect(await ready.json()).toEqual({ mode: 'cloudflare-access' });
+    expect((await fetch(base + '/api/setup/launch', { method: 'POST', headers: { ...headers, origin: 'http://evil.test' }, body: '{}' })).status).toBe(403);
+    expect(calls).toEqual([]);
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});

@@ -242,7 +242,7 @@ async function handleClient(client: WebSocket, message: any) {
 const workspaceContext = { request, scheduler, sideChats, submissions, deliveryQueue, developerTools, appRoot, publicDir, authConfig, localAuth, accessAuth, managedPasswordPath, defaultCwd, browseRoots, homeDir, imageRoots, fileRoots, privateCodexRoot, reviewRoots, capabilities, projectless, dispatchBrowserMessage, reviewDiffs, accountLoader, sseClients, leases, clients, terminalSessions, handleClient, isConnected: () => connected };
 const gatewayHandler = createHttpHandler(workspaceContext);
 const quick = new QuickTunnel({ workspace: options => openQuickOrigin({ ...options, context:workspaceContext }) });
-const setupHandler = createSetupHandler({ quick, probeToken: process.env.CODEX_WEBUI_SETUP_PROBE, readiness: () => ({ mode: authConfig.mode, publicOrigin: authConfig.publicOrigin, audience: authConfig.audience, allowedEmail: authConfig.allowedEmail }) });
+const setupHandler = createSetupHandler({ quick, desktopManaged: process.env.CODEX_WEBUI_DESKTOP_CHILD === '1', probeToken: process.env.CODEX_WEBUI_SETUP_PROBE, readiness: () => ({ mode: authConfig.mode, publicOrigin: authConfig.publicOrigin, audience: authConfig.audience, allowedEmail: authConfig.allowedEmail }) });
 const server = createServer(async (req, res) => {
   if (!await setupHandler.handle(req, res)) await gatewayHandler(req, res);
 });

@@ -20,7 +20,7 @@ export function localSetupRequest(req, mutation = false) {
   if (mutation && (req.headers.origin !== origin.origin || req.headers['x-setup-request'] !== '1' || !req.headers['content-type']?.startsWith('application/json'))) return false;
   return true;
 }
-export function createSetupHandler({ service = new SetupService(), quick = new QuickTunnel(), root = applicationRoot(), readiness, probeToken, now = Date.now } = {}) {
+export function createSetupHandler({ service = new SetupService(), quick = new QuickTunnel(), root = applicationRoot(), readiness, probeToken, desktopManaged = false, now = Date.now } = {}) {
   let bootstrap = null, session = null, requestBusy = false;
   const headers = { 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', 'referrer-policy': 'no-referrer', 'cross-origin-resource-policy': 'same-origin' };
   const json = (res, status, data, extra = {}) => { res.writeHead(status, { ...headers, 'content-type': 'application/json; charset=utf-8', ...extra }); res.end(JSON.stringify(data)); };
@@ -45,6 +45,7 @@ export function createSetupHandler({ service = new SetupService(), quick = new Q
         if (!probeToken || !equal(req.headers['x-setup-probe'], probeToken) || !readiness) throw new SetupError('Setup readiness is not authorized.', 403);
         json(res, 200, readiness()); return true;
       }
+      if (desktopManaged) throw new SetupError('Manage remote access in the desktop app.', 409);
       if (req.method === 'POST' && url.pathname === '/api/setup/launch') {
         // Local same-origin activation supplies a single-use credential, never a management token.
         json(res, 200, { key: issue() }); return true;
