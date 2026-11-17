@@ -5,6 +5,7 @@ import { codexCommand } from '../config/codex-command.js';
 import { appServerConnection } from '../config/app-server.js';
 import { isolatedWorkerPath, nodeRuntime } from '../config/paths.js';
 import { windowsIsolatedProcess, waitForWindowsIsolatedReady } from './windows-isolated.js';
+import { reapProcessGroup, isProcessGroupRunning } from './process-group.js';
 
 export const nativeRequestTimeout = (method: string) =>
   ['thread/read', 'thread/turns/list', 'thread/resume'].includes(method) ? 90000 : 30000;
@@ -25,6 +26,7 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     }
   };
   const lifecycles = new Set<Promise<void>>();
+  const reapFailures = new Map<number, Error>();
   const booting = new WeakSet<object>();
   function terminateProc(proc: ChildProcessWithoutNullStreams, signal: NodeJS.Signals = 'SIGTERM') {
     if (process.platform !== 'win32' && proc.pid) {
@@ -39,14 +41,7 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     if (process.platform === 'win32' || !proc.pid) return;
     // Capture the old group. Reconnect may already own a different child by
     // the time escalation runs. Keep this timer alive even if stdio closes.
-    const group = -proc.pid;
-    try { process.kill(group, 'SIGTERM'); } catch { return; }
-    const deadline = Date.now() + 1500;
-    while (Date.now() < deadline) {
-      await new Promise(resolve => setTimeout(resolve, 50));
-      try { process.kill(group, 0); } catch { return; }
-    }
-    try { process.kill(group, 'SIGKILL'); } catch { /* group already gone */ }
+    await reapProcessGroup(proc.pid);
   }
   function send(message: any, allowStarting = false) {
     if (stopping) throw transportError('Codex WebUI is shutting down', 'RPC_NOT_SENT', 'not-sent');
@@ -157,7 +152,7 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     const reap = () => {
       if (reaping) return;
       reaping = true;
-      void reapGroup(proc).finally(finish);
+      void reapGroup(proc).catch(error => { if (proc.pid) reapFailures.set(proc.pid, error); }).finally(finish);
     };
     proc.stdin.on('error', () => { if (child === proc) terminate(); });
     proc.stdout.setEncoding('utf8');
@@ -207,6 +202,13 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     });
     // Includes exited supervisors whose old descendants outlived their pipes.
     await Promise.all([...lifecycles]);
+    // A previous timeout/observation error remains retryable. Only observe old
+    // groups here: never signal a stale group ID which could have been reused.
+    for (const group of reapFailures.keys()) {
+      try { if (!await isProcessGroupRunning(group)) reapFailures.delete(group); }
+      catch (error) { reapFailures.set(group, error as Error); }
+    }
+    if (reapFailures.size) throw new AggregateError([...reapFailures.values()], 'Codex process cleanup could not be confirmed');
   }
   return { start, request, send, stop };
 }
