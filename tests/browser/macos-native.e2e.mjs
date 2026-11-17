@@ -69,7 +69,7 @@ async function waitFor(probe, label) {
 const evaluate = script => application.evaluate(script);
 const click = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).click(); return true`);
 const select = (selector, value) => evaluate(`const node = document.querySelector(${JSON.stringify(selector)}); node.value = ${JSON.stringify(value)}; node.dispatchEvent(new Event('change', {bubbles:true})); return true`);
-const ready = () => evaluate("return !document.querySelector('#desktopLanguage').disabled && !document.querySelector('#start').hasAttribute('aria-busy')");
+const ready = () => evaluate("return !document.querySelector('#desktopLanguage').disabled && !document.querySelector('[aria-busy=true]')");
 async function closeApplication() {
   if (!application) return;
   const current = application;
@@ -111,6 +111,7 @@ try {
   }
   // Save through the real renderer/host transaction; this also checks the
   // native shell uses the same config validation and registration rollback.
+  await waitFor(() => evaluate("return !document.querySelector('#save').disabled"), 'configuration becomes editable');
   await click('#save');
   await waitFor(async () => (await agentRequest(directory, 'status')).events.some(item => item.event === 'configuration-saved'), 'native config save');
   await waitFor(ready, 'config reply');
@@ -148,6 +149,10 @@ try {
   console.log('PASS: actual native WKWebView UI, restricted asset/bridge access, native menus/dialogs, saved settings/language, gateway continuity and clean uninstall');
 } catch (error) {
   console.error('Native application diagnostics:', application?.logs());
+  if (application) {
+    console.error('Native rendered failure state:', await evaluate(`return {url:location.href,title:document.title,text:document.querySelector('#message')?.textContent,saveDisabled:document.querySelector('#save')?.disabled,invalid:[...document.querySelectorAll(':invalid')].map(n=>({id:n.id,value:n.value})),busy:[...document.querySelectorAll('[aria-busy]')].map(n=>({id:n.id,value:n.getAttribute('aria-busy')})),form:document.querySelector('#configuration')?.checkValidity()}`).catch(error=>error.message));
+    await application.request('snapshot', {path:join(root,'.artifacts/macos-desktop-failure-webkit.png')}).catch(()=>{});
+  }
   await command(['screencapture', '-x', join(root, '.artifacts/macos-desktop-failure.png')], root).catch(() => {});
   throw error;
 } finally {
