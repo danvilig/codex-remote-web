@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { mkdtemp, mkdir, cp, writeFile, readFile, access, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -9,7 +10,11 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { desktopConfig, desktopDirectory } from '../../src/shared/desktop-config.js';
 import { writePrivate } from '../../src/server/desktop/private-store.js';
 import { agentRequest } from '../../desktop/client.js';
-import { command } from '../../scripts/distribution.ts';
+// This harness runs under pinned Node; avoid Bun-only build helpers here.
+async function command(args, cwd, { timeoutMs = 60000 } = {}) {
+  const { stdout } = await promisify(execFile)(args[0], args.slice(1), { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 });
+  return stdout.trim();
+}
 import { root } from '../helpers/browser-runtime.mjs';
 
 assert.equal(process.platform, 'darwin');
@@ -28,6 +33,7 @@ const env = { ...process.env, HOME: home, CODEX_HOME: join(home, '.codex'), CODE
 let application;
 async function launch() {
   const child = spawn(executable, [], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  child.stdin.on('error', () => {});
   const pending = new Map(); let sequence = 0, logs = '';
   child.stderr.on('data', chunk => { logs += chunk; });
   const lines = createInterface({ input: child.stdout });
