@@ -25,7 +25,7 @@ const port = await new Promise(resolve => { const probe = createServer(); probe.
 const fixture = join(home, 'codex-fixture.mjs'), codex = join(home, 'codex');
 await cp(join(root, 'tests/fixtures/codex'), fixture);
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
-await writeFile(codex, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} "$@"\n`, { mode: 0o700 });
+await writeFile(codex, `#!/bin/sh\nif [ "\${1-}" = "--version" ]; then printf 'codex-fixture 0.1\\n'; exit 0; fi\nexec ${quote(process.execPath)} ${quote(fixture)} "$@"\n`, { mode: 0o700 });
 await writePrivate(join(directory, 'config.json'), desktopConfig({ initialized: true, enabled: false, autostart: false, cwd: home, codex, port, language: 'en' }, home));
 const driver = join(home, 'NativeTestDriver.dylib');
 await command(['xcrun', 'clang', '-dynamiclib', '-fobjc-arc', '-framework', 'AppKit', '-framework', 'WebKit', '-mmacosx-version-min=15.0', join(root, 'tests/helpers/macos-native-driver.m'), '-o', driver], root, { stream: true, timeoutMs: 60000 });
@@ -67,7 +67,12 @@ async function waitFor(probe, label) {
   throw new Error(`Timed out waiting for ${label}: ${last?.message || application?.logs()}`);
 }
 const evaluate = script => application.evaluate(script);
-const click = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).click(); return true`);
+async function click(selector) {
+  // Match real interaction: wait for the asynchronously refreshed UI to
+  // enable the control, then dispatch its click through the actual DOM.
+  await waitFor(() => evaluate(`const node = document.querySelector(${JSON.stringify(selector)}); return Boolean(node && !node.disabled)`), `enabled ${selector}`);
+  return evaluate(`document.querySelector(${JSON.stringify(selector)}).click(); return true`);
+}
 const select = (selector, value) => evaluate(`const node = document.querySelector(${JSON.stringify(selector)}); node.value = ${JSON.stringify(value)}; node.dispatchEvent(new Event('change', {bubbles:true})); return true`);
 const ready = () => evaluate("return !document.querySelector('#desktopLanguage').disabled && !document.querySelector('[aria-busy=true]')");
 async function closeApplication() {
@@ -111,6 +116,9 @@ try {
   }
   // Save through the real renderer/host transaction; this also checks the
   // native shell uses the same config validation and registration rollback.
+  const dependencies = await evaluate("return await window.desktop.invoke('dependencies')");
+  assert.equal(dependencies.ok, true); assert.ok(dependencies.value.find(item=>item.name==='codex')?.ok, JSON.stringify(dependencies.value));
+  assert.ok(dependencies.value.find(item=>item.name==='git')?.ok, JSON.stringify(dependencies.value));
   await waitFor(() => evaluate("return !document.querySelector('#save').disabled"), 'configuration becomes editable');
   await click('#save');
   await waitFor(async () => (await agentRequest(directory, 'status')).events.some(item => item.event === 'configuration-saved'), 'native config save');
