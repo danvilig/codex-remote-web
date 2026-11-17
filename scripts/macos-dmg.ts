@@ -2,7 +2,7 @@ import { cp, mkdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { command } from './distribution.ts';
 
-export const dmgLayout = { width: 680, height: 480, iconSize: 80, app: [170, 216], applications: [510, 216], help: [572, 417] };
+export const dmgLayout = { width: 680, height: 480, iconSize: 80, app: [170, 216], applications: [510, 216], help: [572, 394] };
 
 export async function macIcon(root: string, output: string) {
   const iconset = join(output, 'app.iconset'); await mkdir(iconset);
@@ -24,7 +24,7 @@ export function finderLayoutScript(mount: string) {
     set current view of installerWindow to icon view
     set toolbar visible of installerWindow to false
     set statusbar visible of installerWindow to false
-    set bounds of installerWindow to {100, 100, ${100 + dmgLayout.width}, ${128 + dmgLayout.height}}
+    set bounds of installerWindow to {100, 100, ${114 + dmgLayout.width}, ${142 + dmgLayout.height}}
     set options to icon view options of installerWindow
     set arrangement of options to not arranged
     set icon size of options to ${dmgLayout.iconSize}

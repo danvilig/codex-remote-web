@@ -49,15 +49,21 @@ try {
     set appPosition to position of item "Codex Remote Web.app" of folderAlias
     set targetPosition to position of item "Applications" of folderAlias
     set helpPosition to position of item "Install Guide.html" of folderAlias
-    -- Finder returns a file reference here, not necessarily an alias. Let
-    -- Finder resolve its name rather than asking Standard Additions to coerce
-    -- that reference across the mounted-image boundary.
-    set backgroundName to name of background picture of opts
-    return {item 1 of appPosition, item 2 of appPosition, item 1 of targetPosition, item 2 of targetPosition, item 1 of helpPosition, item 2 of helpPosition, icon size of opts, backgroundName}
+    return {item 1 of appPosition, item 2 of appPosition, item 1 of targetPosition, item 2 of targetPosition, item 1 of helpPosition, item 2 of helpPosition, icon size of opts}
   end tell`],root); }
   finally { await command(['screencapture','-x',join(root,'.artifacts/macos-installer-native.png')],root); }
-  assert.ok(layout.startsWith([...dmgLayout.app,...dmgLayout.applications,...dmgLayout.help,dmgLayout.iconSize].join(', ')),`Final DMG lost Finder positions: ${layout}`);
-  assert.ok(layout.endsWith('installer.png'),`Final DMG lost background: ${layout}`);
+  assert.equal(layout,[...dmgLayout.app,...dmgLayout.applications,...dmgLayout.help,dmgLayout.iconSize].join(', '),`Final DMG lost Finder positions: ${layout}`);
+  // Finder's background-picture getter throws -1728 on a read-only image
+  // even when it renders correctly (retained native screenshots reproduce
+  // this). Check the actual rendered background instead of that getter.
+  const screenshot=join(root,'.artifacts/macos-installer-native.png');
+  const pixel=await command(['swift','-e',`import AppKit
+    let bitmap = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))!
+    let color = bitmap.colorAt(x: 150, y: 480)!.usingColorSpace(.deviceRGB)!
+    print(Int((color.redComponent * 255).rounded()), Int((color.greenComponent * 255).rounded()), Int((color.blueComponent * 255).rounded()))
+  `,screenshot],root,{timeoutMs:60_000});
+  const [red,green,blue]=pixel.split(/\s+/).map(Number);
+  assert.ok(red>=240&&red<=250&&Math.abs(red-green)<=1&&blue>red,`Final DMG background was not rendered: ${pixel}`);
   await cp(app,join(destination,'Codex Remote Web.app'),{recursive:true,verbatimSymlinks:true});
   await command(['hdiutil','detach',mount],root);mounted=false;
   const contents=join(destination,'Codex Remote Web.app/Contents');
