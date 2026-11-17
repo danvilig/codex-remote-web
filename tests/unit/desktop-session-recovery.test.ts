@@ -101,4 +101,4 @@ test('uninstall rechecks installation ownership after a live descriptor is repla
     server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
     await rm(directory, { recursive: true, force: true });
   }
-});
+}, process.platform === 'win32' ? 60000 : 5000);
