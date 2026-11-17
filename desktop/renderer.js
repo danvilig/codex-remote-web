@@ -12,7 +12,9 @@ Object.assign(translations, {
   'Desktop gateway': '桌面网关', 'Runs in your login session': '在当前登录会话中运行', 'Gateway connection': '网关连接', 'Background and terminal': '后台与终端', Theme: '主题', 'Local gateway': '本地网关', 'Local address': '本地地址', 'Dependencies checked.': '依赖检测完成。', 'Gateway started.': '网关已启动。', 'Gateway stopped.': '网关已停止。', 'Gateway restarted.': '网关已重启。', 'No background activity yet.': '暂无后台活动。', 'Gateway configuration saved': '网关设置已保存', 'Background agent ready': '后台代理已就绪', 'Local gateway ready': '本地网关已就绪', 'Protected gateway ready': '受保护网关已就绪', 'Local gateway exited': '本地网关已退出', 'Protected gateway exited': '受保护网关已退出', 'Connector ready': '连接器已就绪', 'Connector stopped': '连接器已停止', 'Background agent stopped': '后台代理已停止', 'Automatic startup failed': '自动启动失败', 'Shutdown failed': '停止后台代理失败', 'Background activity updated': '后台活动已更新', 'Background component removed.': '后台组件已移除。',
 });
 Object.assign(translations, { 'Clean up and uninstall': '清理并卸载', 'Remove the remote deployment in Remote access before cleaning up.': '请先在“远程访问”中移除远程部署，再进行清理。', 'Finish remote access or startup recovery before cleaning up.': '请先完成远程访问或启动项恢复，再进行清理。', 'Auto-detect': '自动检测', 'Executable not found': '未找到程序', 'Executable could not be verified': '无法验证程序' });
-const i18n = createI18n();
+// The desktop configuration is authoritative, including in the native
+// WebKit ephemeral origin where localStorage is unavailable.
+const i18n = createI18n({ storage: null });
 createDomI18n(i18n);
 const t = message => i18n.locale === 'zh-CN' ? translations[message] || i18n.t(message) : message;
 const $ = selector => document.querySelector(selector);

@@ -37,6 +37,7 @@ export async function macOperation(installation, action, body, { directory = des
 export async function nativeOperationInput(installation) {
   try {
     let input = '';
+    process.stdin.setEncoding('utf8');
     for await (const chunk of process.stdin) { input += chunk; if (Buffer.byteLength(input) > 16384) throw new Error('Desktop request is too large'); }
     const { action, body } = JSON.parse(input);
     const value = await macOperation(installation, action, body);
