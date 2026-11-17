@@ -57,6 +57,10 @@ static void command(NSDictionary *request) {
             NSError *writeError = nil; [png writeToFile:request[@"path"] options:NSDataWritingAtomic error:&writeError];
             reply(request, @YES, writeError);
         }];
+    } else if ([action isEqual:@"geometry"]) {
+        NSRect frame = [webView.window convertRectToScreen:[webView convertRect:webView.bounds toView:nil]];
+        NSRect screen = webView.window.screen.frame;
+        reply(request, @{ @"left": @(NSMinX(frame)), @"top": @(NSMaxY(screen)-NSMaxY(frame)), @"screenWidth": @(NSWidth(screen)) }, nil);
     } else if ([action isEqual:@"security"]) {
         reply(request, @{ @"persistent": @(webView.configuration.websiteDataStore.persistent), @"url": webView.URL.absoluteString ?: @"", @"inspectable": @(webView.inspectable) }, nil);
     } else { reply(request, nil, [NSError errorWithDomain:@"test" code:2 userInfo:@{NSLocalizedDescriptionKey:@"Unknown test command"}]); }

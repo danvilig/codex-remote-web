@@ -149,7 +149,12 @@ final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegat
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1100, height: 800), styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "Codex Remote Web"; window.minSize = NSSize(width: 660, height: 540)
         window.isReleasedWhenClosed = false; window.delegate = self
-        window.contentView = webView; window.center()
+        // The WebKit remote layer tree needs a layer-backed AppKit host to
+        // composite into the visible window, including on older macOS.
+        let container = NSView(frame: window.contentView!.bounds)
+        container.wantsLayer = true
+        webView.frame = container.bounds; webView.autoresizingMask = [.width, .height]
+        container.addSubview(webView); window.contentView = container; window.center()
         webView.load(URLRequest(url: desktopURL))
     }
     func showSettings() { window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }

@@ -94,6 +94,24 @@ try {
   const secretRead = await evaluate("try { await import('crw-desktop://settings/../gateway/runtime/RUNTIMES.json'); return true } catch { return false }");
   assert.equal(secretRead, false, 'Custom scheme cannot expose the gateway tree');
   await application.request('snapshot', { path: join(root, '.artifacts/macos-desktop-overview.png') });
+  // A WebKit snapshot alone can succeed while its remote layer is missing
+  // from the visible native window. Also inspect the real screen composite.
+  const geometry = await application.request('geometry');
+  const onscreen = join(root, '.artifacts/macos-desktop-onscreen.png');
+  await delay(500); await command(['screencapture', '-x', onscreen], root);
+  const pixels = Number(await command(['swift', '-e', `import AppKit
+    let bitmap = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))!
+    let scale = Double(bitmap.pixelsWide) / Double(CommandLine.arguments[4])!
+    let left = Double(CommandLine.arguments[2])!, top = Double(CommandLine.arguments[3])!
+    var count = 0
+    for y in Int((top + 90) * scale)..<Int((top + 300) * scale) {
+      for x in Int((left + 20) * scale)..<Int((left + 200) * scale) {
+        if let color = bitmap.colorAt(x:x,y:y)?.usingColorSpace(.deviceRGB), max(color.redComponent,color.greenComponent,color.blueComponent) < 0.65 { count += 1 }
+      }
+    }
+    print(count)
+  `, onscreen, String(geometry.left), String(geometry.top), String(geometry.screenWidth)], root));
+  assert.ok(pixels > 100, `Visible native window lost its WebKit composite: ${pixels} sidebar ink pixels`);
   await click('[data-page=configuration]');
   assert.equal(await evaluate("return document.querySelector('#projectPath').value"), home);
   for (const theme of ['light', 'dark']) {
