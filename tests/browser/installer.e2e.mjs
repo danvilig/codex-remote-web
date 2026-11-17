@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, cp, mkdir, access, rm, readFile, readlink } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { mkdtemp, cp, mkdir, access, rm, readFile, readlink, writeFile } from 'node:fs/promises';
+import { basename, join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { command } from '../../scripts/distribution.ts';
 import { dmgLayout } from '../../scripts/macos-dmg.ts';
+import { macOSValidationSystem, macosMinimumVersion } from '../../scripts/macos-validation.ts';
 const root=resolve(import.meta.dir,'../..'),installer=process.env.CODEX_WEBUI_INSTALLER;
 assert.ok(installer,'Test the actual installer, not a replacement build');
 const temp=await mkdtemp(join(tmpdir(),'crw-installer-'));
 let mounted=false,installed=false;
+let evidence;
 const mount=join(temp,'mount'),destination=join(temp,'Installed application with spaces');
 async function msi(args) {
  console.error(`Verifying msiexec ${args[0]}`);
@@ -25,11 +28,17 @@ async function msi(args) {
 }
 try {
  if(process.platform==='darwin') {
+  evidence={format:1,status:'running',system:await macOSValidationSystem(),installer:basename(installer),sha256:createHash('sha256').update(await readFile(installer)).digest('hex'),sourceCommit:await command(['git','rev-parse','HEAD'],root),checks:{},manualAcceptance:['Safari download quarantine','Gatekeeper manual approval','real login/logout session']};
+  console.log('macOS installer validation:',JSON.stringify(evidence));
   await mkdir(mount);
   await command(['hdiutil','verify',installer],root);
   await command(['hdiutil','attach','-nobrowse','-readonly','-mountpoint',mount,installer],root);mounted=true;
   const app=join(mount,'Codex Remote Web.app');
+  evidence.checks.dmgIntegrityAndMount=true;
   await command(['plutil','-lint',join(app,'Contents/Info.plist')],root);
+  const minimum=await command(['plutil','-extract','LSMinimumSystemVersion','raw','-o','-',join(app,'Contents/Info.plist')],root);
+  assert.equal(minimum,macosMinimumVersion,'New-system testing must not raise the macOS 15 minimum');
+  evidence.checks.minimumSystemVersion=minimum;
   await command(['codesign','--verify','--deep','--strict',app],root);
   assert.equal(await readlink(join(mount,'Applications')),'/Applications');
   await access(join(mount,'.DS_Store'));
@@ -64,6 +73,7 @@ try {
   `,screenshot],root,{timeoutMs:60_000});
   const [red,green,blue]=pixel.split(/\s+/).map(Number);
   assert.ok(red>=240&&red<=250&&Math.abs(red-green)<=1&&blue>red,`Final DMG background was not rendered: ${pixel}`);
+  evidence.checks.finderLayoutAndBackground={positions:layout,backgroundPixel:[red,green,blue],screenshot:'macos-installer-native.png'};
   await cp(app,join(destination,'Codex Remote Web.app'),{recursive:true,verbatimSymlinks:true});
   await command(['hdiutil','detach',mount],root);mounted=false;
   const contents=join(destination,'Codex Remote Web.app/Contents');
@@ -71,6 +81,7 @@ try {
   for(const binary of ['gateway/codex-remote-web','gateway/runtime/node','gateway/node_modules/node-pty/build/Release/pty.node','gateway/node_modules/node-pty/build/Release/spawn-helper']) {
    await command(['codesign','--verify','--strict',join(contents,'Resources',binary)],root);
   }
+  evidence.checks.relocatedApplicationAndRuntimeSignatures=true;
   process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(contents,'MacOS/Codex Remote Web');
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=join(contents,'Resources/gateway');
  } else if(process.platform==='win32') {
@@ -81,7 +92,13 @@ try {
   process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(destination,'Codex Remote Web.exe');
  } else throw new Error('Native installer test requires macOS or Windows');
  await command(['bun','run','test:portable'],root,{stream:true,timeoutMs:240_000});
+ if(evidence)evidence.checks.installedGatewayAndPty=true;
  await command(['node','tests/browser/desktop-native.e2e.mjs'],root,{stream:true,timeoutMs:240_000});
+ if(evidence) {
+  for(const file of ['macos-desktop-overview.png','macos-desktop-settings-light.png','macos-desktop-settings-dark.png'])await access(join(root,'.artifacts',file));
+  evidence.checks.installedDesktopLaunchUiAndLifecycle=true;
+  evidence.status='passed';
+ }
  if(installed) {
   await msi(['/x',installer]);installed=false;
   const uninstallLog=await readFile(join(temp,'uninstall.log'),'utf8');
@@ -90,6 +107,11 @@ try {
  }
  console.log('PASS: exact native installer, installation into a path with spaces, installed gateway/files/submissions/PTY and MSI uninstall');
 } finally {
+ if(evidence) {
+  if(evidence.status!=='passed')evidence.status='failed';
+  await mkdir(join(root,'.artifacts'),{recursive:true});
+  await writeFile(join(root,'.artifacts/macos-installation-check.json'),JSON.stringify(evidence,null,2)+'\n');
+ }
  if(mounted)await command(['hdiutil','detach',mount],root);
  if(installed)await msi(['/x',installer]);
  await rm(temp,{recursive:true,force:true});

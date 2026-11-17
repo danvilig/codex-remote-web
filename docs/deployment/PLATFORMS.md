@@ -10,6 +10,8 @@ macOS 15+ 仅支持 Apple Silicon；Windows 11 仅支持 x64、NTFS 和 Windows 
 
 ### macOS 安装与首次打开
 
+最低系统版本保持 macOS 15.0。原生流水线在 macOS 15 构建并测试 DMG，再在 macOS 27（GitHub `xcode-27` 预览 runner）下载、核对 SHA-256 并测试**同一份** DMG，不在新系统另造替代包。两端均记录真实 `sw_vers` 与系统 build，检查挂载、Finder 布局、安装后启动、浅色/深色设置界面、沙箱和后台生命周期；`macos-installation-check.json` 关联精确安装包 SHA-256。预览 runner 的镜像可能更新，实际测试系统以每次报告为准，不将 runner 名称本身当成覆盖证据。
+
 打开 DMG，将左侧应用拖入右侧 Applications；等待复制完成，推出磁盘，再从“应用程序”启动。Finder 安装窗口使用静态背景，随包的 `Install Guide.html` 提供带轻量动画的中英指南，支持键盘和系统“减少动态效果”。Codex CLI、Git 须另行安装配置。
 
 新的 Mac 测试包在最终资源和权限确定后，对 Electron、网关/Bun、Node、PTY 及完整 `.app` 由内向外进行 ad-hoc 完整性签名，并强制校验。这不是 Apple Developer ID 签名或公证，首次仍可能被 Gatekeeper 阻止。先尝试打开，再按 [Apple 指引](https://support.apple.com/102445)进入“系统设置 → 隐私与安全性 → 仍要打开”并确认；只允许来源可信的构建。

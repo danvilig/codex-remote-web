@@ -70,6 +70,26 @@ try {
   assert.equal(await window.evaluate(() => typeof window.require), 'undefined');
   const webPreferences = await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences());
   assert.equal(webPreferences.sandbox, true); assert.equal(webPreferences.contextIsolation, true); assert.equal(webPreferences.nodeIntegration, false);
+  if(process.platform==='darwin') {
+    // Inspect the real installed Electron window on each macOS version. All
+    // projects/accounts are disposable fixtures; no personal sessions appear.
+    await window.locator('#gatewayState').filter({hasText:'Stopped'}).waitFor();
+    await window.screenshot({path:join(root,'.artifacts/macos-desktop-overview.png'),animations:'disabled'});
+    await window.locator('[data-page=configuration]').click();
+    await window.locator('#projectPath').waitFor();
+    assert.equal(await window.locator('#projectPath').inputValue(),home);
+    for(const theme of ['light','dark']) {
+      await window.locator('#desktopTheme').selectOption(theme,{force:true});
+      await window.waitForFunction(value=>document.documentElement.dataset.theme===value,theme);
+      assert.equal(await window.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true,'Native settings must not overflow horizontally');
+      await window.screenshot({path:join(root,`.artifacts/macos-desktop-settings-${theme}.png`),animations:'disabled'});
+    }
+    await window.locator('#desktopTheme').selectOption('system',{force:true});
+    await window.locator('[data-page=diagnostics]').click();
+    await window.locator('#removeBackground').waitFor();
+    await window.locator('[data-page=overview]').click();
+    await window.locator('#start').waitFor();
+  }
   await window.locator('#start').click(); await window.waitForFunction(() => document.querySelector('#gatewayState').textContent === 'Running');
   const state = await agentRequest(directory, 'status'); assert.equal(state.local.phase, 'running');
   // Running means the HTTP gateway is ready; its isolated native connection

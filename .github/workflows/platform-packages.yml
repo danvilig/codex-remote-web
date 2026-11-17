@@ -33,6 +33,7 @@ jobs:
           - os: darwin
             arch: arm64
             runner: macos-15
+            macos-major: '15'
           - os: win32
             arch: x64
             runner: windows-2025
@@ -42,6 +43,7 @@ jobs:
       TARGET_OS: ${{ matrix.os }}
       TARGET_ARCH: ${{ matrix.arch }}
       RELEASE_TAG: ${{ inputs.tag || '' }}
+      CODEX_WEBUI_EXPECT_MACOS_MAJOR: ${{ matrix.macos-major || '' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -54,6 +56,9 @@ jobs:
         with:
           bun-version-file: .bun-version
       - run: bun install --frozen-lockfile
+      - name: Verify actual macOS 15 baseline
+        if: runner.os == 'macOS'
+        run: bun -e 'import { macOSValidationSystem } from "./scripts/macos-validation.ts"; console.log(await macOSValidationSystem());'
       - name: Rebuild Unix terminal against pinned Node headers
         if: runner.os != 'Windows'
         shell: bash
@@ -82,6 +87,7 @@ jobs:
         if: always()
         with:
           name: release-${{ matrix.os }}-${{ matrix.arch }}
+          overwrite: true
           path: |
             .artifacts/release/*.tar.gz*
             .artifacts/release/*.zip*
@@ -89,4 +95,54 @@ jobs:
             .artifacts/release/*.msi*
             .artifacts/release/*.deb*
             .artifacts/macos-installer-native.png
+            .artifacts/macos-desktop-*.png
+            .artifacts/macos-installation-check.json
+          if-no-files-found: error
+
+  macos-27:
+    name: validate-dmg-macos-27-arm64
+    needs: packages
+    # The official xcode-27 preview image runs macOS 27; verify sw_vers below
+    # so a changing runner label can never masquerade as this OS coverage.
+    runs-on: xcode-27
+    timeout-minutes: 25
+    env:
+      CODEX_WEBUI_EXPECT_MACOS_MAJOR: '27'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.revision || '' }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - name: Verify actual macOS 27 runtime
+        run: bun -e 'import { macOSValidationSystem } from "./scripts/macos-validation.ts"; console.log(await macOSValidationSystem());'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-darwin-arm64
+          path: .artifacts/macos15-input
+      - name: Select and verify the exact macOS 15-built DMG
+        shell: bash
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          installer="codex-remote-web-${version}-macos-arm64.dmg"
+          cd .artifacts/macos15-input/release
+          shasum -a 256 -c "${installer}.sha256"
+          echo "CODEX_WEBUI_INSTALLER=${GITHUB_WORKSPACE}/.artifacts/macos15-input/release/${installer}" >> "$GITHUB_ENV"
+      - name: Mount, install, launch and inspect the same DMG on macOS 27
+        run: bun tests/browser/installer.e2e.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-macos-27-arm64
+          overwrite: true
+          path: |
+            .artifacts/macos-installer-native.png
+            .artifacts/macos-desktop-*.png
+            .artifacts/macos-installation-check.json
           if-no-files-found: error
