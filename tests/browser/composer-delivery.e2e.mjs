@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises';
 import { join, delimiter } from 'node:path';
 import { chromium } from 'playwright';
 import { root, artifact, launchOptions } from '../helpers/browser-runtime.mjs';
 
-const temp=await mkdtemp('/tmp/crw-delivery-'),home=join(temp,'home'),project=join(temp,'project'),log=join(temp,'rpc.jsonl');
-await Promise.all([mkdir(home),mkdir(project)]);
+const temp=await mkdtemp('/tmp/crw-delivery-'),home=join(temp,'home'),project=join(temp,'project'),log=join(temp,'rpc.jsonl'),completionDirectory=join(temp,'complete');
+await Promise.all([mkdir(home),mkdir(project),mkdir(completionDirectory)]);
 const port=await new Promise(resolve=>{const server=createServer();server.listen(0,'127.0.0.1',()=>{const p=server.address().port;server.close(()=>resolve(p));});}),base=`http://127.0.0.1:${port}`;
-const server=Bun.spawn(['bun','src/server/index.ts'],{cwd:root,stdout:'ignore',stderr:'ignore',env:{...process.env,HOST:'127.0.0.1',PORT:String(port),HOME:home,CODEX_HOME:home,CODEX_AUTH_PATH:join(home,'missing-auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_AUTH_MODE:'local',CODEX_WEBUI_APP_SERVER_MODE:'isolated',CODEX_WEBUI_FIXTURE_CONVERSATION_TOOLS:'true',CODEX_WEBUI_FIXTURE_TURN_DURATION_MS:'4500',CODEX_WEBUI_FIXTURE_LOG:log,PATH:join(root,'tests/fixtures')+delimiter+process.env.PATH}});
+const server=Bun.spawn(['bun','src/server/index.ts'],{cwd:root,stdout:'ignore',stderr:'ignore',env:{...process.env,HOST:'127.0.0.1',PORT:String(port),HOME:home,CODEX_HOME:home,CODEX_AUTH_PATH:join(home,'missing-auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_AUTH_MODE:'local',CODEX_WEBUI_APP_SERVER_MODE:'isolated',CODEX_WEBUI_FIXTURE_CONVERSATION_TOOLS:'true',CODEX_WEBUI_FIXTURE_COMPLETION_DIR:completionDirectory,CODEX_WEBUI_FIXTURE_LOG:log,PATH:join(root,'tests/fixtures')+delimiter+process.env.PATH}});
 let browser,page,phase='startup';
 const records=async()=>{
   const text=await readFile(log,'utf8');
@@ -17,6 +17,17 @@ const records=async()=>{
   return text.slice(0,text.lastIndexOf('\n')+1).split('\n').filter(Boolean).map(JSON.parse);
 };
 const wait=async predicate=>{for(let i=0;!await predicate();i++){if(i>250)throw Error('Timed out: '+phase);await Bun.sleep(40);}};
+const complete=async text=>{
+  const start=(await records()).find(r=>r.method==='turn/start'&&r.params.input[0].text===text);
+  assert(start,`Missing turn/start: ${text}`);
+  const response=await fetch(base+'/api/rpc',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:'completion-read',method:'thread/read',params:{threadId:start.params.threadId}})});
+  assert.equal(response.ok,true);
+  const reply=await response.json();
+  const turn=reply.result?.thread?.turns?.find(turn=>turn.items.some(item=>item.type==='userMessage'&&item.content?.[0]?.text===text));
+  assert(turn,`Missing fixture turn: ${text}`);
+  assert.equal(turn.status,'inProgress');
+  await writeFile(join(completionDirectory,turn.id),'complete');
+};
 try{
   await wait(async()=>{try{return(await(await fetch(base+'/api/health')).json()).codex;}catch{return false;}});
   browser=await chromium.launch(launchOptions());const context=await browser.newContext({viewport:{width:1180,height:900}});
@@ -56,6 +67,12 @@ try{
   await page.screenshot({path:artifact('composer-queued-messages.png')});
   await page.evaluate(()=>globalThis.__codexWebuiI18n.setPreference('en'));
   await page.locator('#prompt').fill('Draft typed while queued messages wait');
+  phase='completion releases one FIFO queue item at a time';
+  assert.equal((await records()).filter(r=>r.method==='turn/start').length,1);
+  await complete('Initial delivery');
+  await wait(async()=>(await records()).filter(r=>r.method==='turn/start').length===2);
+  assert.equal((await records()).filter(r=>r.method==='turn/start')[1].params.input[0].text,'Queued first');
+  await complete('Queued first');
   await wait(async()=>(await records()).filter(r=>r.method==='turn/start').length===3);
   const starts=(await records()).filter(r=>r.method==='turn/start');assert.deepEqual(starts.map(r=>r.params.input[0].text),['Initial delivery','Queued first','Queued second [wait]']);
   assert.equal(await page.locator('#prompt').inputValue(),'Draft typed while queued messages wait');
@@ -86,9 +103,11 @@ try{
   await side.locator('.composer-delivery-choice').click();await page.getByRole('menuitem',{name:'Queue',exact:true}).click();
   await input.fill('Side queued [wait]');await side.locator('[data-side-composer=send]').click();
   await side.locator('.composer-queue-row').waitFor();
+  assert.equal((await records()).some(r=>r.method==='turn/start'&&r.params.input[0].text==='Side queued [wait]'),false);
+  await complete('Side initial delivery');
   await wait(async()=>(await records()).some(r=>r.method==='turn/start'&&r.params.input[0].text==='Side queued [wait]'));
   await page.waitForFunction(()=>document.querySelectorAll('#sideChatPanel .composer-queue-row').length===0);
   assert.deepEqual(errors,[]);
   console.log('PASS: immediate spinner/disabled duplicate submission, native steering, FIFO completion queue, captured settings/draft safety, cancel/reload retention, failure recovery, mobile bounds, matching side composer behavior; fixture only');
-}catch(error){console.error('FAIL phase:',phase, await page?.locator('#composer').innerText());await page?.screenshot({path:artifact('composer-delivery-failure.png')}).catch(()=>{});throw error;}
+}catch(error){console.error('FAIL phase:',phase, await page?.locator('#composer').innerText());console.error('Fixture RPC records:',await records().catch(()=>[]));await page?.screenshot({path:artifact('composer-delivery-failure.png')}).catch(()=>{});throw error;}
 finally{await browser?.close();server.kill();await server.exited;await rm(temp,{recursive:true,force:true});}
