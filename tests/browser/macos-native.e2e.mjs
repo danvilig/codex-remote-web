@@ -85,6 +85,22 @@ async function closeApplication() {
 }
 const menus = [];
 try {
+  // Capture a normal production launch before injecting the external driver.
+  // This distinguishes an OS/host rendering failure from instrumentation.
+  const productionEnv = { ...env }; delete productionEnv.DYLD_INSERT_LIBRARIES;
+  const production = spawn(executable, [], { env: productionEnv, stdio: 'ignore' });
+  try {
+    await waitFor(async () => {
+      assert.equal(production.exitCode, null);
+      return (await agentRequest(directory, 'status')).config.initialized;
+    }, 'uninstrumented production launch');
+    await delay(2000);
+    await command(['screencapture', '-x', join(root, '.artifacts/macos-desktop-production-launch.png')], root);
+  } finally {
+    production.kill('SIGTERM');
+    for (let i=0; production.exitCode===null && production.signalCode===null && i<100; i++) await delay(50);
+    assert.ok(production.exitCode!==null || production.signalCode!==null, 'Production-launch probe must exit before interaction test');
+  }
   await launch();
   assert.deepEqual(await application.request('security'), { persistent: false, url: 'crw-desktop://settings/index.html', inspectable: false });
   assert.deepEqual(await evaluate("return [typeof window.require, typeof window.process, typeof window.Bun]"), ['undefined', 'undefined', 'undefined']);
