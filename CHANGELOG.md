@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.0-beta.1
+
+- Add a background gateway with a coordinated Electron tray/settings app for macOS, Windows and Linux; initialize projects, manage gateway/remote access, inspect diagnostics and configure login startup without a terminal.
+- Add Linux x64/arm64 desktop DEBs alongside DMG/MSI installers and portable CLI/deployment archives, with actual native installer and background-lifecycle regression checks.
+- Coordinate desktop and Web settings themes, controls, transitions, bilingual layouts and reduced-motion behavior.
+- Default to the shared Codex Desktop/CLI App Server, wait/reconnect without an isolated fallback, and preserve the shared daemon and its tasks when stopping the gateway; standalone deployments explicitly select isolated mode.
+- Use 30-day application sessions with HttpOnly/SameSite=Lax cookies for new fixed-domain Access apps; retain existing app settings and document deliberate migration and shorter-session limits.
+- Document desktop initialization, startup/logout/uninstall boundaries, Windows protected temporary access and upgrades from Alpha.3 in both READMEs.
+
 ## Unreleased
 
 - Add a unified macOS/Windows/Linux desktop settings window, tray controls and an independent user-session gateway agent.
