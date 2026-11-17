@@ -42,6 +42,16 @@ using System.IO;
 using System.Reflection;
 using System.Threading;
 public static class RelayHarness {
+ public static void CheckBuffered(Type job, Stream input, Stream output, WaitHandle delivered) {
+  // Keep gateway stdin open until the short request reaches the underlying
+  // pipe sink. StreamWriter.AutoFlush does not apply to BaseStream writes.
+  Exception problem=null;
+  Thread reader=new Thread(delegate(){try{job.GetMethod("RelayInput").Invoke(null,new object[]{input,output,new Action(delegate(){})});}catch(Exception e){problem=e;}});
+  reader.IsBackground=true;reader.Start();
+  if(!delivered.WaitOne(5000))throw new Exception("Short JSON-RPC remained buffered while gateway input stayed open");
+  if(!reader.Join(1000))throw new Exception("Buffered relay failed to finish after delivered input EOF");
+  if(problem!=null)throw problem;
+ }
  public static void Check(Type job, Stream input, Stream output, bool throws) {
   ManualResetEvent revoked=new ManualResetEvent(false); Exception problem=null;
   Thread thread=new Thread(delegate(){try{job.GetMethod("RelayInput").Invoke(null,new object[]{input,output,new Action(delegate(){revoked.Set();})});}catch(Exception e){problem=e;}});
@@ -70,6 +80,13 @@ $gated=[GatedInput]::new($utf8,$observed.Written)
 $copied=$observed.ToArray()
 if([Convert]::ToBase64String($copied) -cne [Convert]::ToBase64String($utf8)){throw 'Byte relay changed input'}
 Write-Host 'PASS: production C# RelayInput preserves raw UTF8 and zero bytes before EOF'
+$short=[Text.Encoding]::UTF8.GetBytes('{"id":1,"method":"initialize","params":{}}'+[char]10)
+$pipeSink=[ObservedSink]::new()
+$nativeInput=[IO.BufferedStream]::new($pipeSink,4096)
+$gatewayInput=[GatedInput]::new($short,$pipeSink.Written)
+[RelayHarness]::CheckBuffered([CodexIsolatedJob],$gatewayInput,$nativeInput,$pipeSink.Written)
+if([Convert]::ToBase64String($pipeSink.ToArray()) -cne [Convert]::ToBase64String($short)){throw 'Buffered stdin changed the short JSON-RPC'}
+Write-Host 'PASS: short JSON-RPC flushes through buffered native stdin while gateway input remains open'
 # Use the supplied Node runtime as an argv dumper. No shell is involved.
 $expected=@('', 'hello world', '汉字', 'a"b', 'end\', '\\"x\', '$(echo injected); & | %PATH%')
 $dump=[Diagnostics.ProcessStartInfo]::new($env:CODEX_WEBUI_TEST_NODE)

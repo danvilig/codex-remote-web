@@ -80,6 +80,10 @@ public static class CodexIsolatedJob {
             try {
                 foreach (byte[] block in pending.GetConsumingEnumerable()) {
                     output.Write(block, 0, block.Length);
+                    // .NET Framework's Process.StandardInput.BaseStream is
+                    // buffered. Direct byte writes bypass StreamWriter's
+                    // AutoFlush, so a short JSON-RPC must flush explicitly.
+                    output.Flush();
                     Interlocked.Add(ref buffered, -block.Length);
                 }
             }
