@@ -4,6 +4,7 @@ export const LOCALE_PREFERENCES = Object.freeze(["system", "zh-CN", "en"]);
 const ZH_CN = Object.create(null);
 
 Object.assign(ZH_CN, {
+  'Manage remote access in the desktop app.': '请在桌面应用中管理远程访问。',
   'Project instructions': '项目指令', 'Read and edit this project’s AGENTS.md. Changes apply when Codex next reads project instructions.': '读取和编辑此项目的 AGENTS.md。Codex 下次读取项目指令时生效。',
   'Preview changes': '预览改动', 'Create managed worktree': '创建托管工作树', 'Remove worktree': '移除工作树', 'Managed by WebUI': '由 WebUI 管理', 'External worktree': '外部工作树',
   'Only clean, unoccupied worktrees created here can be removed. Their branches are preserved.': '仅可移除在此创建、没有未提交改动且未使用的工作树。分支将保留。',

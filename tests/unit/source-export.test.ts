@@ -38,6 +38,7 @@ test('public snapshot contains only allowed current files and has independent hi
     await writeFile(join(fixture, 'docs/history/machine.md'), 'private machine record\n');
     await writeFile(join(fixture, 'public/assets/old.svg'), '<svg>historical fixture</svg>');
     await writeFile(join(fixture, 'tests/fixtures/codex'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+    await writeFile(join(fixture, 'tests/fixtures/windows-job-offline.ps1'), 'Write-Host "Offline C# test fixture"');
     run(['git', 'init', '-q', '-b', 'main']);
     run(['git', 'config', 'user.name', 'Snapshot Test']);
     run(['git', 'config', 'user.email', 'snapshot@example.invalid']);
@@ -61,6 +62,7 @@ test('public snapshot contains only allowed current files and has independent hi
     for (const internal of ['docs/images/README.md', 'scripts/capture-docs.ts', 'tests/browser/readme-screenshot.mjs', 'tests/fixtures/showcase-codex.mjs']) expect(Bun.spawnSync(['git', 'cat-file', '-e', `HEAD:${internal}`], { cwd: exported.directory }).exitCode).not.toBe(0);
     await expect(access(join(exported.directory, 'docs/images/personal.png'))).rejects.toThrow();
     expect((await stat(join(exported.directory, 'tests/fixtures/codex'))).mode & 0o111).toBe(0o111);
+    expect(await readFile(join(exported.directory, 'tests/fixtures/windows-job-offline.ps1'), 'utf8')).toBe(await readFile(join(fixture, 'tests/fixtures/windows-job-offline.ps1'), 'utf8'));
     await expect(access(join(exported.directory, 'docs/history/machine.md'))).rejects.toThrow();
     expect(Bun.spawnSync(['git', 'cat-file', '-e', oldBlob], { cwd: exported.directory }).exitCode).not.toBe(0);
     for (const commit of [historicalCommit, developmentCommit]) expect(Bun.spawnSync(['git', 'cat-file', '-e', commit], { cwd: exported.directory }).exitCode).not.toBe(0);

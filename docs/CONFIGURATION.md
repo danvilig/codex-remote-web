@@ -82,7 +82,7 @@ Environment=CODEX_WEBUI_ENABLE_TERMINAL=true
 “已归档的对话”支持搜索、按项目/类型筛选和取消归档；分页时筛选仅作用于已加载的对话。恢复后重新读取侧边栏，不自动打开或执行聊天。“存储”统计 Codex 目录中的逻辑文件大小：不等同于磁盘实际占用、不统计目录外项目、不单独拆分数据库里的子代理空间；达到扫描上限或无法访问文件会提示部分统计。“工作树”显示当前项目登记的 Git 工作树，可显式创建本应用托管的新工作树；只有干净、无占用且归属明确的托管工作树才能在预览确认后移除，分支保留，不自动删除。当前项目的 AGENTS.md 在“个性化”中提供预览编辑和修订冲突检查，已知继承指令仅显示只读元数据。
 
 
-无域名临时访问不需要新增 `.env` 认证参数。在完整本地设置页填写邮箱启动即可；内部 `quick-tunnel` 认证只存在于私有 Unix socket，不能通过 `CODEX_WEBUI_AUTH_MODE` 将普通 TCP 服务切换为此模式。依赖现有 `PATH` 中的 cloudflared、Node.js（可用 `CODEX_WEBUI_NODE` 指定）和 Unix socket。临时源站共享当前 WebUI 的 Codex/终端权限；没有另行启用终端或扩大项目权限。无需 sudo、systemd、Cloudflare API Token 或管理凭据。独立的 `quick-tunnel.lock` 位于用户私有配置目录中；运行地址和邮箱不写入固定域名部署记录。
+无域名临时访问不需要新增 `.env` 认证参数。CLI 网关可在完整本地设置页填写邮箱启动；桌面网关请在桌面应用的远程访问中管理，本地浏览器仅显示桌面部署状态，不会另建 systemd 部署。Linux/macOS 的内部 `quick-tunnel` 认证仅用于私有 Unix socket；Windows 的桌面和 CLI 入口均使用独立随机 loopback 端口及每次运行的 192-bit 随机 Host 凭据，HTTP/WebSocket 同时检查该凭据、loopback 和公网 Origin，私有配置由 NTFS owner/DACL 保护。不能通过 `CODEX_WEBUI_AUTH_MODE` 将普通 TCP 服务切换为此模式。依赖现有 `PATH` 中的 cloudflared、Node.js（可用 `CODEX_WEBUI_NODE` 指定）。临时源站共享当前 WebUI 的 Codex/终端权限；没有另行启用终端或扩大项目权限。无需 sudo、systemd、Cloudflare API Token 或管理凭据。独立的 `quick-tunnel.lock` 位于用户私有配置目录中；运行地址和邮箱不写入固定域名部署记录。
 
 ## 计划任务与本机资源
 

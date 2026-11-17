@@ -1,6 +1,6 @@
-# 本地 Alpha 发布流程
+# 预发布候选与发布流程
 
-目标版本为 `0.2.0-alpha.3`。本地脚本只准备候选或 CI Artifact，不自动推送、打标签、上传 GitHub Release 或重启服务。公开仓库为 `danvilig/codex-remote-web`，首次公开从独立快照开始，后续遵循 [Git 开发流程](GIT_WORKFLOW.md)：日常 PR 进入 `develop`，准备发版才创建 `release/<version>`，稳定后通过 PR 合入 `main`。标签指向已通过 Verify 的 `main` 提交，由维护者单独授权发布。
+目标版本为 `0.2.0-beta.1`（标签 `v0.2.0-beta.1`，仍为预发布）。本地脚本只准备候选或 CI Artifact，不自动推送、打标签、上传 GitHub Release 或重启服务。公开仓库为 `danvilig/codex-remote-web`，首次公开从独立快照开始，后续遵循 [Git 开发流程](GIT_WORKFLOW.md)：日常 PR 进入 `develop`，准备发版才创建 `release/<version>`，稳定后通过 PR 合入 `main`。标签指向已通过 Verify 的 `main` 提交，由维护者单独授权发布。
 
 ## 公开源码快照
 
@@ -55,7 +55,7 @@ bun run test:docker
 bun run source:scan
 ```
 
-`verify:release` 统一运行依赖审计、构建、单元、协议基础/执行保护、工作区/手机/设置/终端、WebKit 预检、合成长会话性能基线、Access、配置向导、临时访问、HOME 外项目和生产归档回归。检测到 cloudflared 时必须执行真实二进制离线校验；未安装时输出明确 SKIP。离线校验不注册 Tunnel、不发送邮件。默认测试均使用隔离目录、模拟 App Server/Cloudflare、本地 JWKS，不需要真实凭据或模型调用。
+`verify:release` 统一运行依赖审计、构建、单元、协议基础/执行保护、工作区/手机/设置/终端、WebKit 预检、合成长会话性能基线、Access、配置向导、临时访问、HOME 外项目和生产归档回归。Verify 与候选 CI 下载固定版本、经 SHA-256 校验的 cloudflared，并设置 `CODEX_WEBUI_REQUIRE_CLOUDFLARED=1`，缺少二进制时直接失败。普通本地运行检测到 cloudflared 时执行真实二进制离线校验，未安装且未要求该检查时输出明确 SKIP。离线校验不注册 Tunnel、不发送邮件。默认测试均使用隔离目录、模拟 App Server/Cloudflare、本地 JWKS，不需要真实凭据或模型调用。
 
 Docker 回归只挂载临时项目与协议替身，校验 `/workspace`、权限边界、静态资源和真实 PTY。Linux 原生为主，Docker 为备用；容器内不能自动配置宿主机 systemd，默认镜像不包含 Codex 或 cloudflared。需要 Docker sudo 的开发主机可仅对该检查设置 `CODEX_WEBUI_DOCKER_SUDO=1`。
 
@@ -71,7 +71,7 @@ bun run candidate:prepare
 
 生产 tar.gz 及 SHA-256 文件来自独立快照。白名单仅包括运行所需 bundle、静态资源、安装/安全文档、部署模板、冻结锁文件与生产依赖许可证清单 `third-party/dependencies.json` 和许可证/NOTICE 文本（包含 DOMPurify Apache-2.0）。README 展示图仅限 `scripts/documentation-assets.ts` 列出的六张模拟数据截图，并包含在源码和生产归档中以保持图片链接有效；图片目录说明、截图生成脚本、演示 fixture 和旧截图测试属于开发内部文件，不进入公开快照或生产归档。个人截图及其他图片仍被排除。扫描不能识别图片中的文字，展示图必须目视审阅。Docker 构建仍不包含文档图片。不包含 node_modules，原生依赖须在目标平台安装。`release.json.commit` 指向快照提交，`developmentCommit` 和 `SOURCE_PROVENANCE.json` 追溯本地开发来源。包不是独立可执行程序。
 
-`test:release` 使用单独临时输出目录和 `--allow-dirty` 验证开发构建，禁止把这种测试产物当作候选；最终候选必须 `dirty: false`、`source: public-snapshot`。在独立 HOME 外目录校验 SHA-256 并解压，执行 `bun install --production --frozen-lockfile`，从其他 cwd 启动 `dist/server.js`，检查文件、PTY、静态资源和临时连接器 worker。安装、升级与回退见 [发布说明](releases/0.2.0-alpha.2.md)。
+`test:release` 使用单独临时输出目录和 `--allow-dirty` 验证开发构建，禁止把这种测试产物当作候选；最终候选必须 `dirty: false`、`source: public-snapshot`。在独立 HOME 外目录校验 SHA-256 并解压，执行 `bun install --production --frozen-lockfile`，从其他 cwd 启动 `dist/server.js`，检查文件、PTY、静态资源和临时连接器 worker。安装、升级与回退见 [Beta.1 发布说明](releases/0.2.0-beta.1.md)。
 
 ## 正式升级前的互斥协议切换
 
@@ -86,20 +86,20 @@ bun run candidate:prepare
 3. 在 **Security → Advisories** 确认 **Report a vulnerability** 按钮，检查进入的是该仓库的私密报告表单；无需发送虚构漏洞。更新 SECURITY 的状态后再宣称渠道已启用。[GitHub 官方步骤](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository)。
 4. 在目标仓库实际运行 Verify 与手动 prerelease 工作流，确认 Actions 权限、浏览器和镜像构建都通过，再决定标签和正式上传。
 
-两个工作流共享 `verify:release`，均执行依赖审计、临时访问、WebKit 预检和合成性能回归；有 cloudflared 时执行离线验证。验证后调用 `candidate:prepare`，导出并扫描干净独立快照后构建。手动流程只上传候选 CI Artifact，未调用公开发布 API。Artifact 的可见性由目标仓库设置决定。
+两个工作流共享 `verify:release`，均执行依赖审计、临时访问、WebKit 预检和合成性能回归，并强制执行真实 cloudflared 离线验证。cloudflared 仅作为 CI 工具下载，不加入产品包。验证后调用 `candidate:prepare`，导出并扫描干净独立快照后构建。手动流程只上传候选 CI Artifact，未调用公开发布 API。Artifact 的可见性由目标仓库设置决定。
 
 ## 跨平台 GitHub Release
 
-Alpha.3 目标为 Linux x64/arm64、macOS Apple Silicon（macOS 15+）和 Windows x64（Windows 11）。不构建 Intel Mac、Windows ARM64 或 musl 包；现有 Alpha.2 标签和附件保持不变。
+Beta.1 目标为 Linux x64/arm64、macOS Apple Silicon（macOS 15+）和 Windows x64（Windows 11）。不构建 Intel Mac、Windows ARM64 或 musl 包；现有 Alpha 标签和附件保持不变。版本变更、发布说明与候选验证先通过稳定化 PR；发布准备不等于授权打标签或公开上传。
 
 `.github/workflows/platform-packages.yml` 在 PR 中生成可审阅 Artifact。发布工作流复用同一矩阵，使用原生 `ubuntu-24.04`、`ubuntu-24.04-arm`、`macos-15` 和 `windows-2025` runner。只有固定版本标签、受保护 main 历史和该提交成功的 main-push Verify 才能发布；不能使用未合并的 PR Artifact 冒充正式 Release。
 
-每个平台校验冻结安装、构建、目标架构和实际便携归档。回归覆盖异目录启动、完整页面及静态资源、受限文件读取/编辑、私有回执及 UUID 去重、持久队列访问、真实终端。Linux/macOS 验证保护临时连接器；Windows 验证 Unix socket 临时访问明确失败，不降级为公开隧道。Linux 完整 Verify、依赖审计、浏览器和 Docker 验证继续运行。
+每个平台校验冻结安装、构建、目标架构和实际便携归档。回归覆盖异目录启动、完整页面及静态资源、受限文件读取/编辑、私有回执及 UUID 去重、持久队列访问、真实终端。Linux/macOS 验证受保护的临时连接器；Windows 的 CLI/便携包和桌面入口均使用独立 loopback 端口及每次运行的随机 Host 凭据，并校验 HTTP/WebSocket 边界，不降级为可公开访问的无认证源站。Linux 完整 Verify、依赖审计、浏览器和 Docker 验证继续运行。
 
-安装包使用已通过测试的便携包构建。macOS runner 挂载 DMG、复制 `.app` 到含空格路径、校验 Info.plist/启动脚本，并从安装目录运行回归。Windows 使用固定 WiX 5.0.2 构建 per-user MSI，实际静默安装到含空格路径、检查开始菜单、运行同样回归、卸载并确认程序和快捷方式清理。Windows 另验证 NTFS 宽泛 ACL 和 junction 拒绝。GUI 双击及 TCC/Gatekeeper/SmartScreen 提示仍需真实桌面人工验证，自动化不冒充人工验收。
+桌面安装包使用已通过测试的便携网关资源和锁定 Electron 构建。macOS runner 挂载 DMG、复制 `.app` 到含空格路径并运行真实桌面窗口/后台生命周期回归。Windows 使用固定 WiX 5.0.2 构建 per-user MSI，实际静默安装、检查开始菜单、运行回归、卸载并确认自有程序和快捷方式清理；另验证 NTFS 宽泛 ACL 和 junction 拒绝。Linux 两种架构安装实际 DEB，在 Xvfb 中验证沙箱窗口、退出托盘后网关继续运行、重新连接及停止，再移除 DEB。GUI 人工操作、TCC/Gatekeeper/SmartScreen 提示、真实注销/登录与公网邮箱验证仍需单独验收，自动化不冒充人工验收。
 
-Alpha.3 共八个安装/归档文件：macOS DMG、Windows MSI、四个系统/架构的便携包，以及两种 Linux 架构的 JS 部署包。Windows 便携包为 zip，其余为 tar.gz；每个文件附带同名 `.sha256`，汇总 `SHA256SUMS` 共八项。下载一个包时只核对它的校验文件，下载全部包时可用 `sha256sum -c SHA256SUMS`。GitHub 自动提供源码下载，无需重复上传源码包。
+Beta.1 共十个安装/归档文件：macOS DMG、Windows MSI、两种 Linux 架构的桌面 DEB、四个系统/架构的 CLI 便携包，以及两种 Linux 架构的 JS 部署包。Windows 便携包为 zip，其他归档为 tar.gz；每个文件附带同名 `.sha256`，汇总 `SHA256SUMS` 共十项。下载一个包时只核对它的校验文件，下载全部包时可用 `sha256sum -c SHA256SUMS`。GitHub 自动提供源码下载，无需重复上传源码包。
 
 本机便携构建使用 `bun run release:portable -- --output-dir <new-directory>`，必须与目标系统及架构一致；`CODEX_WEBUI_PORTABLE_ARCHIVE` 指定待验收的实际归档，`bun run test:portable` 验证不依赖宿主机 Bun/Node、安装器或编译器。包保留运行时许可证、依赖声明、`dist/portable.js` 和重链接说明。不包含 Codex、cloudflared 或凭据。
 
-Mac/Windows 包暂未代码签名或公证。固定域名自动服务向导仍限 Linux systemd，其他平台手动配置 Tunnel + Access；安装器不配置系统服务、不改动凭据和工作区。安装、权限边界及限制见 [跨平台配置](deployment/PLATFORMS.md)。
+桌面包暂未代码签名或公证。桌面应用在 macOS/Windows/Linux 管理固定域名网关与受保护临时访问；无桌面的自动部署仍使用 Linux 用户级 systemd。登录自启默认勾选，在首次保存时注册，注销后停止；应用不自动接管已有 headless/systemd 部署。升级前停止冲突网关并保留数据；macOS 删除应用前显式移除后台组件，Windows/Linux 卸载清理自有后台组件。安装、权限边界及限制见 [跨平台配置](deployment/PLATFORMS.md)。

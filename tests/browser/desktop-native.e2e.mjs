@@ -9,6 +9,7 @@ import { desktopConfig, desktopDirectory } from '../../src/shared/desktop-config
 import { writePrivate } from '../../src/server/desktop/private-store.js';
 import { agentRequest } from '../../desktop/client.js';
 import { root } from '../helpers/browser-runtime.mjs';
+import { windowsIsolatedStartupTimeout } from '../../src/server/bridge/windows-isolated.js';
 
 const executable = process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE;
 assert.ok(executable, 'Test an actual desktop executable');
@@ -71,6 +72,20 @@ try {
   assert.equal(webPreferences.sandbox, true); assert.equal(webPreferences.contextIsolation, true); assert.equal(webPreferences.nodeIntegration, false);
   await window.locator('#start').click(); await window.waitForFunction(() => document.querySelector('#gatewayState').textContent === 'Running');
   const state = await agentRequest(directory, 'status'); assert.equal(state.local.phase, 'running');
+  // Running means the HTTP gateway is ready; its isolated native connection
+  // initializes independently. Establish connectivity before testing whether
+  // quitting the tray preserves it (including cold PowerShell compilation).
+  console.error('Verifying native connection before tray exit');
+  // Windows helper compilation has its own bounded startup phase before the
+  // unchanged 30s initialize RPC budget. The immediate post-exit check below
+  // still has no reconnect retry.
+  const deadline = Date.now() + (windows ? windowsIsolatedStartupTimeout + 30000 : 30000);
+  for (;;) {
+    const health = await (await fetch(state.url + '/api/health', { signal: AbortSignal.timeout(10000) })).json();
+    if (health.codex) break;
+    assert.ok(Date.now() < deadline, 'Native fixture must connect before tray exit: ' + JSON.stringify((await agentRequest(directory, 'status')).events));
+    await delay(100);
+  }
   console.error('Verifying tray exit preserves gateway');
   await closeApplication();
   console.error('Verifying background control after tray exit');
