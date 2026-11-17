@@ -33,8 +33,6 @@ export function finderLayoutScript(mount: string) {
     set position of item "Codex Remote Web.app" of installerFolder to {${dmgLayout.app}}
     set position of item "Applications" of installerFolder to {${dmgLayout.applications}}
     set position of item "Install Guide.html" of installerFolder to {${dmgLayout.help}}
-    close installerWindow
-    open installerFolder
     update installerFolder without registering applications
     delay 2
     close installerWindow
