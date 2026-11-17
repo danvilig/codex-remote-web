@@ -1,4 +1,4 @@
-import { lstat, readdir, rm } from 'node:fs/promises';
+import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { command } from './distribution.ts';
 
@@ -20,15 +20,13 @@ export async function macAppSize(path: string) {
 }
 export async function trimMacApp(app: string, root: string) {
   const before = await macAppSize(app);
-  // Strip only the bundled Node executable's debug/local symbols. Do not
-  // rewrite Electron or Bun binaries; signing follows this final mutation.
+  // The native AppKit/WebKit shell has no Chromium payload. Strip only
+  // Node's debug/local symbols; the compiled Bun image must stay intact.
+  // All signatures are rebuilt after this final mutation.
   await command(['strip', '-S', '-x', join(app, 'Contents/Resources/gateway/runtime/node')], root);
-  const resources = join(app, 'Contents/Frameworks/Electron Framework.framework/Versions/A/Resources');
-  const keep = new Set(['en.lproj', 'en_GB.lproj', 'zh_CN.lproj', 'zh_TW.lproj', 'Base.lproj']);
-  for (const name of await readdir(resources)) if (name.endsWith('.lproj') && !keep.has(name)) await rm(join(resources, name), { recursive: true });
-  // Symbols are for crash analysis, not execution. Retain runtime notices.
-  for (const directory of [join(app, 'Contents/Resources'), resources]) {
-    for (const name of await readdir(directory)) if (name.endsWith('.dSYM') || name.endsWith('.debug') || name === 'default_app.asar') await rm(join(directory, name), { recursive: true });
-  }
-  return { before, trimmed: await macAppSize(app) };
+  return { before, trimmed: await macAppSize(app), components: {
+    shell: await macAppSize(join(app, 'Contents/MacOS')),
+    gateway: await macAppSize(join(app, 'Contents/Resources/gateway')),
+    node: await macAppSize(join(app, 'Contents/Resources/gateway/runtime')),
+  } };
 }

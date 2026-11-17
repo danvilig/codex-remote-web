@@ -1,6 +1,6 @@
 # Desktop gateway / 桌面网关
 
-The macOS DMG, Windows per-user MSI and Linux desktop DEB open a shared Electron settings window. The standalone archives remain command-line distributions for headless use. Desktop packages include the existing Bun/Node gateway and native terminal; Codex CLI, Git and cloudflared are external prerequisites. Electron is pinned in the lockfile, and its MIT/Chromium notices accompany each desktop package.
+The macOS DMG uses a native AppKit status bar/window and the system WKWebView. Windows per-user MSI and Linux desktop DEB use Electron. All three render the same settings interface. The standalone archives remain command-line distributions for headless use. Desktop packages include the existing Bun/Node gateway and native terminal; Codex CLI, Git and cloudflared are external prerequisites. Electron is pinned in the lockfile, and its MIT/Chromium notices accompany Windows/Linux desktop packages. macOS includes no Chromium or Electron framework; the Bun/Node gateway and native PTY remain self-contained.
 
 ## 初始化与日常使用
 
@@ -14,7 +14,7 @@ macOS 15+ 仅支持 Apple Silicon；Windows 11 仅支持 x64、NTFS 和 Windows 
 
 打开 DMG，将左侧应用拖入右侧 Applications；等待复制完成，推出磁盘，再从“应用程序”启动。Finder 安装窗口使用静态背景，随包的 `Install Guide.html` 提供带轻量动画的中英指南，支持键盘和系统“减少动态效果”。Codex CLI、Git 须另行安装配置。
 
-新的 Mac 测试包在最终资源和权限确定后，对 Electron、网关/Bun、Node、PTY 及完整 `.app` 由内向外进行 ad-hoc 完整性签名，并强制校验。这不是 Apple Developer ID 签名或公证，首次仍可能被 Gatekeeper 阻止。先尝试打开，再按 [Apple 指引](https://support.apple.com/102445)进入“系统设置 → 隐私与安全性 → 仍要打开”并确认；只允许来源可信的构建。
+新的 Mac 测试包在最终资源和权限确定后，对原生界面、网关/Bun、Node、PTY 及完整 `.app` 由内向外进行 ad-hoc 完整性签名，并强制校验。这不是 Apple Developer ID 签名或公证，首次仍可能被 Gatekeeper 阻止。先尝试打开，再按 [Apple 指引](https://support.apple.com/102445)进入“系统设置 → 隐私与安全性 → 仍要打开”并确认；只允许来源可信的构建。
 
 若仍提示“已损坏”，请保留安装包和 SHA-256，反馈原始提示、macOS 版本及芯片型号。不要通过全局禁用 Gatekeeper 或清除 quarantine 属性绕过错误。旧版本包不因本次修复而获得有效签名。原生 CI 验证签名、篡改拒绝、DMG 挂载后的 Finder 布局、复制后的签名及真实桌面运行；Safari 下载隔离与人工信任流程需在真实 Mac 上另行验收。
 
@@ -53,8 +53,16 @@ Windows 独立 App Server 模式使用隐藏的 Windows PowerShell Job 辅助进
 
 ## 开发和验收
 
-`bun run desktop:dev` 构建并打开桌面界面；首次需要执行 `node node_modules/electron/install.js` 下载锁定的 Electron 运行时。`bun run test:desktop` 使用隔离项目、协议/Cloudflare fixture 验证设置交互和后台生命周期，不访问个人账户或模型。`tests/browser/desktop-native.e2e.mjs` 在各原生安装包上检查真实窗口沙箱、preload 隔离、退出界面后网关继续运行、重新连接和停止。
+`bun run desktop:dev` 构建并打开桌面界面；首次需要执行 `node node_modules/electron/install.js` 下载锁定的 Electron 运行时。`bun run test:desktop` 使用隔离项目、协议/Cloudflare fixture 验证设置交互和后台生命周期，不访问个人账户或模型。`tests/browser/desktop-native.e2e.mjs` 检查 Windows/Linux 的真实 Electron 窗口沙箱及 preload 隔离。Mac 使用 `tests/browser/macos-native.e2e.mjs` 检查 DMG 中实际安装的 AppKit/WKWebView 应用，覆盖受限资源读取、桥接动作与消息大小、真实原生菜单/确认框、中英文持久化、浅色/深色界面、配置保存、后台连续运行和干净卸载。测试通过外部注入的专用 dylib 操作真实 WebKit；该驱动仅在测试临时目录编译，不进入安装包，应用本身不提供脚本执行/自动确认的调试接口。
 
 原生 CI 构建并测试 DMG/MSI/DEB；GUI 人工操作、系统信任提示、注销/登录真实桌面会话与真实公网邮箱验证需要单独报告，不能由 fixture 测试代替。保留源码、锁文件、第三方许可证与 Electron 的 Chromium 通知，签名、公证和正式发布单独进行。
 
 桌面语言可在网关运行时即时切换，原生菜单与窗口使用相同选择。诊断页的“清理并卸载”在确认后清除应用设置/缓存/管理令牌并退出，Mac 同时将应用移至废纸篓；项目和 Codex 账户保持不变。有远程部署时，请先在远程访问页移除部署后再清理。少量稳定锁/代际标记与未知文件保留；其他独立部署不受影响。Mac 测试包使用透明文件系统压缩，验收时请区分逻辑大小与实际磁盘占用。
+
+### macOS 体积与原生界面
+
+Mac 包使用系统自带的 AppKit/WebKit，不再携带独立 Chromium/Electron。应用代码和完整网关仍随包提供，不在首次启动下载运行时，也不要求用户安装 Node。最低部署版本保持 15.0；Windows/Linux 与 CLI 便携包的运行时不变。原生界面仅从固定自定义 scheme 读取明确列出的界面资源，禁止界面导航到外部页面，主帧桥接只允许设置动作；账户与控制令牌留在后台进程。WebKit 使用非持久化数据存储。
+
+网关退出界面后继续运行；原生后台 launcher 通过生命周期管道管理代理，launcher 结束时 EOF 触发代理关闭。登录自启继续使用相同 LaunchAgent 格式与安装归属校验。“清理并卸载”也清理上一版 Electron 留下的应用缓存，保留项目和 Codex 账户。
+
+原生验证在实际 Finder 复制后分别报告逻辑字节和占用块数，防止把下载压缩率当成安装体积。测试要求应用逻辑体积小于 250 MB、实际占用小于 130 MB，并核对应用中没有 Electron framework；具体数字以每次 `macos-installation-check.json` 为准。

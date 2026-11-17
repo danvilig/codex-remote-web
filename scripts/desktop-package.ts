@@ -5,8 +5,8 @@ import { createHash } from 'node:crypto';
 import { buildDesktop } from './desktop.ts';
 import { command } from './distribution.ts';
 import { signMacApp } from './macos-sign.ts';
-import { macIcon } from './macos-dmg.ts';
 import { trimMacApp } from './macos-size.ts';
+import { nativeMacDesktop } from './macos-desktop.ts';
 import { macosMinimumVersion } from './macos-validation.ts';
 
 const root = resolve(import.meta.dir, '..');
@@ -18,23 +18,25 @@ async function distributionPermissions(path: string) {
 }
 export async function desktopPackage(gateway: string, output: string) {
   const pkg = await Bun.file(join(root, 'package.json')).json();
+  if (process.platform === 'darwin') {
+    const destination = await nativeMacDesktop(gateway, output, root, pkg);
+    await distributionPermissions(destination);
+    const application = join(destination, 'Codex Remote Web.app');
+    const size = await trimMacApp(application, root);
+    await signMacApp(application);
+    await writeFile(join(root, '.artifacts/macos-package-size.json'), JSON.stringify(size, null, 2) + '\n');
+    return destination;
+  }
   const temp = await mkdtemp(join(output, '.desktop-'));
   try {
     const source = await buildDesktop(join(temp, 'app'));
     await writeFile(join(source, 'package.json'), JSON.stringify({ name: pkg.name, productName: 'Codex Remote Web', author: 'Codex Remote Web contributors', version: pkg.version, main: 'main.cjs', type: 'module', license: 'MIT' }));
     const payload = join(temp, 'payload/gateway'); await mkdir(dirname(payload), { recursive: true }); await cp(gateway, payload, { recursive: true });
-    const icon = process.platform === 'darwin' ? await macIcon(root, temp) : undefined;
-    const [app] = await packager({ icon, dir: source, out: join(temp, 'packed'), name: 'Codex Remote Web', executableName: process.platform === 'linux' ? 'codex-remote-web-desktop' : 'Codex Remote Web', platform: process.platform, arch: process.arch, electronVersion: pkg.devDependencies.electron, appBundleId: 'io.github.danvilig.codex-remote-web', appVersion: pkg.version, buildVersion: pkg.version.split('-')[0], extraResource: [payload], asar: false, prune: false, download: { cacheRoot: process.env.electron_config_cache || join(root, '.artifacts/electron-cache') }, extendInfo: { LSMinimumSystemVersion: macosMinimumVersion } });
+    const [app] = await packager({ dir: source, out: join(temp, 'packed'), name: 'Codex Remote Web', executableName: process.platform === 'linux' ? 'codex-remote-web-desktop' : 'Codex Remote Web', platform: process.platform, arch: process.arch, electronVersion: pkg.devDependencies.electron, appBundleId: 'io.github.danvilig.codex-remote-web', appVersion: pkg.version, buildVersion: pkg.version.split('-')[0], extraResource: [payload], asar: false, prune: false, download: { cacheRoot: process.env.electron_config_cache || join(root, '.artifacts/electron-cache') }, extendInfo: { LSMinimumSystemVersion: macosMinimumVersion } });
     // Framework symlinks must remain relative when the app is relocated and
     // this temporary build tree is removed.
     const destination = join(output, basename(app)); await cp(app, destination, { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false });
     if (process.platform !== 'win32') await distributionPermissions(destination);
-    if (process.platform === 'darwin') {
-      const application = join(destination, 'Codex Remote Web.app');
-      const size = await trimMacApp(application, root);
-      await signMacApp(application);
-      await writeFile(join(root, '.artifacts/macos-package-size.json'), JSON.stringify(size, null, 2) + '\n');
-    }
     return destination;
   } finally { await rm(temp, { recursive: true, force: true }); }
 }

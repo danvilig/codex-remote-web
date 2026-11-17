@@ -1,0 +1,152 @@
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { createInterface } from 'node:readline';
+import { mkdtemp, mkdir, cp, writeFile, readFile, access, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createServer } from 'node:net';
+import { setTimeout as delay } from 'node:timers/promises';
+import { desktopConfig, desktopDirectory } from '../../src/shared/desktop-config.js';
+import { writePrivate } from '../../src/server/desktop/private-store.js';
+import { agentRequest } from '../../desktop/client.js';
+import { command } from '../../scripts/distribution.ts';
+import { root } from '../helpers/browser-runtime.mjs';
+
+assert.equal(process.platform, 'darwin');
+const executable = process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE;
+assert.ok(executable);
+const home = await mkdtemp(join(tmpdir(), 'macos-native-')), directory = desktopDirectory(home);
+const port = await new Promise(resolve => { const probe = createServer(); probe.listen(0, '127.0.0.1', () => { const value = probe.address().port; probe.close(() => resolve(value)); }); });
+const fixture = join(home, 'codex-fixture.mjs'), codex = join(home, 'codex');
+await cp(join(root, 'tests/fixtures/codex'), fixture);
+const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
+await writeFile(codex, `#!/bin/sh\nexec ${quote(process.execPath)} ${quote(fixture)} "$@"\n`, { mode: 0o700 });
+await writePrivate(join(directory, 'config.json'), desktopConfig({ initialized: true, enabled: false, autostart: false, cwd: home, codex, port, language: 'en' }, home));
+const driver = join(home, 'NativeTestDriver.dylib');
+await command(['xcrun', 'clang', '-dynamiclib', '-fobjc-arc', '-framework', 'AppKit', '-framework', 'WebKit', '-mmacosx-version-min=15.0', join(root, 'tests/helpers/macos-native-driver.m'), '-o', driver], root, { stream: true, timeoutMs: 60000 });
+const env = { ...process.env, HOME: home, CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), DYLD_INSERT_LIBRARIES: driver };
+let application;
+async function launch() {
+  const child = spawn(executable, [], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+  const pending = new Map(); let sequence = 0, logs = '';
+  child.stderr.on('data', chunk => { logs += chunk; });
+  const lines = createInterface({ input: child.stdout });
+  lines.on('line', line => {
+    let reply; try { reply = JSON.parse(line); } catch { return; }
+    const entry = pending.get(reply.id); if (!entry) return;
+    pending.delete(reply.id); clearTimeout(entry.timer);
+    if (reply.error) entry.reject(new Error(reply.error)); else entry.resolve(reply.value);
+  });
+  child.on('error', error => { for (const item of pending.values()) { clearTimeout(item.timer); item.reject(error); } pending.clear(); });
+  child.on('exit', code => { for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error(`Native app exited ${code}: ${logs}`)); } pending.clear(); });
+  const request = (action, extra = {}) => new Promise((resolve, reject) => {
+    const id = ++sequence;
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Native request timed out: ${action}; ${logs}`)); }, 30000);
+    pending.set(id, { resolve, reject, timer }); child.stdin.write(JSON.stringify({ id, action, ...extra }) + '\n');
+  });
+  const evaluate = script => request('evaluate', { script });
+  const app = { child, request, evaluate, logs: () => logs };
+  application = app;
+  await waitFor(async () => evaluate("return Boolean(document.querySelector('#localAddress')?.textContent.startsWith('http://'))"), 'rendered native window');
+  return app;
+}
+async function waitFor(probe, label) {
+  const deadline = Date.now() + 45000;
+  let last;
+  while (Date.now() < deadline) {
+    try { const result = await probe(); if (result) return result; } catch (error) { last = error; }
+    assert.ok(!application || application.child.exitCode === null, `Native app exited while waiting for ${label}: ${application?.logs()}`);
+    await delay(150);
+  }
+  throw new Error(`Timed out waiting for ${label}: ${last?.message || application?.logs()}`);
+}
+const evaluate = script => application.evaluate(script);
+const click = selector => evaluate(`document.querySelector(${JSON.stringify(selector)}).click(); return true`);
+const select = (selector, value) => evaluate(`const node = document.querySelector(${JSON.stringify(selector)}); node.value = ${JSON.stringify(value)}; node.dispatchEvent(new Event('change', {bubbles:true})); return true`);
+const ready = () => evaluate("return !document.querySelector('#desktopLanguage').disabled && !document.querySelector('#start').hasAttribute('aria-busy')");
+async function closeApplication() {
+  if (!application) return;
+  const current = application;
+  await current.request('quit');
+  await waitFor(() => current.child.exitCode !== null, 'real tray exit');
+  assert.equal(current.child.exitCode, 0);
+  current.child.stdin.destroy(); application = null;
+}
+const menus = [];
+try {
+  await launch();
+  assert.deepEqual(await application.request('security'), { persistent: false, url: 'crw-desktop://settings/index.html', inspectable: false });
+  assert.deepEqual(await evaluate("return [typeof window.require, typeof window.process, typeof window.Bun]"), ['undefined', 'undefined', 'undefined']);
+  assert.equal((await evaluate("return await window.desktop.invoke('prepare')")).ok, false, 'Renderer cannot call host-only operations');
+  assert.equal((await evaluate("return await window.desktop.invoke('cleanup-desktop', {directory:'/tmp'})")).ok, false);
+  assert.equal((await evaluate("return await window.desktop.invoke('status', {padding:'a'.repeat(17000)}).then(()=>false,()=>true)")).valueOf(), true, 'Oversize messages are rejected before helper invocation');
+  const secretRead = await evaluate("try { await import('crw-desktop://settings/../gateway/runtime/RUNTIMES.json'); return true } catch { return false }");
+  assert.equal(secretRead, false, 'Custom scheme cannot expose the gateway tree');
+  await application.request('snapshot', { path: join(root, '.artifacts/macos-desktop-overview.png') });
+  await click('[data-page=configuration]');
+  assert.equal(await evaluate("return document.querySelector('#projectPath').value"), home);
+  for (const theme of ['light', 'dark']) {
+    await select('#desktopTheme', theme);
+    await waitFor(() => evaluate(`return document.documentElement.dataset.theme === '${theme}'`), theme);
+    assert.equal(await evaluate('return document.documentElement.scrollWidth <= innerWidth'), true);
+    await application.request('snapshot', { path: join(root, `.artifacts/macos-desktop-settings-${theme}.png`) });
+  }
+  await select('#desktopTheme', 'system');
+  for (const [language, expected, title] of [['zh', ['设置', '打开工作区', '启动网关', '停止网关', '退出托盘（网关继续运行）'], '网关设置'], ['en', ['Settings', 'Open workspace', 'Start gateway', 'Stop gateway', 'Quit tray (gateway continues)'], 'Gateway settings']]) {
+    await select('#desktopLanguage', language);
+    await waitFor(async () => await ready() && await evaluate(`return document.querySelector('#pageTitle').textContent === ${JSON.stringify(title)}`), language + ' rendered language');
+    const native = await application.request('menus');
+    assert.deepEqual(native.tray, expected); assert.equal(native.app[1], language === 'zh' ? '编辑' : 'Edit');
+    menus.push({ language, ...native });
+    await click('[data-page=diagnostics]'); await click('#removeBackground');
+    await waitFor(async () => (await application.request('confirmation'))?.buttons?.[0] === (language === 'zh' ? '取消' : 'Cancel'), 'localized native confirmation');
+    assert.deepEqual((await application.request('confirmation')).buttons, language === 'zh' ? ['取消', '移除'] : ['Cancel', 'Remove']);
+    await waitFor(ready, 'cancel completes'); await click('[data-page=configuration]');
+  }
+  // Save through the real renderer/host transaction; this also checks the
+  // native shell uses the same config validation and registration rollback.
+  await click('#save');
+  await waitFor(async () => (await agentRequest(directory, 'status')).events.some(item => item.event === 'configuration-saved'), 'native config save');
+  await waitFor(ready, 'config reply');
+  await click('[data-page=overview]'); await click('#start');
+  await waitFor(async () => (await agentRequest(directory, 'status')).local.phase === 'running', 'gateway ready');
+  const state = await agentRequest(directory, 'status');
+  await click('[data-page=configuration]'); await select('#desktopLanguage', 'zh');
+  await waitFor(async () => await ready() && await evaluate("return document.documentElement.lang === 'zh-CN'"), 'Chinese while running');
+  assert.equal((await agentRequest(directory, 'status')).local.pid, state.local.pid);
+  await waitFor(async () => (await (await fetch(state.url + '/api/health')).json()).codex, 'fixture native connection');
+  await closeApplication();
+  assert.equal((await agentRequest(directory, 'status')).local.pid, state.local.pid);
+  assert.equal((await (await fetch(state.url + '/api/health')).json()).codex, true);
+  await launch();
+  await waitFor(() => evaluate("return document.querySelector('#gatewayState').textContent === '运行中'"), 'reconnect and persisted Chinese');
+  assert.equal((await application.request('menus')).app[1], '编辑');
+  await click('[data-page=configuration]'); await select('#desktopLanguage', 'en');
+  await waitFor(async () => await ready() && await evaluate("return document.documentElement.lang === 'en'"), 'English while running');
+  assert.equal((await agentRequest(directory, 'status')).local.pid, state.local.pid);
+  await click('[data-page=overview]'); await click('#stop');
+  await waitFor(async () => (await agentRequest(directory, 'status')).local.pid === null, 'native stop');
+  await waitFor(ready, 'stop reply');
+  const sentinel = join(home, '.codex/account-preserved.txt'); await mkdir(join(home, '.codex'), { recursive: true }); await writeFile(sentinel, 'fixture account');
+  const legacy = join(home, 'Library/Application Support/Codex Remote Web'); await mkdir(legacy, { recursive: true }); await writeFile(join(legacy, 'old-cache'), 'fixture');
+  await application.request('confirmation', { response: true });
+  await click('[data-page=diagnostics]'); await click('#cleanUninstall');
+  await waitFor(() => application.child.exitCode !== null, 'clean uninstall');
+  assert.equal(application.child.exitCode, 0); application = null;
+  assert.equal(await readFile(sentinel, 'utf8'), 'fixture account');
+  await assert.rejects(access(join(directory, 'config.json')));
+  await assert.rejects(access(join(directory, 'agent.json')));
+  await assert.rejects(access(legacy));
+  await assert.rejects(access(executable), 'Disposable application moves to Trash');
+  await writeFile(join(root, '.artifacts/macos-native-menus.json'), JSON.stringify(menus, null, 2) + '\n');
+  console.log('PASS: actual native WKWebView UI, restricted asset/bridge access, native menus/dialogs, saved settings/language, gateway continuity and clean uninstall');
+} catch (error) {
+  console.error('Native application diagnostics:', application?.logs());
+  await command(['screencapture', '-x', join(root, '.artifacts/macos-desktop-failure.png')], root).catch(() => {});
+  throw error;
+} finally {
+  await closeApplication().catch(() => { application?.child.kill(); });
+  await agentRequest(directory, 'shutdown').catch(() => {});
+  for (let i = 0; i < 100; i++) { try { await agentRequest(directory, 'status', undefined, { timeoutMs: 100 }); } catch { break; } await delay(100); }
+  await rm(home, { recursive: true, force: true });
+}

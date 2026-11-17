@@ -21,6 +21,7 @@ const chinese = {
   Minimize: '最小化', Zoom: '缩放', 'Toggle Full Screen': '切换全屏', Close: '关闭窗口',
   'Hide Codex Remote Web': '隐藏 Codex Remote Web', 'Hide Others': '隐藏其他应用', 'Show All': '显示全部',
 };
+export const nativeTranslations = { en: {}, 'zh-CN': chinese };
 export function nativeText(message, locale) { return locale === 'zh-CN' ? chinese[message] || message : message; }
 export function trayTemplate(locale, { openSettings, openWorkspace, start, stop, quit }) {
   const t = message => nativeText(message, locale);

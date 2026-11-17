@@ -14,6 +14,9 @@ uninstall-desktop: stop and unregister this user's desktop background component.
 Configure your project with CODEX_WEBUI_CWD. Keep this installation directory
 intact: public assets, runtime and terminal workers accompany the executable.
 Codex CLI is required; cloudflared is needed for remote access.`);
+} else if (command === 'native-operation' && process.platform === 'darwin') {
+  const { nativeOperationInput } = await import('../../desktop/macos/operations.js');
+  await nativeOperationInput(process.argv[3]);
 } else if (command === 'session-configure') {
   try {
     let input = '';
@@ -40,7 +43,16 @@ Codex CLI is required; cloudflared is needed for remote access.`);
   await uninstallBackground({ directory, executable: installation || process.execPath }, installation);
 } else if (command === 'agent') {
   const { startDesktopAgent } = await import('./desktop/agent.js');
-  try { await startDesktopAgent(); }
+  try {
+    const agent = await startDesktopAgent();
+    // The native session launcher owns this pipe. EOF also handles a crashed
+    // launcher; no PID reuse or orphaned session service after logout.
+    if (process.platform === 'darwin' && process.env.CODEX_WEBUI_DESKTOP_PIPE_PARENT === '1') {
+      process.stdin.resume();
+      process.stdin.once('end', () => void agent.close());
+      agent.server.once('close', () => { process.stdin.destroy(); });
+    }
+  }
   catch (error: any) {
     if (error.code === 'PRIVATE_LOCK_BUSY') process.exit(0);
     console.error('Desktop agent could not start. Check private state permissions and installation.'); process.exit(1);

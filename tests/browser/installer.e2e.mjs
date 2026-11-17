@@ -104,6 +104,10 @@ try {
    await command(['codesign','--verify','--strict',join(contents,'Resources',binary)],root);
   }
   evidence.checks.relocatedApplicationAndRuntimeSignatures=true;
+  await assert.rejects(access(join(contents,'Frameworks/Electron Framework.framework')),'Native macOS application must not bundle Chromium');
+  assert.ok(evidence.checks.installedSize.logicalBytes<250_000_000,'Native shell must reduce actual payload, not only filesystem allocation');
+  assert.ok(evidence.checks.installedSize.allocatedBytes<130_000_000,'Native shell disk budget');
+  evidence.checks.desktopRuntime='system AppKit/WebKit';
   process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(contents,'MacOS/Codex Remote Web');
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=join(contents,'Resources/gateway');
  } else if(process.platform==='win32') {
@@ -115,7 +119,7 @@ try {
  } else throw new Error('Native installer test requires macOS or Windows');
  await command(['bun','run','test:portable'],root,{stream:true,timeoutMs:240_000});
  if(evidence)evidence.checks.installedGatewayAndPty=true;
- await command(['node','tests/browser/desktop-native.e2e.mjs'],root,{stream:true,timeoutMs:240_000});
+ await command(['node',process.platform==='darwin'?'tests/browser/macos-native.e2e.mjs':'tests/browser/desktop-native.e2e.mjs'],root,{stream:true,timeoutMs:300_000});
  if(evidence) {
   for(const file of ['macos-desktop-overview.png','macos-desktop-settings-light.png','macos-desktop-settings-dark.png'])await access(join(root,'.artifacts',file));
   evidence.checks.installedDesktopLaunchUiAndLifecycle=true;
