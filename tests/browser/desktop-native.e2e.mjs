@@ -9,6 +9,7 @@ import { desktopConfig, desktopDirectory } from '../../src/shared/desktop-config
 import { writePrivate } from '../../src/server/desktop/private-store.js';
 import { agentRequest } from '../../desktop/client.js';
 import { root } from '../helpers/browser-runtime.mjs';
+import { windowsIsolatedStartupTimeout } from '../../src/server/bridge/windows-isolated.js';
 
 const executable = process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE;
 assert.ok(executable, 'Test an actual desktop executable');
@@ -75,7 +76,10 @@ try {
   // initializes independently. Establish connectivity before testing whether
   // quitting the tray preserves it (including cold PowerShell compilation).
   console.error('Verifying native connection before tray exit');
-  const deadline = Date.now() + 30000;
+  // Windows helper compilation has its own bounded startup phase before the
+  // unchanged 30s initialize RPC budget. The immediate post-exit check below
+  // still has no reconnect retry.
+  const deadline = Date.now() + (windows ? windowsIsolatedStartupTimeout + 30000 : 30000);
   for (;;) {
     const health = await (await fetch(state.url + '/api/health', { signal: AbortSignal.timeout(10000) })).json();
     if (health.codex) break;

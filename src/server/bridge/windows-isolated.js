@@ -1,5 +1,36 @@
 import { join } from 'node:path';
 
+export const windowsIsolatedStartupTimeout = 90000;
+// Cold Windows PowerShell/Add-Type startup precedes the native RPC lifetime.
+// A separate bounded deadline prevents repeated recompilation at every RPC
+// initialize timeout. No native request budget is extended by this handshake.
+export function waitForWindowsIsolatedReady(proc, { timeoutMs = windowsIsolatedStartupTimeout } = {}) {
+  return new Promise((resolve, reject) => {
+    let buffer = '', discarding = false;
+    const finish = error => {
+      clearTimeout(timer);
+      proc.stderr.off('data', data); proc.off('error', failed); proc.off('exit', exited); proc.off('close', exited);
+      if (error) reject(error); else resolve();
+    };
+    const failed = () => finish(new Error('Windows native helper could not start'));
+    const exited = () => finish(new Error('Windows native helper exited before readiness'));
+    const data = chunk => {
+      for (const part of String(chunk).split(/(?<=\n)/)) {
+        const complete = part.endsWith('\n');
+        if (!discarding) {
+          buffer += part;
+          if (buffer.length > 128) { buffer = ''; discarding = true; }
+          else if (complete && buffer.trim() === '[codex-isolated:native-wait]') { finish(); return; }
+        }
+        if (complete) { buffer = ''; discarding = false; }
+      }
+    };
+    const timer = setTimeout(() => finish(new Error('Windows native helper startup timed out')), timeoutMs);
+    proc.stderr.on('data', data); proc.once('error', failed); proc.once('exit', exited); proc.once('close', exited);
+    if (proc.exitCode != null || proc.signalCode != null) exited();
+  });
+}
+
 // Windows has no Unix process group. This hidden helper first joins its own
 // non-breakaway Job, then starts the native server, so even immediately spawned
 // tools inherit ownership. The sole non-inheritable Job handle belongs to the

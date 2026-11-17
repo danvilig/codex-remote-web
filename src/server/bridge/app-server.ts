@@ -4,7 +4,7 @@ import { WebSocket } from 'ws';
 import { codexCommand } from '../config/codex-command.js';
 import { appServerConnection } from '../config/app-server.js';
 import { isolatedWorkerPath, nodeRuntime } from '../config/paths.js';
-import { windowsIsolatedProcess } from './windows-isolated.js';
+import { windowsIsolatedProcess, waitForWindowsIsolatedReady } from './windows-isolated.js';
 
 export const nativeRequestTimeout = (method: string) =>
   ['thread/read', 'thread/turns/list', 'thread/resume'].includes(method) ? 90000 : 30000;
@@ -25,6 +25,7 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     }
   };
   const lifecycles = new Set<Promise<void>>();
+  const booting = new WeakSet<object>();
   function terminateProc(proc: ChildProcessWithoutNullStreams, signal: NodeJS.Signals = 'SIGTERM') {
     if (process.platform !== 'win32' && proc.pid) {
       try { process.kill(-proc.pid, signal); return; } catch { /* wrapper fallback */ }
@@ -47,15 +48,18 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     }
     try { process.kill(group, 'SIGKILL'); } catch { /* group already gone */ }
   }
-  function send(message: any) {
+  function send(message: any, allowStarting = false) {
     if (stopping) throw transportError('Codex WebUI is shutting down', 'RPC_NOT_SENT', 'not-sent');
     start();
     if (connection.mode === 'shared') {
       if (socket?.readyState !== WebSocket.OPEN) throw transportError('Shared Codex App Server is connecting', 'RPC_NOT_SENT', 'not-sent');
       socket.send(JSON.stringify(message));
-    } else child!.stdin.write(JSON.stringify(message) + '\n');
+    } else {
+      if (child && booting.has(child) && !allowStarting) throw transportError('Windows native helper is starting', 'RPC_NOT_SENT', 'not-sent');
+      child!.stdin.write(JSON.stringify(message) + '\n');
+    }
   }
-  function request(method: string, params: any = {}, { onLateResponse }: { onLateResponse?: (result: any, error?: any) => unknown } = {}) {
+  function request(method: string, params: any = {}, { onLateResponse, waitForReady }: { onLateResponse?: (result: any, error?: any) => unknown; waitForReady?: Promise<void> } = {}) {
     const id = seq++;
     return new Promise<any>((resolve, reject) => {
       try {
@@ -63,27 +67,34 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
         start();
       } catch (error) { reject(error); return; }
       const owner = connection.mode === 'shared' ? socket : child;
+      if (owner && booting.has(owner) && !waitForReady) { reject(transportError('Windows native helper is starting', 'RPC_NOT_SENT', 'not-sent')); return; }
       let timedOut = false, cleanup: ReturnType<typeof setTimeout> | undefined;
       const late = (result: any, error?: any) => {
         clearTimeout(cleanup);
         try { Promise.resolve(onLateResponse?.(result, error)).catch(() => {}); } catch { /* receipt recovery can retry reads */ }
       };
-      const timer = setTimeout(() => {
-        timedOut = true;
-        if (onLateResponse) {
-          // Retain correlation briefly so a delayed native result can settle
-          // the original receipt without resending its mutation.
-          cleanup = setTimeout(() => pending.delete(id), 300000);
-          cleanup.unref?.();
-        } else pending.delete(id);
-        reject(transportError(`Codex request timed out: ${method}`, 'RPC_TIMEOUT'));
-      }, requestTimeoutMs(method));
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const armTimeout = () => {
+        if (!pending.has(id)) return;
+        timer = setTimeout(() => {
+          timedOut = true;
+          if (onLateResponse) {
+            // Retain correlation briefly so a delayed native result can settle
+            // the original receipt without resending its mutation.
+            cleanup = setTimeout(() => pending.delete(id), 300000);
+            cleanup.unref?.();
+          } else pending.delete(id);
+          reject(transportError(`Codex request timed out: ${method}`, 'RPC_TIMEOUT'));
+        }, requestTimeoutMs(method));
+      };
       pending.set(id, {
         owner,
         resolve: value => { clearTimeout(timer); if (timedOut) late(value); else resolve(value); },
         reject: error => { clearTimeout(timer); if (timedOut) late(undefined, error); else reject(error); }
       });
-      try { send({ id, method, params }); } catch (error) { pending.get(id)?.reject(error as Error); pending.delete(id); }
+      if (waitForReady) void waitForReady.then(armTimeout, () => { pending.get(id)?.reject(transportError('Windows native helper startup failed', 'RPC_DISCONNECTED')); pending.delete(id); });
+      else armTimeout();
+      try { send({ id, method, params }, !!waitForReady); } catch (error) { pending.get(id)?.reject(error as Error); pending.delete(id); }
     });
   }
   function receive(raw: string, owner: object) {
@@ -136,6 +147,8 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     const windows = process.platform === 'win32' ? windowsIsolatedProcess(command, cwd) : null;
     const proc = spawn(windows?.binary || (supervised ? nodeRuntime() : binary), windows?.args || (supervised ? [isolatedWorkerPath()] : command.slice(1)), { cwd, env: windows?.env || process.env, stdio: supervised ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' }) as ChildProcessWithoutNullStreams;
     child = proc; let buffer = '';
+    if (windows) booting.add(proc);
+    const ready = windows ? waitForWindowsIsolatedReady(proc).then(() => { booting.delete(proc); }) : undefined;
     let finish: () => void;
     const lifecycle = new Promise<void>(resolve => { finish = resolve; });
     lifecycles.add(lifecycle);
@@ -173,7 +186,8 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     proc.once('exit', (code, signal) => { reap(); disconnected(code, signal); });
     proc.on('close', disconnected); // spawn failures may have no exit event
     if (supervised && typeof proc.send === 'function') proc.send({ type: 'start', command, cwd }, error => { if (error && child === proc) terminate(); });
-    request('initialize', { clientInfo, capabilities: { experimentalApi: true } }).then(result => {
+    request('initialize', { clientInfo, capabilities: { experimentalApi: true } }, { waitForReady: ready }).then(async result => {
+      await ready;
       if (child !== proc || stopping) return;
       send({ method: 'initialized', params: {} });
       if (typeof result?.codexHome === 'string') onHome(result.codexHome);
