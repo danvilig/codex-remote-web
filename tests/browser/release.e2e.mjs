@@ -157,7 +157,11 @@ try {
   server.kill('SIGTERM');await server.exited;assert.equal((await serverError).includes('Frontend build failed'),false);server=null;
   // The desktop path must resolve the shipped supervisor outside the source
   // tree, including with portable runtimes and the poisoned host PATH.
-  server=Bun.spawn(portable?[executable]:['bun',join(unpacked,'dist/server.js')],{cwd:fixture,env:{...env,CODEX_WEBUI_DESKTOP_CHILD:'1'},stdout:'pipe',stderr:'pipe'});
+  // Desktop settings supply an explicit Codex executable. The first gateway
+  // above separately verifies CLI discovery through the poisoned PATH.
+  const desktopEnv={...env,CODEX_WEBUI_DESKTOP_CHILD:'1',...(windows?{CODEX_WEBUI_CODEX:join(quickBin,'codex.cmd')}:{})};
+  for(const path of [project,nodePath,...(windows?[desktopEnv.CODEX_WEBUI_CODEX,join(quickBin,'node_modules/@openai/codex/bin/codex.js')]:[])])assert.ok(existsSync(path),`Missing desktop fixture: ${path}`);
+  server=Bun.spawn(portable?[executable]:['bun',join(unpacked,'dist/server.js')],{cwd:fixture,env:desktopEnv,stdout:'pipe',stderr:'pipe'});
   const desktopOutput=new Response(server.stdout).text();
   serverLog=new Response(server.stderr).text();
   for(let attempt=0;;attempt++){try{if((await(await fetch(base+'/api/health')).json()).codex)break;}catch{}if(attempt>200)throw new Error('Packaged desktop isolated supervisor failed');await Bun.sleep(50);}
