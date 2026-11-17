@@ -88,6 +88,9 @@ jobs:
         with:
           name: release-${{ matrix.os }}-${{ matrix.arch }}
           overwrite: true
+          # Only the explicit archive/evidence paths below are selected.
+          # Their .artifacts parent is hidden; do not drop all matches.
+          include-hidden-files: true
           path: |
             .artifacts/release/*.tar.gz*
             .artifacts/release/*.zip*
@@ -141,6 +144,7 @@ jobs:
         with:
           name: validation-macos-27-arm64
           overwrite: true
+          include-hidden-files: true
           path: |
             .artifacts/macos-installer-native.png
             .artifacts/macos-desktop-*.png
