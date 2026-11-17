@@ -14,6 +14,19 @@ uninstall-desktop: stop and unregister this user's desktop background component.
 Configure your project with CODEX_WEBUI_CWD. Keep this installation directory
 intact: public assets, runtime and terminal workers accompany the executable.
 Codex CLI is required; cloudflared is needed for remote access.`);
+} else if (command === 'session-configure') {
+  try {
+    let input = '';
+    process.stdin.setEncoding('utf8');
+    for await (const chunk of process.stdin) { input += chunk; if (input.length > 262144) throw new Error('Background registration request is too large'); }
+    const request = JSON.parse(input);
+    if (typeof request.enabled !== 'boolean' || !request.options || typeof request.options.directory !== 'string') throw new Error('Invalid background registration request');
+    const allowed = ['directory', 'executable', 'args', 'definition', 'expectedInstallation', 'expectedRegistration', 'expectedGeneration'];
+    if (Object.keys(request.options).some(key => !allowed.includes(key))) throw new Error('Invalid background registration option');
+    const { configureSession } = await import('../../desktop/session.js');
+    const restore = await configureSession(request.enabled, request.options);
+    console.log(JSON.stringify({ snapshot: restore.snapshot }));
+  } catch (error: any) { console.log(JSON.stringify({ error: error.message, code: error.code })); process.exitCode = 1; }
 } else if (command === 'uninstall-desktop') {
   const { desktopDirectory } = await import('../shared/desktop-config.js');
   const { uninstallBackground } = await import('../../desktop/uninstall.js');

@@ -3,8 +3,9 @@ import { promisify } from 'node:util';
 import { mkdir, lstat, readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { createHash } from 'node:crypto';
-import { readPrivate, writePrivate } from '../src/server/desktop/private-store.js';
+import { createHash, randomUUID } from 'node:crypto';
+import { remoteSession } from './session-client.js';
+import { privateDirectory, readPrivate, writePrivate } from '../src/server/desktop/private-store.js';
 
 const exec = promisify(execFile);
 const label = 'io.github.danvilig.codex-remote-web.desktop-agent';
@@ -88,22 +89,65 @@ async function powershell(script, env) {
   return exec(binary, ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { env: { ...process.env, ...env }, windowsHide: true, timeout: 20000 });
 }
 export async function configureSession(enabled, options) {
+  // Electron delegates the whole transaction to its bundled Bun CLI. The
+  // SQLite lock and mutation always live in the same process.
+  if (options.command) return remoteSession(enabled, options);
+  await privateDirectory(options.directory);
+  const { acquirePrivateLock } = await import('../src/server/services/private-lock.js');
+  const release = await acquirePrivateLock(join(options.directory, 'session-lock'));
+  try {
+    const recordPath = join(options.directory, 'session.json');
+    const generationPath = join(options.directory, 'session-generation.json');
+    const missing = Symbol('missing registration');
+    const revision = await readPrivate(generationPath, missing);
+    const generation = revision === missing ? null : revision;
+    if (revision !== missing && (typeof generation !== 'string' || !/^[a-f0-9-]{36}$/.test(generation))) throw new Error('Background registration generation is invalid; preserve it');
+    if (Object.hasOwn(options, 'expectedGeneration') && generation !== options.expectedGeneration) {
+      throw Object.assign(new Error('Background registration changed before rollback; preserve it'), { code: 'SESSION_CHANGED' });
+    }
+    const record = await readPrivate(recordPath, missing);
+    const saved = record === missing ? null : record;
+    const valid = saved && typeof saved === 'object' && !Array.isArray(saved)
+      && ['linux', 'darwin', 'win32'].includes(saved.platform)
+      && (saved.platform === 'win32'
+        ? [saved.name, saved.executable, saved.arguments].every(value => typeof value === 'string')
+        : [saved.path, saved.content].every(value => typeof value === 'string'));
+    if (record !== missing && !valid) {
+      throw Object.assign(new Error('Background registration state is invalid; preserve it'), { code: 'SESSION_STATE_INVALID' });
+    }
+    if (Object.hasOwn(options, 'expectedRegistration') && JSON.stringify(saved) !== JSON.stringify(options.expectedRegistration)) {
+      throw Object.assign(new Error('Background registration changed before rollback; preserve it'), { code: 'SESSION_CHANGED' });
+    }
+    if (!enabled && options.expectedInstallation && !sessionOwnedBy(saved, options.expectedInstallation, options)) {
+      const skipped = async () => {}; skipped.snapshot = { previous: saved, current: saved, generation, skipped: true }; return skipped;
+    }
+    // Persist intent before touching OS state, including disabled tombstones
+    // and identical saves. A failed attempt conservatively invalidates older
+    // rollback tokens; it must not make an ABA sequence look unchanged.
+    const nextGeneration = randomUUID();
+    await writePrivate(generationPath, nextGeneration);
+    await mutateSession(enabled, options, saved);
+    const current = await readPrivate(recordPath);
+    const restore = () => configureSession(!!saved, { ...options, definition: saved || sessionDefinition(options), expectedInstallation: undefined, expectedRegistration: current, expectedGeneration: nextGeneration });
+    restore.snapshot = { previous: saved, current, generation: nextGeneration };
+    return restore;
+  } finally { await release(); }
+}
+async function mutateSession(enabled, options, saved) {
   const definition = options.definition || sessionDefinition(options), recordPath = join(options.directory, 'session.json');
   const run = options.run || exec;
-  const saved = await readPrivate(recordPath);
-  const restore = () => configureSession(!!saved, { ...options, definition: saved || definition });
   const unchanged = enabled && JSON.stringify(saved) === JSON.stringify(definition);
   if (definition.platform === 'win32') {
-    if (unchanged) return async () => {};
+    if (unchanged) return;
     const spec = enabled ? definition : saved;
-    if (!spec) return async () => {};
+    if (!spec) return;
     const payload = Buffer.from(JSON.stringify(spec)).toString('base64');
     const previous = Buffer.from(JSON.stringify(saved || spec)).toString('base64');
     const script = `$ErrorActionPreference='Stop'; $s=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:CRW_TASK_SPEC))|ConvertFrom-Json; $old=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:CRW_TASK_PREVIOUS))|ConvertFrom-Json; $scheduler=New-Object -ComObject Schedule.Service; $scheduler.Connect(); $folder=$scheduler.GetFolder('\\'); $existing=$null; try{$existing=$folder.GetTask($s.name)}catch{}; ${saved ? '' : "if($existing){throw 'A background task with this name already exists'};"} if($existing -and ($existing.Definition.Actions.Count -ne 1 -or $existing.Definition.Actions.Item(1).Path -ne $old.executable -or $existing.Definition.Actions.Item(1).Arguments -ne $old.arguments)){throw 'The background task changed; preserve it'}; ` + (enabled ? `$task=$scheduler.NewTask(0); $task.RegistrationInfo.Description='Codex Remote Web desktop v1'; $task.Principal.LogonType=3; $task.Principal.RunLevel=0; $task.Settings.Enabled=$true; $task.Settings.DisallowStartIfOnBatteries=$false; $task.Settings.StopIfGoingOnBatteries=$false; $task.Settings.ExecutionTimeLimit='PT0S'; $task.Settings.MultipleInstances=2; $trigger=$task.Triggers.Create(9); $trigger.UserId=[Security.Principal.WindowsIdentity]::GetCurrent().Name; $action=$task.Actions.Create(0); $action.Path=$s.executable; $action.Arguments=$s.arguments; $null=$folder.RegisterTaskDefinition($s.name,$task,6,[Security.Principal.WindowsIdentity]::GetCurrent().Name,$null,3)` : `if($existing){$folder.DeleteTask($s.name,0)}`);
     await powershell(script, { CRW_TASK_SPEC: payload, CRW_TASK_PREVIOUS: previous });
   } else {
     const spec = enabled ? definition : saved;
-    if (!spec) return async () => {};
+    if (!spec) return;
     const metadata = await lstat(spec.path).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
     if (metadata && (!metadata.isFile() || metadata.isSymbolicLink() || metadata.nlink !== 1 || metadata.uid !== process.getuid())) throw new Error('Unsafe background registration; preserve it before continuing');
     const current = await readFile(spec.path, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error; });
@@ -111,13 +155,13 @@ export async function configureSession(enabled, options) {
     const expected = sessionDefinition(options).path;
     if (spec.path !== expected) throw new Error('Background registration path changed; preserve it before continuing');
     const enabledLink = definition.platform === 'linux' ? await enablement(expected) : null;
-    if (unchanged && current === spec.content && (definition.platform !== 'linux' || enabledLink.target !== null)) return async () => {};
+    if (unchanged && current === spec.content && (definition.platform !== 'linux' || enabledLink.target !== null)) return;
     if (!enabled && definition.platform === 'linux') {
       const runtime = options.env?.XDG_RUNTIME_DIR || process.env.XDG_RUNTIME_DIR || `/run/user/${process.getuid()}`;
       const bus = await lstat(join(runtime, 'bus')).catch(error => { if (error.code === 'ENOENT') return null; throw error; });
       if (!bus) {
         await removeOffline(spec, current, recordPath, saved, enabledLink.link, enabledLink.target);
-        return restore;
+        return;
       }
     }
     try {
@@ -155,8 +199,8 @@ export async function configureSession(enabled, options) {
       }
       throw error;
     }
-    return restore;
+    return;
   }
   if (enabled) await writePrivate(recordPath, definition); else await rm(recordPath, { force: true });
-  return restore;
+  return;
 }

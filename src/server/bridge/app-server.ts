@@ -15,10 +15,14 @@ const transportError = (message: string, code: string, dispatchState = 'unknown'
 export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, onHome, connection = appServerConnection(), requestTimeoutMs = nativeRequestTimeout }: any) {
   let child: ChildProcessWithoutNullStreams | null = null;
   let socket: WebSocket | null = null;
-  let stopping = false, seq = 1, buffer = '';
+  let stopping = false, seq = 1;
   let restart: ReturnType<typeof setTimeout> | undefined;
-  const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
-  const rejectPending = (message: string) => { for (const item of pending.values()) item.reject(transportError(message, 'RPC_DISCONNECTED')); pending.clear(); };
+  const pending = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void; owner: object | null }>();
+  const rejectPending = (message: string, owner?: object) => {
+    for (const [id, item] of pending) if (!owner || item.owner === owner) {
+      pending.delete(id); item.reject(transportError(message, 'RPC_DISCONNECTED'));
+    }
+  };
   const lifecycles = new Set<Promise<void>>();
   function terminateProc(proc: ChildProcessWithoutNullStreams, signal: NodeJS.Signals = 'SIGTERM') {
     if (process.platform !== 'win32' && proc.pid) {
@@ -53,6 +57,11 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
   function request(method: string, params: any = {}, { onLateResponse }: { onLateResponse?: (result: any, error?: any) => unknown } = {}) {
     const id = seq++;
     return new Promise<any>((resolve, reject) => {
+      try {
+        if (stopping) throw transportError('Codex WebUI is shutting down', 'RPC_NOT_SENT', 'not-sent');
+        start();
+      } catch (error) { reject(error); return; }
+      const owner = connection.mode === 'shared' ? socket : child;
       let timedOut = false, cleanup: ReturnType<typeof setTimeout> | undefined;
       const late = (result: any, error?: any) => {
         clearTimeout(cleanup);
@@ -69,13 +78,15 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
         reject(transportError(`Codex request timed out: ${method}`, 'RPC_TIMEOUT'));
       }, requestTimeoutMs(method));
       pending.set(id, {
+        owner,
         resolve: value => { clearTimeout(timer); if (timedOut) late(value); else resolve(value); },
         reject: error => { clearTimeout(timer); if (timedOut) late(undefined, error); else reject(error); }
       });
       try { send({ id, method, params }); } catch (error) { pending.get(id)?.reject(error as Error); pending.delete(id); }
     });
   }
-  function receive(raw: string) {
+  function receive(raw: string, owner: object) {
+    if (owner !== (connection.mode === 'shared' ? socket : child)) return;
     try {
       const message = JSON.parse(raw);
       const item = message.id !== undefined && ('result' in message || 'error' in message) ? pending.get(Number(message.id)) : null;
@@ -98,11 +109,11 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
       handshakeTimeout: 10000,
     });
     socket = ws;
-    ws.on('message', data => receive(String(data)));
+    ws.on('message', data => receive(String(data), ws));
     ws.on('error', () => console.error('[codex-webui] cannot connect to shared Codex App Server'));
     ws.on('close', () => {
       if (socket !== ws) return;
-      socket = null; rejectPending('Shared Codex App Server disconnected');
+      socket = null; rejectPending('Shared Codex App Server disconnected', ws);
       onStatus({ status: 'disconnected' });
       if (!stopping) restart = setTimeout(start, 1000);
     });
@@ -122,7 +133,7 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     const supervised = process.platform !== 'win32' && process.env.CODEX_WEBUI_DESKTOP_CHILD === '1';
     const command = [binary, ...prefix, 'app-server', '--stdio'];
     const proc = spawn(supervised ? nodeRuntime() : binary, supervised ? [isolatedWorkerPath()] : command.slice(1), { cwd, env: process.env, stdio: supervised ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' }) as ChildProcessWithoutNullStreams;
-    child = proc; buffer = '';
+    child = proc; let buffer = '';
     let finish: () => void;
     const lifecycle = new Promise<void>(resolve => { finish = resolve; });
     lifecycles.add(lifecycle);
@@ -140,7 +151,7 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
       for (;;) {
         const pos = buffer.indexOf('\n'); if (pos < 0) break;
         const line = buffer.slice(0, pos).trim(); buffer = buffer.slice(pos + 1); if (!line) continue;
-        receive(line);
+        receive(line, proc);
       }
     });
     proc.stderr.setEncoding('utf8');
@@ -149,13 +160,16 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
       console.error('[codex-webui] cannot start Codex app-server', error.code || 'UNKNOWN');
       if (!proc.pid) reap();
     });
-    proc.once('exit', reap);
-    proc.on('close', (code, signal) => {
-      rejectPending('Codex app-server exited');
-      if (child === proc) child = null;
+    const disconnected = (code: number | null, signal: NodeJS.Signals | null) => {
+      if (child !== proc) return;
+      child = null; rejectPending('Codex app-server exited', proc);
       onStatus({ status: 'disconnected', code, signal });
       if (!stopping) restart = setTimeout(start, 1000);
-    });
+    };
+    // Exit invalidates only this connection. Descendants may retain pipes, so
+    // close can arrive after a replacement has already initialized.
+    proc.once('exit', (code, signal) => { reap(); disconnected(code, signal); });
+    proc.on('close', disconnected); // spawn failures may have no exit event
     if (supervised && typeof proc.send === 'function') proc.send({ type: 'start', command, cwd }, error => { if (error && child === proc) terminate(); });
     request('initialize', { clientInfo, capabilities: { experimentalApi: true } }).then(result => {
       if (child !== proc || stopping) return;

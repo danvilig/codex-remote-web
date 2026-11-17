@@ -34,6 +34,7 @@ async function fixture(run) {
   try {
     await mkdir(wants, { recursive: true }); await writeFile(definition.path, definition.content); await symlink('../codex-remote-web-desktop.service', link);
     await writePrivate(join(directory, 'session.json'), definition);
+    await configureSession(true, options); // establish the stable lock before permission-failure tests
     await run({ options, definition, wants, link });
   } finally {
     await chmod(directory, 0o700); await chmod(wants, 0o700); await chmod(dirname(definition.path), 0o700);
@@ -43,12 +44,12 @@ async function fixture(run) {
 
 unix('offline unregister preserves startup when the state record cannot be removed', async () => fixture(async ({ options, definition, link }) => {
   await chmod(options.directory, 0o500);
-  await expect(configureSession(false, options)).rejects.toMatchObject({ code: 'EACCES' });
+  await expect(configureSession(false, options)).rejects.toThrow();
   expect(await Bun.file(definition.path).text()).toBe(definition.content);
   expect(await readlink(link)).toBe('../codex-remote-web-desktop.service');
   expect(await readPrivate(join(options.directory, 'session.json'))).toEqual(definition);
-  // An unchanged save really is a no-op because both unit and link survived.
-  await configureSession(true, options);
+  // Restore write access for the SQLite lock, then verify the unchanged save.
+  await chmod(options.directory, 0o700); await configureSession(true, options);
 }));
 
 unix('offline unregister restores the record and link after a later deletion fails', async () => fixture(async ({ options, definition, link }) => {

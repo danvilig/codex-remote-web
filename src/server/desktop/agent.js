@@ -126,7 +126,7 @@ export async function startDesktopAgent({ home = homedir(), directory = desktopD
       } else if (action === 'start') await start();
       else if (action === 'stop') await stop();
       else if (action === 'restart') { await stop(); await start(); }
-      else if (action === 'shutdown') { setTimeout(() => void close().catch(() => log('shutdown-failed')), 20); }
+      else if (action === 'shutdown') { closing = true; setTimeout(() => void close().catch(() => log('shutdown-failed')), 20); }
       else throw new SetupError('Unknown desktop operation', 404);
       return status();
     } finally { busy = false; }

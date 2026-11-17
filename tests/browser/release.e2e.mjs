@@ -99,6 +99,19 @@ try {
   const runtimePath = windows ? [quickBin,join(process.env.SystemRoot,'System32'),join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0'),dirname(Bun.which('git'))].join(delimiter) : quickBin;
   const env={...process.env,HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_AUTH_MODE:'local',HOME:home,CODEX_HOME:join(home,'.codex'),CODEX_AUTH_PATH:join(home,'auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_REVIEW_ROOT:project,CODEX_WEBUI_ENABLE_TERMINAL:'true',CODEX_WEBUI_ENABLE_REVIEW_WRITE:'false',SHELL:windows?join(process.env.SystemRoot,'System32/cmd.exe'):'/bin/bash',USERPROFILE:home,CODEX_WEBUI_APP_SERVER_MODE:'isolated',PATH:portable?runtimePath:`${quickBin}${delimiter}${join(root,'tests/fixtures')}${delimiter}${process.env.PATH}`};
   delete env.CODEX_WEBUI_NODE;
+  if (portable) {
+    // The native settings app delegates complete registration transactions to
+    // this compiled CLI. No source, host Bun or OS registration is needed for
+    // an empty cleanup, but its real private SQLite lock must be available.
+    const directory = join(home, 'session-fixture'), input = join(fixture, 'session-input.json');
+    writeFileSync(input, JSON.stringify({ enabled: false, options: { directory, executable: '/fixture/desktop' } }));
+    const helper = Bun.spawn([executable, 'session-configure'], { cwd: fixture, env, stdin: Bun.file(input), stdout: 'pipe', stderr: 'pipe' });
+    const [output, errors, exit] = await Promise.all([new Response(helper.stdout).text(), new Response(helper.stderr).text(), helper.exited]);
+    assert.equal(exit, 0, errors);
+    const { snapshot } = JSON.parse(output); assert.equal(snapshot.previous, null); assert.equal(snapshot.current, null);
+    assert.match(snapshot.generation, /^[a-f0-9-]{36}$/);
+    assert.ok(existsSync(join(directory, 'session-lock.sqlite')), 'Shipped CLI must acquire its private registration lock');
+  }
   // Start from a different cwd and without source: no frontend rebuild may be needed.
   server=Bun.spawn(portable?[executable]:['bun',join(unpacked,'dist/server.js')],{cwd:fixture,env,stdout:'pipe',stderr:'pipe'});
   const serverError=serverLog=new Response(server.stderr).text();

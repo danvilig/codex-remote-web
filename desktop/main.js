@@ -18,6 +18,7 @@ const here = app.getAppPath();
 const directory = desktopDirectory();
 const root = app.isPackaged ? join(process.resourcesPath, 'gateway') : resolve(here, '../..');
 const launchArgs = app.isPackaged ? [] : [join(here, 'main.cjs')];
+const controlCommand = app.isPackaged ? [join(root, process.platform === 'win32' ? 'codex-remote-web.exe' : 'codex-remote-web')] : [process.env.CODEX_DESKTOP_BUN || 'bun', 'run', join(root, 'src/server/cli.ts')];
 // Independent locks: quitting the tray must never terminate the agent.
 const userData = join(app.getPath('userData'), background ? 'background' : 'desktop');
 mkdirSync(userData, { recursive: true, mode: 0o700 });
@@ -29,7 +30,7 @@ if (!ownsLock && !uninstall) app.quit();
 else {
   let window, tray, quitting = false, backgroundChild, sessionWindow;
   const pageURL = pathToFileURL(join(here, 'index.html')).href;
-  const sessionOptions = { executable: process.execPath, args: launchArgs, directory };
+  const sessionOptions = { executable: process.execPath, args: launchArgs, directory, command: controlCommand };
   async function ensureAgent() {
     try { await agentRequest(directory, 'status', undefined, { timeoutMs: 1000 }); return; } catch {}
     const child = spawn(process.execPath, [...launchArgs, '--background-agent'], { detached: true, windowsHide: true, stdio: 'ignore' });
@@ -62,7 +63,7 @@ else {
     if (action === 'removeBackground') {
       const confirm = await dialog.showMessageBox(window, { type: 'question', message: 'Stop and remove the background component? / 停止并移除后台组件？', detail: 'Your projects, credentials and remote deployment records will be preserved. / 项目、凭据与远程部署记录将保留。', buttons: ['Cancel / 取消', 'Remove / 移除'], cancelId: 0, defaultId: 0 });
       if (confirm.response !== 1) return;
-      await agentRequest(directory, 'stop'); await configureSession(false, sessionOptions); await agentRequest(directory, 'shutdown'); return;
+      await uninstallBackground(sessionOptions, process.execPath); return;
     }
     if (!['status', 'dependencies', 'config', 'start', 'stop', 'restart', 'setup'].includes(action)) throw new Error('Unsupported desktop operation');
     if (action === 'config') {
@@ -91,7 +92,7 @@ else {
   } else if (background) {
     await privateDirectory(directory);
     if (process.platform === 'darwin') app.dock?.hide();
-    const command = app.isPackaged ? [join(root, process.platform === 'win32' ? 'codex-remote-web.exe' : 'codex-remote-web'), 'agent'] : [process.env.CODEX_DESKTOP_BUN || 'bun', 'run', join(root, 'src/server/cli.ts'), 'agent'];
+    const command = [...controlCommand, 'agent'];
     backgroundChild = spawn(command[0], command.slice(1), { cwd: root, env: { ...process.env, CODEX_WEBUI_DESKTOP_INSTALLATION: process.execPath }, windowsHide: true, serialization: 'json', stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
     backgroundChild.once('error', () => app.exit(1)); backgroundChild.once('exit', code => app.exit(code || 0));
     powerMonitor.on('shutdown', () => { backgroundChild?.disconnect(); });

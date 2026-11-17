@@ -1,18 +1,19 @@
-import { join } from 'node:path';
-import { readPrivate } from '../src/server/desktop/private-store.js';
 import { agentRequest } from './client.js';
-import { configureSession, sessionOwnedBy } from './session.js';
+import { configureSession } from './session.js';
 
 export async function uninstallBackground(options, installation) {
   const { directory } = options;
-  const registration = await readPrivate(join(directory, 'session.json'));
-  const descriptor = await readPrivate(join(directory, 'agent.json'));
-  const ownsAgent = !installation || descriptor?.installation === installation;
-  const ownsRegistration = !installation || sessionOwnedBy(registration, installation, options);
   // A stale launcher for installation A must not control installation B's agent.
   // Recheck ownership on each request in case the descriptor was replaced.
-  const requestOptions = { expectedInstallation: installation };
-  if (ownsAgent) await agentRequest(directory, 'stop', undefined, requestOptions).catch(() => {});
-  if (ownsRegistration) await configureSession(false, options);
-  if (ownsAgent) await agentRequest(directory, 'shutdown', undefined, requestOptions).catch(() => {});
+  const requestOptions = { expectedInstallation: installation, timeoutMs: options.timeoutMs ?? 120000 };
+  for (const action of ['stop', 'shutdown']) {
+    try { await agentRequest(directory, action, undefined, requestOptions); }
+    catch (error) {
+      // Only an absent/offline endpoint or another installation is harmless.
+      // A live refusal, timeout or unsafe state must keep uninstall retryable.
+      if (!['AGENT_ABSENT', 'AGENT_OFFLINE', 'AGENT_FOREIGN'].includes(error.code)) throw error;
+    }
+  }
+  // Ownership is rechecked under the registration lock after all HTTP awaits.
+  await configureSession(false, { ...options, expectedInstallation: installation });
 }
