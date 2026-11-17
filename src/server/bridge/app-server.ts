@@ -119,7 +119,7 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     });
     proc.stderr.setEncoding('utf8');
     proc.stderr.on('data', data => console.error('[codex app-server]', String(data).trimEnd()));
-    proc.on('error', () => console.error('[codex-webui] cannot start Codex app-server'));
+    proc.on('error', (error: NodeJS.ErrnoException) => console.error('[codex-webui] cannot start Codex app-server', error.code || 'UNKNOWN'));
     proc.once('exit', () => {
       // An unexpectedly exited stdio server can leave its own tool descendants
       // holding its stdio pipes open, so waiting for `close` would deadlock

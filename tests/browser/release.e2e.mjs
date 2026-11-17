@@ -157,12 +157,13 @@ try {
   server.kill('SIGTERM');await server.exited;assert.equal((await serverError).includes('Frontend build failed'),false);server=null;
   // The desktop path must resolve the shipped supervisor outside the source
   // tree, including with portable runtimes and the poisoned host PATH.
-  server=Bun.spawn(portable?[executable]:['bun',join(unpacked,'dist/server.js')],{cwd:fixture,env:{...env,CODEX_WEBUI_DESKTOP_CHILD:'1'},stdout:'ignore',stderr:'pipe'});
+  server=Bun.spawn(portable?[executable]:['bun',join(unpacked,'dist/server.js')],{cwd:fixture,env:{...env,CODEX_WEBUI_DESKTOP_CHILD:'1'},stdout:'pipe',stderr:'pipe'});
+  const desktopOutput=new Response(server.stdout).text();
   serverLog=new Response(server.stderr).text();
   for(let attempt=0;;attempt++){try{if((await(await fetch(base+'/api/health')).json()).codex)break;}catch{}if(attempt>200)throw new Error('Packaged desktop isolated supervisor failed');await Bun.sleep(50);}
   assert.deepEqual(await(await fetch(base+'/api/remote-access/status')).json(),{configured:false,management:'desktop',canManage:false});
   assert.equal((await fetch(base+'/api/setup/launch',{method:'POST',headers:{origin:base,'x-setup-request':'1','content-type':'application/json'},body:'{}'})).status,409);
-  server.kill('SIGTERM');await server.exited;assert.equal((await serverLog).includes('cannot start Codex'),false);server=null;
+  server.kill('SIGTERM');await server.exited;await desktopOutput;assert.equal((await serverLog).includes('cannot start Codex'),false);server=null;
   if (portable) assert.equal(existsSync(poisonLog),false,'Executable must not use a host runtime, installer or compiler');
   console.log(portable ? 'PASS: native executable, bundled runtime/license/relink bundle, no host runtime/install/compiler use, outside-HOME and foreign-cwd gateway/setup, assets, restricted project APIs, real PTY and platform-appropriate remote-access checks' : 'PASS: allowlisted archive, checksum, dependency notices, frozen production install, outside-HOME production installation, restricted project APIs, foreign-cwd gateway/setup startup and packaged PTY/temporary-connector workers');
 } finally { if(setup){setup.kill('SIGTERM');await setup.exited;}if(server){server.kill('SIGTERM');await server.exited;console.error(await serverLog);}rmSync(fixture,{recursive:true,force:true}); }
