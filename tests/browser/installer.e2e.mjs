@@ -38,7 +38,8 @@ try {
   // Read the layout from the final compressed image after remounting. A
   // background PNG alone is insufficient: Finder must restore its positions.
   const quoted='"'+mount.replaceAll('\\','\\\\').replaceAll('"','\\"')+'"';
-  const layout=await command(['osascript','-e',`tell application "Finder"
+  let layout;
+  try { layout=await command(['osascript','-e',`tell application "Finder"
     activate
     set folderAlias to POSIX file ${quoted} as alias
     open folderAlias
@@ -48,12 +49,15 @@ try {
     set appPosition to position of item "Codex Remote Web.app" of folderAlias
     set targetPosition to position of item "Applications" of folderAlias
     set helpPosition to position of item "Install Guide.html" of folderAlias
-    set backgroundFile to background picture of opts as alias
-    return {item 1 of appPosition, item 2 of appPosition, item 1 of targetPosition, item 2 of targetPosition, item 1 of helpPosition, item 2 of helpPosition, icon size of opts, POSIX path of backgroundFile}
-  end tell`],root);
+    -- Finder returns a file reference here, not necessarily an alias. Let
+    -- Finder resolve its name rather than asking Standard Additions to coerce
+    -- that reference across the mounted-image boundary.
+    set backgroundName to name of background picture of opts
+    return {item 1 of appPosition, item 2 of appPosition, item 1 of targetPosition, item 2 of targetPosition, item 1 of helpPosition, item 2 of helpPosition, icon size of opts, backgroundName}
+  end tell`],root); }
+  finally { await command(['screencapture','-x',join(root,'.artifacts/macos-installer-native.png')],root); }
   assert.ok(layout.startsWith([...dmgLayout.app,...dmgLayout.applications,...dmgLayout.help,dmgLayout.iconSize].join(', ')),`Final DMG lost Finder positions: ${layout}`);
-  assert.ok(layout.includes('.background/installer.png'),`Final DMG lost background: ${layout}`);
-  await command(['screencapture','-x',join(root,'.artifacts/macos-installer-native.png')],root);
+  assert.ok(layout.endsWith('installer.png'),`Final DMG lost background: ${layout}`);
   await cp(app,join(destination,'Codex Remote Web.app'),{recursive:true,verbatimSymlinks:true});
   await command(['hdiutil','detach',mount],root);mounted=false;
   const contents=join(destination,'Codex Remote Web.app/Contents');

@@ -37,6 +37,8 @@ export function finderLayoutScript(mount: string) {
     open installerFolder
     update installerFolder without registering applications
     delay 2
+    close installerWindow
+    delay 2
   end tell`;
 }
 
