@@ -117,7 +117,7 @@ try {
   // Save through the real renderer/host transaction; this also checks the
   // native shell uses the same config validation and registration rollback.
   const dependencies = await evaluate("return await window.desktop.invoke('dependencies')");
-  assert.equal(dependencies.ok, true); assert.ok(dependencies.value.find(item=>item.name==='codex')?.ok, JSON.stringify(dependencies.value));
+  assert.equal(dependencies.ok, true, JSON.stringify(dependencies)); assert.ok(dependencies.value.find(item=>item.name==='codex')?.ok, JSON.stringify(dependencies.value));
   assert.ok(dependencies.value.find(item=>item.name==='git')?.ok, JSON.stringify(dependencies.value));
   await waitFor(() => evaluate("return !document.querySelector('#save').disabled"), 'configuration becomes editable');
   await click('#save');

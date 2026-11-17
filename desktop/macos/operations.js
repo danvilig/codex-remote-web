@@ -13,6 +13,9 @@ import { cleanDesktopState } from '../../src/server/desktop/cleanup.js';
 export async function macOperation(installation, action, body, { directory = desktopDirectory() } = {}) {
   if (typeof installation !== 'string' || !installation.startsWith('/') || /[\0\r\n]/.test(installation)) throw new Error('Invalid desktop installation');
   if (action === 'prepare') { await privateDirectory(directory); return null; }
+  // WebKit transports absent optional arguments as JSON null; restore the
+  // existing desktop protocol's omitted-body semantics before dispatch.
+  body ??= undefined;
   const options = { executable: installation, directory };
   const request = (name, value) => agentRequest(directory, name, value, { expectedInstallation: installation });
   if (action === 'removeBackground' || action === 'cleanUninstall') {
