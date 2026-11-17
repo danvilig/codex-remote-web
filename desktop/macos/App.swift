@@ -266,9 +266,13 @@ final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegat
     }
 }
 
-let background = CommandLine.arguments.contains("--background-agent")
-let app = NSApplication.shared
-app.setActivationPolicy(background ? .prohibited : .regular)
-let delegate: NSApplicationDelegate = background ? BackgroundSession() : DesktopApplication()
-app.delegate = delegate
-app.run()
+// AppKit starts on the process main thread. Make that actor boundary explicit
+// for both the macOS 15 and current SDK compilers.
+MainActor.assumeIsolated {
+    let background = CommandLine.arguments.contains("--background-agent")
+    let app = NSApplication.shared
+    app.setActivationPolicy(background ? .prohibited : .regular)
+    let delegate: NSApplicationDelegate = background ? BackgroundSession() : DesktopApplication()
+    app.delegate = delegate
+    withExtendedLifetime(delegate) { app.run() }
+}
