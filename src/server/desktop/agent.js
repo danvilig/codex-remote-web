@@ -16,6 +16,7 @@ import { SetupError } from '../setup/cloudflare.js';
 import { privateDirectory, readPrivate, writePrivate } from './private-store.js';
 import { GatewayProcess } from './process.js';
 import { DesktopDeployment } from './deployment.js';
+import { assertDesktopCleanup } from './cleanup.js';
 import { DesktopConnector } from './connector.js';
 
 const exec = promisify(execFile);
@@ -118,7 +119,14 @@ export async function startDesktopAgent({ home = homedir(), directory = desktopD
     busy = true;
     try {
       if (action === 'setup') return await setupRequest(body.path, body.body);
+      if (action === 'language') {
+        if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'language')) throw new SetupError('Invalid desktop preferences');
+        const next = desktopConfig({ ...config, language: body.language }, home);
+        await writePrivate(configPath, next); config = next;
+        return status();
+      }
       if (setup.busy) throw new SetupError('Wait for the remote access operation', 409);
+      if (action === 'cleanupCheck') { await assertDesktopCleanup(directory); return { ready: true }; }
       if (action === 'validateConfig') return await validateConfig(body);
       if (action === 'config') {
         const next = await validateConfig(body);

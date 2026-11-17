@@ -27,6 +27,11 @@ Codex CLI is required; cloudflared is needed for remote access.`);
     const restore = await configureSession(request.enabled, request.options);
     console.log(JSON.stringify({ snapshot: restore.snapshot }));
   } catch (error: any) { console.log(JSON.stringify({ error: error.message, code: error.code })); process.exitCode = 1; }
+} else if (command === 'cleanup-desktop') {
+  const { desktopDirectory } = await import('../shared/desktop-config.js');
+  const { cleanDesktopState } = await import('./desktop/cleanup.js');
+  try { console.log(JSON.stringify(await cleanDesktopState(desktopDirectory()))); }
+  catch (error: any) { console.error(error.message); process.exitCode = 1; }
 } else if (command === 'uninstall-desktop') {
   const { desktopDirectory } = await import('../shared/desktop-config.js');
   const { uninstallBackground } = await import('../../desktop/uninstall.js');

@@ -81,8 +81,17 @@ try {
   page = await context.newPage(); page.on('pageerror', error => errors.push(error.message)); await page.goto(url);
   await page.waitForFunction(() => document.querySelector('#gatewayState').textContent === 'Running');
   await page.locator('[data-page=configuration]').click(); assert.equal(await page.locator('#save').isDisabled(), true);
+  await page.locator('[name=language]').selectOption('zh');
+  await page.waitForFunction(() => document.documentElement.lang === 'zh-CN' && !document.querySelector('[name=language]').disabled);
+  assert.equal((await agent.dispatch('status')).config.language, 'zh');
+  assert.equal((await agent.dispatch('status')).local.pid, pid, 'Language switching must preserve the running gateway');
+  await page.reload(); await page.waitForFunction(() => document.documentElement.lang === 'zh-CN');
+  await page.locator('[data-page=configuration]').click();
+  await page.locator('[name=language]').selectOption('en');
+  await page.waitForFunction(() => document.documentElement.lang === 'en' && !document.querySelector('[name=language]').disabled);
   await page.locator('[data-page=overview]').click(); await page.locator('#stop').click(); await page.waitForFunction(() => document.querySelector('#gatewayState').textContent === 'Stopped');
   await page.locator('[data-page=configuration]').click(); await page.locator('[name=language]').selectOption('zh'); await page.locator('[name=theme]').selectOption('dark');
+  await page.waitForFunction(() => document.querySelector('#pageTitle').textContent === '网关设置' && !document.querySelector('[name=language]').disabled);
   assert.equal(await page.locator('#pageTitle').textContent(), '网关设置');
   const languagePicker = page.locator('[data-select=desktopLanguage]');
   await languagePicker.focus(); await page.keyboard.press('ArrowDown');

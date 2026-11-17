@@ -4,6 +4,7 @@ import { basename, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { command } from '../../scripts/distribution.ts';
+import { macAppSize } from '../../scripts/macos-size.ts';
 import { dmgLayout } from '../../scripts/macos-dmg.ts';
 import { macOSValidationSystem, macosMinimumVersion } from '../../scripts/macos-validation.ts';
 const root=resolve(import.meta.dir,'../..'),installer=process.env.CODEX_WEBUI_INSTALLER;
@@ -42,8 +43,21 @@ try {
   await command(['codesign','--verify','--deep','--strict',app],root);
   assert.equal(await readlink(join(mount,'Applications')),'/Applications');
   await access(join(mount,'.DS_Store'));
-  await access(join(mount,'.background/installer.png'));
-  assert.match(await readFile(join(mount,'Install Guide.html'),'utf8'),/Privacy &amp; Security/);
+  await access(join(mount,'.background/installer.tiff'));
+  assert.match(await readFile(join(mount,'Install Guide.html'),'utf8'),/Privacy & Security/);
+  const representations=JSON.parse(await command(['swift','-e',`import AppKit
+    let image = NSImage(contentsOfFile: CommandLine.arguments[1])!
+    let sizes = image.representations.map { [$0.pixelsWide, $0.pixelsHigh] }.sorted { $0[0] < $1[0] }
+    let result: [String: Any] = ["points": [Int(image.size.width), Int(image.size.height)], "pixels": sizes]
+    print(String(data: try JSONSerialization.data(withJSONObject: result), encoding: .utf8)!)
+  `,join(mount,'.background/installer.tiff')],root,{timeoutMs:60_000}));
+  assert.deepEqual(representations,{points:[680,480],pixels:[[680,480],[1360,960]]},'Finder needs a real Retina representation without doubling the layout');
+  const finderInfo=Buffer.from((await command(['xattr','-px','com.apple.FinderInfo',join(mount,'Install Guide.html')],root)).replace(/\s/g,''),'hex');
+  assert.ok((finderInfo.readUInt16BE(8)&0x0400)!==0,'Guide must retain the Finder custom-icon flag after compression');
+  const resourceFork=Buffer.from((await command(['xattr','-px','com.apple.ResourceFork',join(mount,'Install Guide.html')],root)).replace(/\s/g,''),'hex');
+  assert.ok(resourceFork.length>1024,'Guide icon resource fork must survive remounting');
+  evidence.checks.retinaBackground=representations;
+  evidence.checks.guideCustomIcon={finderFlag:true,resourceBytes:resourceFork.length};
   // Read the layout from the final compressed image after remounting. A
   // background PNG alone is insufficient: Finder must restore its positions.
   const quoted='"'+mount.replaceAll('\\','\\\\').replaceAll('"','\\"')+'"';
@@ -74,7 +88,11 @@ try {
   const [red,green,blue]=pixel.split(/\s+/).map(Number);
   assert.ok(red>=240&&red<=250&&Math.abs(red-green)<=1&&blue>red,`Final DMG background was not rendered: ${pixel}`);
   evidence.checks.finderLayoutAndBackground={positions:layout,backgroundPixel:[red,green,blue],screenshot:'macos-installer-native.png'};
-  await cp(app,join(destination,'Codex Remote Web.app'),{recursive:true,verbatimSymlinks:true});
+  evidence.checks.mountedSize=await macAppSize(app);
+  assert.ok(evidence.checks.mountedSize.allocatedBytes<evidence.checks.mountedSize.logicalBytes*0.8,'Installed payload must actually use transparent filesystem compression');
+  await command(['ditto','--rsrc','--extattr','--preserveHFSCompression',app,join(destination,'Codex Remote Web.app')],root,{timeoutMs:120_000});
+  evidence.checks.installedSize=await macAppSize(join(destination,'Codex Remote Web.app'));
+  assert.ok(evidence.checks.installedSize.allocatedBytes<evidence.checks.installedSize.logicalBytes*0.8,'Copying out of DMG must preserve the reduced disk allocation');
   await command(['hdiutil','detach',mount],root);mounted=false;
   const contents=join(destination,'Codex Remote Web.app/Contents');
   await command(['codesign','--verify','--deep','--strict',join(destination,'Codex Remote Web.app')],root);

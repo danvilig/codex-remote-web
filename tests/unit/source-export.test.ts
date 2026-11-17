@@ -31,7 +31,7 @@ test('public snapshot contains only allowed current files and has independent hi
     await writeFile(join(fixture, 'tests/fixtures/showcase-codex.mjs'), 'internal screenshot fixture');
     await writeFile(join(fixture, 'docs/images/personal.png'), 'Personal screenshot fixture');
     await mkdir(join(fixture, 'desktop/assets'), { recursive: true });
-    for (const file of ['app-icon.png', 'dmg-background.png', 'personal.png']) await writeFile(join(fixture, 'desktop/assets', file), 'Installer image fixture');
+    for (const file of ['app-icon.png', 'dmg-background.png', 'dmg-background@2x.png', 'guide-icon.png', 'personal.png']) await writeFile(join(fixture, 'desktop/assets', file), 'Installer image fixture');
     await writeFile(join(fixture, 'package.json'), JSON.stringify({ name: 'snapshot-fixture', version: '0.2.0-alpha.1' }));
     await writeFile(join(fixture, '.gitignore'), '.artifacts/\n');
     await writeFile(join(fixture, 'LICENSE'), 'Original MIT attribution fixture\n');
@@ -63,7 +63,7 @@ test('public snapshot contains only allowed current files and has independent hi
     for (const file of ['AGENTS.md', '.github/CODEOWNERS', 'docs/GIT_WORKFLOW.md']) expect(await readFile(join(exported.directory, file), 'utf8')).toBe(await readFile(join(fixture, file), 'utf8'));
     for (const internal of ['docs/images/README.md', 'scripts/capture-docs.ts', 'tests/browser/readme-screenshot.mjs', 'tests/fixtures/showcase-codex.mjs']) expect(Bun.spawnSync(['git', 'cat-file', '-e', `HEAD:${internal}`], { cwd: exported.directory }).exitCode).not.toBe(0);
     await expect(access(join(exported.directory, 'docs/images/personal.png'))).rejects.toThrow();
-    for (const file of ['app-icon.png', 'dmg-background.png']) expect(await readFile(join(exported.directory, 'desktop/assets', file), 'utf8')).toBe('Installer image fixture');
+    for (const file of ['app-icon.png', 'dmg-background.png', 'dmg-background@2x.png', 'guide-icon.png']) expect(await readFile(join(exported.directory, 'desktop/assets', file), 'utf8')).toBe('Installer image fixture');
     await expect(access(join(exported.directory, 'desktop/assets/personal.png'))).rejects.toThrow();
     expect((await stat(join(exported.directory, 'tests/fixtures/codex'))).mode & 0o111).toBe(0o111);
     expect(await readFile(join(exported.directory, 'tests/fixtures/windows-job-offline.ps1'), 'utf8')).toBe(await readFile(join(fixture, 'tests/fixtures/windows-job-offline.ps1'), 'utf8'));

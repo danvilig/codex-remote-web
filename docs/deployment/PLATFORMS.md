@@ -56,3 +56,5 @@ Windows 独立 App Server 模式使用隐藏的 Windows PowerShell Job 辅助进
 `bun run desktop:dev` 构建并打开桌面界面；首次需要执行 `node node_modules/electron/install.js` 下载锁定的 Electron 运行时。`bun run test:desktop` 使用隔离项目、协议/Cloudflare fixture 验证设置交互和后台生命周期，不访问个人账户或模型。`tests/browser/desktop-native.e2e.mjs` 在各原生安装包上检查真实窗口沙箱、preload 隔离、退出界面后网关继续运行、重新连接和停止。
 
 原生 CI 构建并测试 DMG/MSI/DEB；GUI 人工操作、系统信任提示、注销/登录真实桌面会话与真实公网邮箱验证需要单独报告，不能由 fixture 测试代替。保留源码、锁文件、第三方许可证与 Electron 的 Chromium 通知，签名、公证和正式发布单独进行。
+
+桌面语言可在网关运行时即时切换，原生菜单与窗口使用相同选择。诊断页的“清理并卸载”在确认后清除应用设置/缓存/管理令牌并退出，Mac 同时将应用移至废纸篓；项目和 Codex 账户保持不变。有远程部署时，请先在远程访问页移除部署后再清理。少量稳定锁/代际标记与未知文件保留；其他独立部署不受影响。Mac 测试包使用透明文件系统压缩，验收时请区分逻辑大小与实际磁盘占用。

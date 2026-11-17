@@ -1,6 +1,6 @@
 // Original, code-drawn artwork. Regenerate with the pinned Playwright Chromium:
 // bunx playwright install chromium && bun scripts/macos-artwork.ts
-// These two reviewed PNGs are build inputs, not captures of personal sessions.
+// These reviewed PNGs are build inputs, not captures of personal sessions.
 import { chromium } from 'playwright';
 import { mkdir } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -14,17 +14,18 @@ try {
     *{box-sizing:border-box}body{margin:0;background:#f5f5f7;color:#1d1d1f;font-family:Arial,"Noto Sans CJK SC",sans-serif}
     main{height:480px;background:radial-gradient(ellipse at 50% 12%,#fff,transparent 76%);text-align:center;padding-top:58px}
     h1{font-size:30px;letter-spacing:-1.1px;font-weight:600;margin:0}
-    .arrow{position:absolute;left:317px;top:202px;color:#a1a1a6}
+    .arrow{position:absolute;left:317px;top:202px;color:#6e6e73}
     .instruction{position:absolute;top:315px;left:0;right:0;font-size:17px;letter-spacing:-.25px}
-    .zh{margin-top:9px;font-size:13px;color:#86868b}
-    footer{position:absolute;left:44px;right:44px;top:375px;border-top:1px solid #e4e4e8;text-align:left;padding-top:30px;font-size:12px;color:#86868b}
+
+    footer{position:absolute;left:44px;right:44px;top:375px;border-top:1px solid #e4e4e8;text-align:left;padding-top:30px;font-size:12px;color:#515154}
     footer small{display:block;margin-top:8px;font-size:11px}
   </style><main><h1>Codex Remote Web</h1>
     <svg class="arrow" width="46" height="24" viewBox="0 0 46 24" fill="none"><path d="M2 12h40M33 3l9 9-9 9" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-    <div class="instruction">Drag to Applications<div class="zh">拖入“应用程序”即可安装</div></div>
-    <footer>macOS 15+ · Apple Silicon<small>First launch? Open Install Guide. / 首次打开请查看安装指南。</small></footer>
+    <div class="instruction">Drag to Applications</div>
+    <footer>macOS 15+ · Apple Silicon<small>First launch? Open Install Guide.</small></footer>
   </main>`);
   await page.screenshot({ path: join(output, 'dmg-background.png'), scale: 'css' });
+  await page.screenshot({ path: join(output, 'dmg-background@2x.png'), scale: 'device' });
   await page.setViewportSize({ width: 1024, height: 1024 });
   await page.setContent(`<!doctype html><style>body{margin:0;background:transparent}svg{display:block}</style>
     <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
@@ -37,4 +38,15 @@ try {
     </svg>`);
   // iconutil expects a 1024px source.
   await page.screenshot({ path: join(output, 'app-icon.png'), scale: 'css', omitBackground: true });
+  await page.setContent(`<!doctype html><style>body{margin:0;background:transparent}svg{display:block}</style>
+    <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+      <defs><linearGradient id="paper" x2="1" y2="1"><stop stop-color="#fcfefd"/><stop offset="1" stop-color="#dcebe5"/></linearGradient></defs>
+      <rect x="148" y="104" width="728" height="816" rx="100" fill="url(#paper)" stroke="#c1d5cd" stroke-width="8"/>
+      <path d="M268 104v816" stroke="#b7cfc4" stroke-width="12"/>
+      <rect x="384" y="268" width="280" height="240" rx="52" fill="#1c3030"/>
+      <path d="m454 334 54 54-54 54m108 0h46" fill="none" stroke="#edf6f2" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M390 640h294m-294 76h220" stroke="#738f83" stroke-width="24" stroke-linecap="round"/>
+      <path d="M748 104v158l-42-30-42 30V104" fill="#426d5b"/>
+    </svg>`);
+  await page.screenshot({ path: join(output, 'guide-icon.png'), scale: 'css', omitBackground: true });
 } finally { await browser.close(); }

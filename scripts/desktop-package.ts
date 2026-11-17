@@ -6,6 +6,7 @@ import { buildDesktop } from './desktop.ts';
 import { command } from './distribution.ts';
 import { signMacApp } from './macos-sign.ts';
 import { macIcon } from './macos-dmg.ts';
+import { trimMacApp } from './macos-size.ts';
 import { macosMinimumVersion } from './macos-validation.ts';
 
 const root = resolve(import.meta.dir, '..');
@@ -28,7 +29,12 @@ export async function desktopPackage(gateway: string, output: string) {
     // this temporary build tree is removed.
     const destination = join(output, basename(app)); await cp(app, destination, { recursive: true, verbatimSymlinks: true, errorOnExist: true, force: false });
     if (process.platform !== 'win32') await distributionPermissions(destination);
-    if (process.platform === 'darwin') await signMacApp(join(destination, 'Codex Remote Web.app'));
+    if (process.platform === 'darwin') {
+      const application = join(destination, 'Codex Remote Web.app');
+      const size = await trimMacApp(application, root);
+      await signMacApp(application);
+      await writeFile(join(root, '.artifacts/macos-package-size.json'), JSON.stringify(size, null, 2) + '\n');
+    }
     return destination;
   } finally { await rm(temp, { recursive: true, force: true }); }
 }

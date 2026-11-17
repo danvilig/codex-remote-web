@@ -14,6 +14,8 @@ export const documentationImages = new Set([
 export const installerImages = new Set([
   'desktop/assets/app-icon.png',
   'desktop/assets/dmg-background.png',
+  'desktop/assets/dmg-background@2x.png',
+  'desktop/assets/guide-icon.png',
 ]);
 
 // These files only create or exercise the local documentation captures. They

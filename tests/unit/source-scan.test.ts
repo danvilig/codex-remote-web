@@ -107,7 +107,7 @@ test('source scanner permits only reviewed documentation image paths and still s
 test('installer artwork allowlist stays exact and does not exempt content from scanning',async()=>{
   await fixture(async({root,commit,scan})=>{
     await mkdir(join(root,'desktop/assets'),{recursive:true});
-    for(const file of ['app-icon.png','dmg-background.png']) await writeFile(join(root,'desktop/assets',file),'Original installer artwork fixture');
+    for(const file of ['app-icon.png','dmg-background.png','dmg-background@2x.png','guide-icon.png']) await writeFile(join(root,'desktop/assets',file),'Original installer artwork fixture');
     await commit();expect((await scan()).code).toBe(0);
   });
   await fixture(async({root,commit,scan})=>{

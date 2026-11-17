@@ -104,4 +104,12 @@ Beta.1 共十个安装/归档文件：macOS DMG、Windows MSI、两种 Linux 架
 
 本机便携构建使用 `bun run release:portable -- --output-dir <new-directory>`，必须与目标系统及架构一致；`CODEX_WEBUI_PORTABLE_ARCHIVE` 指定待验收的实际归档，`bun run test:portable` 验证不依赖宿主机 Bun/Node、安装器或编译器。包保留运行时许可证、依赖声明、`dist/portable.js` 和重链接说明。不包含 Codex、cloudflared 或凭据。
 
-Mac 测试包在最终应用组装和权限归一化后，对全部 Mach-O、嵌套 bundle 与外层应用由内向外进行 ad-hoc 签名，再验证最终 DMG 内及复制后的签名；它仍无 Apple Developer ID 签名或公证，Windows 包也尚无发布者签名。不可将 ad-hoc 校验通过描述成 Gatekeeper 信任通过。安装窗口采用原生 Finder 固定布局，详细说明在带动效的 `Install Guide.html` 中。原生 CI 读取压缩成品的背景与图标位置并保留截图；Safari 下载与手动允许须在真实 Mac 验收。原始图标和背景由 `bun scripts/macos-artwork.ts` 使用锁定 Playwright Chromium 生成，构建仅取两个指定 PNG，不引入第三方品牌素材。桌面应用在 macOS/Windows/Linux 管理固定域名网关与受保护临时访问；无桌面的自动部署仍使用 Linux 用户级 systemd。登录自启默认勾选，在首次保存时注册，注销后停止；应用不自动接管已有 headless/systemd 部署。升级前停止冲突网关并保留数据；macOS 删除应用前显式移除后台组件，Windows/Linux 卸载清理自有后台组件。安装、权限边界及限制见 [跨平台配置](deployment/PLATFORMS.md)。
+Mac 测试包在最终应用组装和权限归一化后，对全部 Mach-O、嵌套 bundle 与外层应用由内向外进行 ad-hoc 签名，再验证最终 DMG 内及复制后的签名；它仍无 Apple Developer ID 签名或公证，Windows 包也尚无发布者签名。不可将 ad-hoc 校验通过描述成 Gatekeeper 信任通过。安装窗口采用原生 Finder 固定布局，详细说明在带动效的 `Install Guide.html` 中。原生 CI 读取压缩成品的背景与图标位置并保留截图；Safari 下载与手动允许须在真实 Mac 验收。原始图标和背景由 `bun scripts/macos-artwork.ts` 使用锁定 Playwright Chromium 生成，构建仅取四个指定 PNG，不引入第三方品牌素材。桌面应用在 macOS/Windows/Linux 管理固定域名网关与受保护临时访问；无桌面的自动部署仍使用 Linux 用户级 systemd。登录自启默认勾选，在首次保存时注册，注销后停止；应用不自动接管已有 headless/systemd 部署。升级前停止冲突网关并保留数据；macOS 删除应用前显式移除后台组件，Windows/Linux 卸载清理自有后台组件。安装、权限边界及限制见 [跨平台配置](deployment/PLATFORMS.md)。
+
+### macOS 清晰度、语言与磁盘占用
+
+安装背景使用 `tiffutil -cathidpicheck` 合并 680×480 和 1360×960 两个表示，维持 680×480 点的 Finder 布局。指南图标通过 AppKit 写入挂载卷的资源叉，压缩后重新挂载验证 Finder 标志和图标数据。静态安装背景保留一行英文拖拽指引；独立指南按系统语言显示，并提供中英文切换。桌面语言选择即时持久化，同步界面、状态栏菜单、应用菜单及确认框，无需停止网关。
+
+macOS 打包在签名前裁剪 Node 本地符号及未支持语言资源，保留中英文与所有运行时许可；签名完成后用 `ditto --hfsCompression` 将应用复制进 HFS+ DMG。原生回归重新挂载、保留压缩属性复制安装，并检查签名、实际启动及终端。`macos-package-size.json` 记录裁剪前后逻辑大小与卷内分配；`macos-installation-check.json` 记录卷内及安装后大小。不能以 DMG 下载大小代替安装体积；不支持透明压缩的目标文件系统可能恢复逻辑大小。
+
+诊断页保留“停止并移除后台组件”，另提供“清理并卸载”。确认后停止自有进程、移除登录项、清除应用设置、缓存和已保存的管理令牌；Mac 应用移入废纸篓。项目、`~/.codex` 与独立 headless 部署不在删除列表内。存在远程部署或未完成的恢复时拒绝清理，用户须先在远程访问页处理，防止删除云端资源的恢复记录。后台目录仅保留无个人信息的稳定锁与代际标记，以维护并发/旧回滚令牌边界；未知文件保留。

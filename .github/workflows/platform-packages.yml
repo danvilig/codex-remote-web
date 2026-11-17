@@ -100,6 +100,7 @@ jobs:
             .artifacts/macos-installer-native.png
             .artifacts/macos-desktop-*.png
             .artifacts/macos-installation-check.json
+            .artifacts/macos-package-size.json
           if-no-files-found: error
 
   macos-27:
@@ -149,4 +150,5 @@ jobs:
             .artifacts/macos-installer-native.png
             .artifacts/macos-desktop-*.png
             .artifacts/macos-installation-check.json
+            .artifacts/macos-package-size.json
           if-no-files-found: error

@@ -8,6 +8,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { desktopConfig, desktopDirectory } from '../../src/shared/desktop-config.js';
 import { writePrivate } from '../../src/server/desktop/private-store.js';
 import { agentRequest } from '../../desktop/client.js';
+import { command } from '../../scripts/distribution.ts';
 import { root } from '../helpers/browser-runtime.mjs';
 import { windowsIsolatedStartupTimeout } from '../../src/server/bridge/windows-isolated.js';
 
@@ -90,8 +91,38 @@ try {
     await window.locator('[data-page=overview]').click();
     await window.locator('#start').waitFor();
   }
+  // Capture actual native menus in the test process; no production debug API.
+  await application.evaluate(({ Tray, dialog }) => {
+    const original = Tray.prototype.setContextMenu;
+    Tray.prototype.setContextMenu = function(menu) { globalThis.__nativeTray = menu; return original.call(this, menu); };
+    dialog.showMessageBox = async (...args) => { globalThis.__confirmation = args.at(-1); return { response: 0 }; };
+  });
+  await window.locator('[data-page=configuration]').click();
+  for (const [language, expected, title] of [['zh', ['设置', '打开工作区', '启动网关', '停止网关', '退出托盘（网关继续运行）'], '网关设置'], ['en', ['Settings', 'Open workspace', 'Start gateway', 'Stop gateway', 'Quit tray (gateway continues)'], 'Gateway settings']]) {
+    await window.locator('#desktopLanguage').selectOption(language, {force:true});
+    await window.waitForFunction(value => document.querySelector('#pageTitle').textContent === value && !document.querySelector('#desktopLanguage').disabled, title);
+    const menus = await application.evaluate(({ Menu }) => ({ tray: globalThis.__nativeTray?.items.filter(item => item.type !== 'separator').map(item => item.label), app: Menu.getApplicationMenu().items.map(item => item.label) }));
+    if (process.platform === 'darwin') {
+      assert.deepEqual(menus.tray, expected, 'Actual status-bar menu must match the selected language');
+      assert.equal(menus.app[1], language === 'zh' ? '编辑' : 'Edit');
+      await application.evaluate(() => globalThis.__nativeTray.popup({x:550,y:160}));
+      await command(['screencapture','-x',join(root,`.artifacts/macos-desktop-tray-${language}.png`)],root);
+      await application.evaluate(() => globalThis.__nativeTray.closePopup());
+    }
+    await window.locator('[data-page=diagnostics]').click();
+    await window.locator('#removeBackground').click();
+    const confirmation = await application.evaluate(() => globalThis.__confirmation);
+    assert.deepEqual(confirmation.buttons, language === 'zh' ? ['取消', '移除'] : ['Cancel', 'Remove']);
+    await window.locator('[data-page=configuration]').click();
+  }
+  await window.locator('[data-page=overview]').click();
   await window.locator('#start').click(); await window.waitForFunction(() => document.querySelector('#gatewayState').textContent === 'Running');
   const state = await agentRequest(directory, 'status'); assert.equal(state.local.phase, 'running');
+  await window.locator('[data-page=configuration]').click();
+  await window.locator('#desktopLanguage').selectOption('zh',{force:true});
+  await window.waitForFunction(()=>document.documentElement.lang==='zh-CN'&&!document.querySelector('#desktopLanguage').disabled);
+  assert.equal((await agentRequest(directory,'status')).local.pid,state.local.pid,'Native language change must preserve gateway PID');
+  // Saved Chinese must survive quitting and reopening the native tray.
   // Running means the HTTP gateway is ready; its isolated native connection
   // initializes independently. Establish connectivity before testing whether
   // quitting the tray preserves it (including cold PowerShell compilation).
@@ -114,11 +145,32 @@ try {
   assert.equal((await (await fetch(state.url + '/api/health', { signal: AbortSignal.timeout(10000) })).json()).codex, true);
   console.error('Verifying native desktop reconnect');
   application = await launch(); window = await application.firstWindow({ timeout: 30000 });
-  await window.waitForFunction(() => document.querySelector('#gatewayState').textContent === 'Running');
+  await window.waitForFunction(() => document.querySelector('#gatewayState').textContent === '运行中');
+  assert.equal(await application.evaluate(({Menu})=>Menu.getApplicationMenu().items[1].label),'编辑');
+  await window.locator('[data-page=configuration]').click();
+  await window.locator('#desktopLanguage').selectOption('en',{force:true});
+  await window.waitForFunction(()=>document.documentElement.lang==='en'&&!document.querySelector('#desktopLanguage').disabled);
+  await window.locator('[data-page=overview]').click();
   assert.equal((await agentRequest(directory, 'status')).local.pid, state.local.pid);
   console.error('Verifying native gateway stop');
   await window.locator('#stop').click(); await window.waitForFunction(() => document.querySelector('#gatewayState').textContent === 'Stopped');
   assert.equal((await agentRequest(directory, 'status')).local.pid, null);
+  if (process.platform === 'darwin') {
+    // Exercise confirmed cleanup only against this installed disposable copy.
+    const dataPath = await application.evaluate(({app}) => app.getPath('userData'));
+    const sentinel = join(home, '.codex', 'auth-preserved.txt');
+    await mkdir(join(home,'.codex'),{recursive:true}); await writeFile(sentinel,'fixture account');
+    await application.evaluate(({dialog}) => { dialog.showMessageBox = async () => ({response:1}); });
+    await window.locator('[data-page=diagnostics]').click();
+    await window.locator('#cleanUninstall').click();
+    const child = application.process();
+    for (let i=0; child.exitCode===null && i<200; i++) await delay(100);
+    assert.equal(child.exitCode,0,'Clean uninstall must exit normally');
+    assert.equal(await readFile(sentinel,'utf8'),'fixture account');
+    assert.equal(await readFile(join(directory,'config.json'),'utf8').catch(error=>error.code),'ENOENT');
+    assert.equal(await readFile(dataPath,'utf8').catch(error=>error.code),'ENOENT');
+    assert.equal(await readFile(executable,'utf8').catch(error=>error.code),'ENOENT','Disposable .app must move to Trash');
+  }
   console.log('PASS: real sandboxed desktop window, isolated preload, native gateway, tray-app exit independence, reconnect and stop');
 } finally {
   console.error('Cleaning native desktop fixture');
