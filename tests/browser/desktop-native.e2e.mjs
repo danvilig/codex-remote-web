@@ -172,9 +172,14 @@ try {
     assert.equal(await readFile(executable,'utf8').catch(error=>error.code),'ENOENT','Disposable .app must move to Trash');
   }
   console.log('PASS: real sandboxed desktop window, isolated preload, native gateway, tray-app exit independence, reconnect and stop');
+} catch (error) {
+  console.error('Native desktop failure:',error.stack || error);
+  if (process.platform === 'darwin') await command(['screencapture','-x',join(root,'.artifacts/macos-desktop-failure.png')],root).catch(()=>{});
+  console.error('Native Chromium log:',await readFile(env.ELECTRON_LOG_FILE,'utf8').catch(()=>'(unavailable)'));
+  throw error;
 } finally {
   console.error('Cleaning native desktop fixture');
-  await closeApplication(); await agentRequest(directory, 'shutdown').catch(() => {});
+  await closeApplication().catch(error=>console.error('Secondary cleanup failure:',error.message)); await agentRequest(directory, 'shutdown').catch(() => {});
   for (let i = 0; i < 100; i++) { try { await agentRequest(directory, 'status', undefined, { timeoutMs: 100 }); } catch { break; } await delay(50); }
   await rm(home, { recursive: true, force: true });
 }
