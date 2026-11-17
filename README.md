@@ -6,7 +6,7 @@
 
 A self-hosted browser workspace using **Cloudflare Tunnel + Access**. Set up remote access through the web UI, then continue conversations, follow tool activity, handle approvals, and edit project files from another device.
 
-> **Next release:** The desktop gateway and session changes below are being prepared in [#8](https://github.com/danvilig/codex-remote-web/pull/8) and [#9](https://github.com/danvilig/codex-remote-web/pull/9). Published **0.2.0-alpha.3** installers still use a terminal launcher; the tray/settings app and new session defaults require a build containing those changes.
+> **Beta.1 candidate:** This branch prepares **0.2.0-beta.1** with the desktop gateway and new session defaults. Published **0.2.0-alpha.3** installers still use a terminal launcher; use a Beta.1 build for the features below. See the [Beta.1 release notes](docs/releases/0.2.0-beta.1.md).
 
 ## Highlights
 
@@ -76,7 +76,7 @@ Download your package and its `.sha256` from [Releases](https://github.com/danvi
 On macOS, drag **Codex Remote Web.app** from the DMG into Applications and open it. On Windows, install the per-user MSI and launch **Codex Remote Web** from the Start menu. On Ubuntu, install the desktop DEB and open the application from the app launcher.
 
 1. In **Gateway settings**, choose a project directory and port (default `8899`). Select Codex/cloudflared executable paths if they are not found automatically, check dependencies and save. The app uses your existing Codex account and configuration.
-2. In **Overview**, start the gateway and open the browser workspace. Start, stop and restart controls remain available in the settings window and tray menu.
+2. In **Overview**, start the gateway and open the browser workspace. The settings window offers start, stop and restart; the tray menu offers start and stop.
 3. For access from another device, open **Remote access** and choose a fixed domain or a temporary address protected by an email code.
 
 Closing settings hides the window to the tray; quitting the tray leaves the background gateway running. On Linux desktops without tray support, closing settings minimizes the window to the taskbar. Use **Stop gateway** to stop the gateway and its managed connections; logging out ends the background session. **Start gateway at login** is checked by default and registered when you first save settings; uncheck it before saving if you do not want automatic startup. Disabling it later does not stop the current gateway. The browser terminal is off by default.
@@ -87,13 +87,13 @@ Desktop packages are unsigned. Review the checksum and source, and use your syst
 
 ### Portable CLI packages
 
-The following examples use the published **0.2.0-alpha.3** packages. They run in a terminal; close it or press Ctrl+C to stop the gateway. Use the package name and version matching your download.
+The following examples target **0.2.0-beta.1** portable packages. Use the package name and version matching your download; candidate builds are available as CI artifacts until the release is published. They run in a terminal; close it or press Ctrl+C to stop the gateway.
 ```sh
-archive=codex-remote-web-0.2.0-alpha.3-linux-x64.tar.gz
-# For arm64 use codex-remote-web-0.2.0-alpha.3-linux-arm64.tar.gz
+archive=codex-remote-web-0.2.0-beta.1-linux-x64.tar.gz
+# For arm64 use codex-remote-web-0.2.0-beta.1-linux-arm64.tar.gz
 sha256sum -c "$archive.sha256"
 tar -xzf "$archive"
-cd codex-remote-web-0.2.0-alpha.3
+cd codex-remote-web-0.2.0-beta.1
 CODEX_WEBUI_CWD=/path/to/your/project ./codex-remote-web
 ```
 
@@ -101,7 +101,7 @@ On macOS, extract the `macos-arm64` archive and run the same command. On Windows
 
 ```powershell
 # Compare with the hash in the adjacent .sha256 file before extracting.
-Get-FileHash .\codex-remote-web-0.2.0-alpha.3-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\codex-remote-web-0.2.0-beta.1-windows-x64.zip -Algorithm SHA256
 $env:CODEX_WEBUI_CWD = 'C:\path\to\your\project'
 .\codex-remote-web.exe
 ```
@@ -127,7 +127,7 @@ The WebUI defaults to the local shared Desktop/CLI App Server and waits if its s
 
 ## Set up public access
 
-Open **Remote access** in the desktop app, or **Settings → Remote access** in the full local WebUI. Initialize and start the local gateway first, then choose an option based on whether you own a domain:
+For a desktop-managed gateway, open **Remote access** in the desktop app; its browser settings show deployment status and direct management back to the app. For a CLI/headless gateway, open **Settings → Remote access** in the full local WebUI. Initialize and start the local gateway first, then choose an option based on whether you own a domain:
 
 | | Fixed domain | Temporary access without a domain |
 | --- | --- | --- |
@@ -171,7 +171,7 @@ Desktop-managed fixed-domain setup and protected temporary access support macOS,
 
 The server listens on loopback by default, with public access through a protected Tunnel. Access authentication operates separately from Codex command approvals, Linux permissions, and sandboxing.
 
-Sites deployment, image generation, cloud Library, plugin account OAuth, and full MCP interactions remain on the roadmap. See the [release notes](docs/releases/0.2.0-alpha.3.md) for more limitations.
+Sites deployment, image generation, cloud Library, plugin account OAuth, and full MCP interactions remain on the roadmap. See the [release notes](docs/releases/0.2.0-beta.1.md) for more limitations.
 
 ### Shared Codex sessions and standalone deployments
 
@@ -184,7 +184,7 @@ The detailed guides below are currently in Chinese.
 - [Configuration](docs/CONFIGURATION.md) / [Cloudflare deployment](docs/deployment/CLOUDFLARE.md)
 - [Development and testing](DEVELOPMENT.md) / [Contributing](CONTRIBUTING.md)
 - [Architecture](docs/ARCHITECTURE.md) / [Roadmap](docs/ROADMAP.md)
-- [Release process](docs/RELEASING.md) / [Acceptance report](docs/releases/0.2.0-alpha.3.md) / [Changelog](CHANGELOG.md)
+- [Release process](docs/RELEASING.md) / [Candidate verification](docs/releases/0.2.0-beta.1-acceptance.md) / [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md) / [Git workflow](docs/GIT_WORKFLOW.md) / [Agent rules](AGENTS.md)
 - [Security](SECURITY.md)
 

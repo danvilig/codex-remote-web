@@ -44,6 +44,7 @@ try {
   const unpacked = process.env.CODEX_WEBUI_INSTALLED_DIRECTORY || join(fixture,name);
   for (const readme of ['README.md', 'README-zh.md']) assert.equal(readFileSync(join(unpacked,readme),'utf8'),readFileSync(join(root,readme),'utf8'),`Bilingual README missing or changed: ${readme}`);
   for (const image of documentationImages) assert.deepEqual(readFileSync(join(unpacked,image)),readFileSync(join(root,image)),`README image missing or changed in archive: ${image}`);
+  assert.ok(existsSync(join(unpacked,'dist/isolated-worker.js')),'Packaged desktop isolated supervisor is required');
   const manifest=JSON.parse(readFileSync(join(unpacked,'release.json'),'utf8'));assert.equal(manifest.version,pkg.version);
   if (existsSync(join(root,'SOURCE_PROVENANCE.json'))) {
     const provenance=JSON.parse(readFileSync(join(root,'SOURCE_PROVENANCE.json'),'utf8'));
@@ -98,6 +99,19 @@ try {
   const runtimePath = windows ? [quickBin,join(process.env.SystemRoot,'System32'),join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0'),dirname(Bun.which('git'))].join(delimiter) : quickBin;
   const env={...process.env,HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_AUTH_MODE:'local',HOME:home,CODEX_HOME:join(home,'.codex'),CODEX_AUTH_PATH:join(home,'auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_REVIEW_ROOT:project,CODEX_WEBUI_ENABLE_TERMINAL:'true',CODEX_WEBUI_ENABLE_REVIEW_WRITE:'false',SHELL:windows?join(process.env.SystemRoot,'System32/cmd.exe'):'/bin/bash',USERPROFILE:home,CODEX_WEBUI_APP_SERVER_MODE:'isolated',PATH:portable?runtimePath:`${quickBin}${delimiter}${join(root,'tests/fixtures')}${delimiter}${process.env.PATH}`};
   delete env.CODEX_WEBUI_NODE;
+  if (portable) {
+    // The native settings app delegates complete registration transactions to
+    // this compiled CLI. No source, host Bun or OS registration is needed for
+    // an empty cleanup, but its real private SQLite lock must be available.
+    const directory = join(home, 'session-fixture'), input = join(fixture, 'session-input.json');
+    writeFileSync(input, JSON.stringify({ enabled: false, options: { directory, executable: '/fixture/desktop' } }));
+    const helper = Bun.spawn([executable, 'session-configure'], { cwd: fixture, env, stdin: Bun.file(input), stdout: 'pipe', stderr: 'pipe' });
+    const [output, errors, exit] = await Promise.all([new Response(helper.stdout).text(), new Response(helper.stderr).text(), helper.exited]);
+    assert.equal(exit, 0, errors);
+    const { snapshot } = JSON.parse(output); assert.equal(snapshot.previous, null); assert.equal(snapshot.current, null);
+    assert.match(snapshot.generation, /^[a-f0-9-]{36}$/);
+    assert.ok(existsSync(join(directory, 'session-lock.sqlite')), 'Shipped CLI must acquire its private registration lock');
+  }
   // Start from a different cwd and without source: no frontend rebuild may be needed.
   server=Bun.spawn(portable?[executable]:['bun',join(unpacked,'dist/server.js')],{cwd:fixture,env,stdout:'pipe',stderr:'pipe'});
   const serverError=serverLog=new Response(server.stderr).text();
@@ -154,6 +168,19 @@ try {
   await setupRequest('quick/stop',{});
   for(let attempt=0;;attempt++){if((await setupRequest('quick/status')).data.phase==='stopped')break;if(attempt>400)throw new Error('Packaged temporary connector did not stop');await Bun.sleep(30);}
   server.kill('SIGTERM');await server.exited;assert.equal((await serverError).includes('Frontend build failed'),false);server=null;
+  // The desktop path must resolve the shipped supervisor outside the source
+  // tree, including with portable runtimes and the poisoned host PATH.
+  // Desktop settings supply an explicit Codex executable. The first gateway
+  // above separately verifies CLI discovery through the poisoned PATH.
+  const desktopEnv={...env,CODEX_WEBUI_DESKTOP_CHILD:'1',...(windows?{CODEX_WEBUI_CODEX:join(quickBin,'codex.cmd')}:{})};
+  for(const path of [project,nodePath,...(windows?[desktopEnv.CODEX_WEBUI_CODEX,join(quickBin,'node_modules/@openai/codex/bin/codex.js')]:[])])assert.ok(existsSync(path),`Missing desktop fixture: ${path}`);
+  server=Bun.spawn(portable?[executable]:['bun',join(unpacked,'dist/server.js')],{cwd:fixture,env:desktopEnv,stdout:'pipe',stderr:'pipe'});
+  const desktopOutput=new Response(server.stdout).text();
+  serverLog=new Response(server.stderr).text();
+  for(let attempt=0;;attempt++){try{if((await(await fetch(base+'/api/health')).json()).codex)break;}catch{}if(attempt>200)throw new Error('Packaged desktop isolated supervisor failed');await Bun.sleep(50);}
+  assert.deepEqual(await(await fetch(base+'/api/remote-access/status')).json(),{configured:false,management:'desktop',canManage:false});
+  assert.equal((await fetch(base+'/api/setup/launch',{method:'POST',headers:{origin:base,'x-setup-request':'1','content-type':'application/json'},body:'{}'})).status,409);
+  server.kill('SIGTERM');await server.exited;await desktopOutput;assert.equal((await serverLog).includes('cannot start Codex'),false);server=null;
   if (portable) assert.equal(existsSync(poisonLog),false,'Executable must not use a host runtime, installer or compiler');
   console.log(portable ? 'PASS: native executable, bundled runtime/license/relink bundle, no host runtime/install/compiler use, outside-HOME and foreign-cwd gateway/setup, assets, restricted project APIs, real PTY and platform-appropriate remote-access checks' : 'PASS: allowlisted archive, checksum, dependency notices, frozen production install, outside-HOME production installation, restricted project APIs, foreign-cwd gateway/setup startup and packaged PTY/temporary-connector workers');
 } finally { if(setup){setup.kill('SIGTERM');await setup.exited;}if(server){server.kill('SIGTERM');await server.exited;console.error(await serverLog);}rmSync(fixture,{recursive:true,force:true}); }

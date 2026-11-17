@@ -37,7 +37,7 @@ export async function linuxDesktopPackage(gateway: string, output: string) {
     // Installed by dpkg as root: preserve Chromium's supported setuid sandbox
     // helper rather than requiring --no-sandbox or global userns changes.
     await writeFile(join(temp, 'DEBIAN/control'), `Package: codex-remote-web-desktop\nVersion: ${pkg.version.replace('-', '~')}\nArchitecture: ${arch}\nMaintainer: Codex Remote Web contributors\nDepends: libgtk-3-0, libnss3, libxss1, libasound2t64, libgbm1\nDescription: Codex Remote Web desktop gateway and settings\n`);
-    await writeFile(join(temp, 'DEBIAN/prerm'), `#!/bin/sh\nset -eu\n# Only remove registrations that point at this exact installation. Run each\n# cleanup as its owner; never read their credentials or delete user data.\ngetent passwd | while IFS=: read -r account password uid gid gecos userdir usershell; do\n if [ "$uid" -ge 1000 ] && [ "$uid" -lt 65534 ] && [ -f "$userdir/.config/codex-remote-web/desktop/session.json" ]; then\n  runuser -u "$account" -- env XDG_RUNTIME_DIR="/run/user/$uid" "${prefix}/resources/gateway/codex-remote-web" uninstall-desktop "${prefix}/codex-remote-web-desktop"\n fi\ndone\n`, { mode: 0o755 });
+    await writeFile(join(temp, 'DEBIAN/prerm'), linuxDesktopPrerm(prefix), { mode: 0o755 });
     const desktop = join(temp, 'usr/share/applications'); await mkdir(desktop, { recursive: true });
     await writeFile(join(desktop, 'codex-remote-web.desktop'), `[Desktop Entry]\nType=Application\nName=Codex Remote Web\nComment=Manage your background gateway\nExec=${prefix}/codex-remote-web-desktop\nTerminal=false\nCategories=Development;Network;\n`);
     const archive = join(output, `${pkg.name}-${pkg.version}-desktop-linux-${process.arch}.deb`);
@@ -47,4 +47,8 @@ export async function linuxDesktopPackage(gateway: string, output: string) {
     const sha256 = createHash('sha256').update(await readFile(archive)).digest('hex'); await writeFile(archive + '.sha256', `${sha256}  ${basename(archive)}\n`);
     return { installer: archive, app, sha256 };
   } finally { await rm(temp, { recursive: true, force: true }); }
+}
+
+export function linuxDesktopPrerm(prefix = '/opt/codex-remote-web-desktop') {
+  return `#!/bin/sh\nset -eu\n# Only remove registrations that point at this exact installation. Run each\n# cleanup as its owner; never read their credentials or delete user data.\ngetent passwd | while IFS=: read -r account password uid gid gecos userdir usershell; do\n if [ "$uid" -ge 1000 ] && [ "$uid" -lt 65534 ] && { [ -f "$userdir/.config/codex-remote-web/desktop/session.json" ] || [ -f "$userdir/.config/codex-remote-web/desktop/agent.json" ]; }; then\n  runuser -u "$account" -- env XDG_RUNTIME_DIR="/run/user/$uid" "${prefix}/resources/gateway/codex-remote-web" uninstall-desktop "${prefix}/codex-remote-web-desktop"\n fi\ndone\n`;
 }

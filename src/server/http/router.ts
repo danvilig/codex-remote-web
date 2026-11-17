@@ -76,7 +76,7 @@ export function createHttpHandler(context: any) {
     res.setHeader('cache-control', 'no-store');
     res.setHeader('x-content-type-options', 'nosniff');
     if (req.method !== 'GET') { res.writeHead(405, { allow: 'GET' }); res.end(JSON.stringify({ error: 'Method not allowed' })); return; }
-    try { res.end(JSON.stringify({ ...await remoteAccessStatus(authConfig, homeDir, auth.principal), canManage: localSetupRequest(req) })); }
+    try { const desktopManaged = process.env.CODEX_WEBUI_DESKTOP_CHILD === '1'; res.end(JSON.stringify({ ...await remoteAccessStatus(authConfig, homeDir, auth.principal, { desktopManaged }), canManage: !desktopManaged && localSetupRequest(req) })); }
     catch { res.writeHead(503); res.end(JSON.stringify({ error: 'Remote access status is unavailable. Try again.' })); }
     return;
   }

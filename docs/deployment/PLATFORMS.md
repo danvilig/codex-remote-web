@@ -31,6 +31,16 @@ macOS 15+ 仅支持 Apple Silicon；Windows 11 仅支持 x64、NTFS 和 Windows 
 
 Windows 突然断电时仍不承诺目录项 fsync；保留未知提交的回执并核对，不自动重放。安装包中网关资源位置变为 macOS `.app/Contents/Resources/gateway`、Windows/Linux `resources/gateway`；CLI 便携包目录结构不变。
 
+Windows 登录任务在每次保存时核对实际任务，缺失或被禁用的自有任务会重新注册；名称相同但启动命令已改变的任务会被保留并报错。注册变更前会在私有状态目录保存 `session-windows-pending.json`，本地记录持久化失败时按完整任务 XML 和启用状态核对并回滚，回滚失败也会明确报告。
+
+若出现 `SESSION_RECOVERY_REQUIRED`，辅助进程可能在修改任务后失去响应，或任务已被其他程序修改。保留该文件、`session.json` 及任务计划程序导出的 XML，不要删除状态文件来强行重试。恢复请求只会自动接受与记录中原始状态完全一致的任务，或与已确认提交的任务和本地记录完全一致的状态；其余情况须由维护者核对启动命令、XML、启用状态和归属后处理。此时保存和移除都会报错，避免把未确认的任务当成已成功移除；不会自动覆盖外来任务。
+
+Windows 独立 App Server 模式使用隐藏的 Windows PowerShell Job 辅助进程，须允许 `Add-Type` 编译随包代码。它先建立系统进程归属，再启动 Codex；若系统策略不允许建立该边界，会拒绝启动并记录错误，不会回退为无监督运行。共享 daemon 不属于网关的 Job，停止网关不会停止共享任务。
+
+首次启动时 PowerShell 编译可能较慢。辅助进程有单独的 90 秒启动上限，确认原生进程已启动后才开始计算原有的初始化 RPC 超时；业务请求在辅助进程启动期间返回未发送，不会排队执行。此阶段“网关运行中”仅表示 HTTP 服务已就绪，Codex 连接仍需完成初始化。
+
+辅助进程的待写入输入最多积压 64 MiB 或 2,048 个数据块，先达到任一上限时关闭自有 Job；这也防止 Codex 停止读取输入后无限缓存。由此中断的未知执行仍须核对回执，不自动重试。
+
 ## 开发和验收
 
 `bun run desktop:dev` 构建并打开桌面界面；首次需要执行 `node node_modules/electron/install.js` 下载锁定的 Electron 运行时。`bun run test:desktop` 使用隔离项目、协议/Cloudflare fixture 验证设置交互和后台生命周期，不访问个人账户或模型。`tests/browser/desktop-native.e2e.mjs` 在各原生安装包上检查真实窗口沙箱、preload 隔离、退出界面后网关继续运行、重新连接和停止。

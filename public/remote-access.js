@@ -247,6 +247,17 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
       const response = await fetch('/api/remote-access/status', { cache: 'no-store' });
       if (!response.ok) throw new Error('Remote access status is unavailable. Try again.');
       const data = await response.json();
+      const desktopManaged = data.management === 'desktop';
+      if (desktopManaged && !data.configured) {
+        $('[data-remote="overviewSummary"]').replaceChildren();
+        $('[data-remote=overviewTitle]').textContent = t('Remote access');
+        $('[data-remote=managementHint]').textContent = t('Manage remote access in the desktop app.');
+        $('[data-remote=overviewState]').textContent = t('Manage remote access in the desktop app.');
+        $('[data-remote=overviewLink]').hidden = true;
+        $('[data-action=manageLocal]').hidden = true;
+        $('[data-action=quickOverview]').hidden = true;
+        show('overview'); return true;
+      }
       if (!data.configured) return false;
       const address = new URL(data.publicOrigin);
       if (address.protocol !== 'https:' || address.origin !== data.publicOrigin) throw new Error('Remote access status is unavailable. Try again.');
@@ -255,12 +266,13 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
       $('[data-remote=overviewTitle]').textContent=t(quickMode?'Temporary access without a domain':'Remote access is configured');
       const values = [['Public hostname', address.hostname], ['Authentication', quickMode?'Email verification':'Cloudflare Access'], ['Allowed email', data.allowedEmail]];
       if(data.teamDomain)values.push(['Team Domain',data.teamDomain]);
-      $('[data-remote=managementHint]').textContent=t(quickMode?'This temporary address is managed from the local WebUI. Stopping it closes its remote connections and terminals.':'To change or remove this deployment, open Remote access on the server using its local address. No API token is needed to view this configuration.');
+      $('[data-remote=managementHint]').textContent=t(desktopManaged ? 'Manage remote access in the desktop app.' : quickMode?'This temporary address is managed from the local WebUI. Stopping it closes its remote connections and terminals.':'To change or remove this deployment, open Remote access on the server using its local address. No API token is needed to view this configuration.');
       if (data.identity?.email) values.push(['Signed in as', data.identity.email]);
       if (data.expiresAt) values.push(['Session expires', new Date(data.expiresAt).toLocaleString()]);
       for (const [label,value] of values) { const dt = document.createElement('dt'), dd = document.createElement('dd'); dt.textContent = t(label); dd.textContent = t(value); dd.dataset.i18nIgnore = ''; summary.append(dt,dd); }
       $('[data-remote="overviewState"]').textContent = t(data.mode==='quick-tunnel' ? 'This address works only while temporary access is running.' : data.recoveryRequired ? 'A configuration change needs recovery. Recover it before making other changes.' : data.active ? 'Cloudflare Access protection is active for this workspace.' : 'Your deployment configuration is saved. Open the public address to access the protected workspace.');
       $('[data-remote="overviewLink"]').href = address.origin;
+      $('[data-remote="overviewLink"]').hidden = false;
       $('[data-action="manageLocal"]').hidden = !data.canManage;
       $('[data-action=quickOverview]').hidden = !data.canManage;
       show('overview'); return true;
