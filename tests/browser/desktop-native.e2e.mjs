@@ -105,9 +105,9 @@ try {
     if (process.platform === 'darwin') {
       assert.deepEqual(menus.tray, expected, 'Actual status-bar menu must match the selected language');
       assert.equal(menus.app[1], language === 'zh' ? '编辑' : 'Edit');
-      await application.evaluate(() => globalThis.__nativeTray.popup({x:550,y:160}));
-      await command(['screencapture','-x',join(root,`.artifacts/macos-desktop-tray-${language}.png`)],root);
-      await application.evaluate(() => globalThis.__nativeTray.closePopup());
+      // Inspect the actual status-bar Menu, without entering Cocoa's modal
+      // popup tracking loop inside a synchronous CDP evaluation.
+      console.log('Native tray menu:',language,JSON.stringify(menus.tray));
     }
     await window.locator('[data-page=diagnostics]').click();
     await window.locator('#removeBackground').click();
