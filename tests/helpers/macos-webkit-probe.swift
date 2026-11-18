@@ -78,5 +78,5 @@ final class Assets: NSObject, WKURLSchemeHandler {
 MainActor.assumeIsolated {
     let app = NSApplication.shared; app.setActivationPolicy(.regular)
     let delegate = Probe(); app.delegate = delegate
-    withExtendedLifetime(delegate) { app.run() }
+    withExtendedLifetime(delegate) { _ = NSApplicationMain(CommandLine.argc, CommandLine.unsafeArgv) }
 }

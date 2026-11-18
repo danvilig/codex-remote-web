@@ -37,6 +37,24 @@ jobs:
           mkdir -p .artifacts
           xcrun swiftc -target arm64-apple-macosx15.0 -framework AppKit -framework WebKit tests/helpers/macos-webkit-probe.swift -o "$RUNNER_TEMP/crw-webkit-probe"
           "$RUNNER_TEMP/crw-webkit-probe" "$PWD/.artifacts" 2>&1 | tee .artifacts/macos-webkit-probe.txt
+          cat > .artifacts/macos-webkit-safari.html <<'HTML'
+          <!doctype html><body style="background:#145bd7;color:white;font:40px system-ui">Safari rendering control<input value="Native test">
+          HTML
+          osascript - "$PWD/.artifacts/macos-webkit-safari.html" <<'APPLESCRIPT' > .artifacts/macos-webkit-safari.txt 2>&1 || true
+          on run argv
+            with timeout of 20 seconds
+              tell application "Safari"
+                activate
+                make new document with properties {URL:"file://" & item 1 of argv}
+                set bounds of front window to {80, 120, 840, 640}
+                delay 4
+                return URL of current tab of front window
+              end tell
+            end timeout
+          end run
+          APPLESCRIPT
+          screencapture -x .artifacts/macos-webkit-safari.png
+          osascript -e 'tell application "Safari" to quit' || true
           /usr/bin/log show --last 2m --style compact --predicate '(process CONTAINS "WebKit") AND (messageType == error OR messageType == fault)' > .artifacts/macos-webkit-system.txt
       - uses: actions/upload-artifact@v4
         if: always()
