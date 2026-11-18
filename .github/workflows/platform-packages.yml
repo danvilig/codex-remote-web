@@ -33,9 +33,17 @@ jobs:
           xcrun clang -dynamiclib -fobjc-arc -framework AppKit -framework WebKit -mmacosx-version-min=15.0 tests/helpers/macos-native-driver.m -o "$RUNNER_TEMP/crw-test-driver.dylib"
       - name: Diagnose the system WebKit compositor independently
         run: |
+          set -o pipefail
           mkdir -p .artifacts
           xcrun swiftc -target arm64-apple-macosx15.0 -framework AppKit -framework WebKit tests/helpers/macos-webkit-probe.swift -o "$RUNNER_TEMP/crw-webkit-probe"
-          "$RUNNER_TEMP/crw-webkit-probe" "$PWD/.artifacts"
+          "$RUNNER_TEMP/crw-webkit-probe" "$PWD/.artifacts" 2>&1 | tee .artifacts/macos-webkit-probe.txt
+          /usr/bin/log show --last 2m --style compact --predicate '(process CONTAINS "WebKit") AND (messageType == error OR messageType == fault)' > .artifacts/macos-webkit-system.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: webkit-compositor-diagnostics
+          include-hidden-files: true
+          path: .artifacts/macos-webkit-*
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
