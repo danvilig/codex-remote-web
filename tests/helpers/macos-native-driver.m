@@ -58,7 +58,7 @@ static void command(NSDictionary *request) {
             }];
             return;
         }
-        reply(request, @{ @"visible": @(webView.window.visible), @"minimized": @(webView.window.miniaturized) }, nil);
+        reply(request, @{ @"visible": @(webView.window.visible != NO), @"minimized": @(webView.window.miniaturized != NO) }, nil);
     } else if ([action isEqual:@"runningApps"]) {
         NSArray *foreground = [NSRunningApplication runningApplicationsWithBundleIdentifier:NSBundle.mainBundle.bundleIdentifier];
         NSArray *background = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"io.github.danvilig.codex-remote-web.background"];

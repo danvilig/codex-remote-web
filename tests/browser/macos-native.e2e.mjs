@@ -130,7 +130,7 @@ try {
       const state = await application.request('window');
       return mode === 'close' ? !state.visible : state.minimized;
     }, `${mode} main window`);
-    assert.equal(await application.request('window', {mode:'reopen'}), true, 'Launch Services must reopen the existing GUI process');
+    assert.ok(await application.request('window', {mode:'reopen'}), 'Launch Services must reopen the existing GUI process');
     await waitFor(async () => {
       const state = await application.request('window');
       return state.visible && !state.minimized;
