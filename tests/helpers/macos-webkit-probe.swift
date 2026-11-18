@@ -1,6 +1,7 @@
 // Test-only compositor reproducer. It never enters a distributed application.
 import AppKit
 import WebKit
+import ScreenCaptureKit
 
 final class Assets: NSObject, WKURLSchemeHandler {
     func webView(_ view: WKWebView, start task: WKURLSchemeTask) {
@@ -47,7 +48,19 @@ final class Assets: NSObject, WKURLSchemeHandler {
                 let capture = Process(); capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
                 capture.arguments = ["-x", CommandLine.arguments[1] + "/macos-webkit-probe-\(self.mode).png"]
                 try! capture.run(); capture.waitUntilExit()
-                self.mode += 1; self.next()
+                Task {
+                    do {
+                        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+                        let target = content.windows.first { $0.windowID == CGWindowID(self.window.windowNumber) }!
+                        let config = SCStreamConfiguration()
+                        config.width = Int(target.frame.width); config.height = Int(target.frame.height)
+                        let filter = SCContentFilter(desktopIndependentWindow: target)
+                        let image = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+                        let bitmap = NSBitmapImageRep(cgImage: image)
+                        try bitmap.representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: CommandLine.arguments[1] + "/macos-webkit-probe-sck-\(self.mode).png"))
+                    } catch { print("ScreenCaptureKit probe:", error); fflush(stdout) }
+                    self.mode += 1; self.next()
+                }
             }
         }
     }
