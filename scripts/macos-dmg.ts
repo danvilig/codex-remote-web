@@ -44,6 +44,16 @@ export function finderLayoutScript(mount: string) {
 export { installationHelp } from './macos-guide.ts';
 import { installationHelp } from './macos-guide.ts';
 
+export async function detachMacVolume(mount: string, root: string) {
+  for (let attempt = 0; ; attempt++) {
+    try { await command(['hdiutil', 'detach', mount], root, { timeoutMs: 30_000 }); return; }
+    catch (error) {
+      if (attempt === 5 || !String(error).includes('Resource busy')) throw error;
+      await Bun.sleep(1000 * (attempt + 1));
+    }
+  }
+}
+
 export async function createMacDmg(app: string, installer: string, temp: string, root: string) {
   const image = join(temp, 'image'), mount = join(temp, 'mount'), writable = join(temp, 'installer-rw.dmg');
   await mkdir(join(image, '.background'), { recursive: true }); await mkdir(mount);
@@ -79,7 +89,7 @@ export async function createMacDmg(app: string, installer: string, temp: string,
     // The Finder view must be persisted in the image, not just the host prefs.
     await Bun.file(join(mount, '.DS_Store')).bytes();
   } finally {
-    if (mounted) await command(['hdiutil', 'detach', mount], root);
+    if (mounted) await detachMacVolume(mount, root);
   }
   await command(['hdiutil', 'convert', writable, '-format', 'UDZO', '-imagekey', 'zlib-level=9', '-o', installer], root);
   await command(['hdiutil', 'verify', installer], root);

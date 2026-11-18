@@ -4,13 +4,10 @@
 #import <AppKit/AppKit.h>
 #import <WebKit/WebKit.h>
 #import <objc/runtime.h>
-#import <sys/socket.h>
-#import <sys/un.h>
 #import <unistd.h>
 
 static NSInteger confirmationResponse = NSAlertFirstButtonReturn;
 static NSDictionary *lastConfirmation;
-static NSFileHandle *testOutput;
 static NSModalResponse testAlert(id self, SEL selector) {
     NSAlert *alert = self;
     lastConfirmation = @{ @"message": alert.messageText, @"detail": alert.informativeText,
@@ -26,9 +23,9 @@ static void reply(NSDictionary *request, id value, NSError *error) {
     NSDictionary *result = error ? @{ @"id": request[@"id"], @"error": error.localizedDescription } : @{ @"id": request[@"id"], @"value": value ?: NSNull.null };
     NSData *json = [NSJSONSerialization dataWithJSONObject:result options:NSJSONWritingFragmentsAllowed error:nil];
     if (!json) json = [NSJSONSerialization dataWithJSONObject:@{ @"id": request[@"id"], @"error": @"Non-JSON native result" } options:0 error:nil];
-    @synchronized (testOutput) {
-        [testOutput writeData:json];
-        [testOutput writeData:[@"\n" dataUsingEncoding:NSUTF8StringEncoding]];
+    @synchronized (NSFileHandle.fileHandleWithStandardOutput) {
+        [NSFileHandle.fileHandleWithStandardOutput writeData:json];
+        [NSFileHandle.fileHandleWithStandardOutput writeData:[@"\n" dataUsingEncoding:NSUTF8StringEncoding]];
     }
 }
 static void command(NSDictionary *request) {
@@ -58,11 +55,11 @@ static void command(NSDictionary *request) {
             }];
             return;
         }
-        reply(request, @{ @"visible": @(webView.window.visible != NO), @"minimized": @(webView.window.miniaturized != NO) }, nil);
+        reply(request, @{ @"visible": @(webView.window.visible), @"minimized": @(webView.window.miniaturized) }, nil);
     } else if ([action isEqual:@"runningApps"]) {
         NSArray *foreground = [NSRunningApplication runningApplicationsWithBundleIdentifier:NSBundle.mainBundle.bundleIdentifier];
         NSArray *background = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"io.github.danvilig.codex-remote-web.background"];
-        reply(request, @{ @"pid": @(getpid()), @"foreground": [foreground valueForKey:@"processIdentifier"], @"backgroundPolicies": [background valueForKey:@"activationPolicy"] }, nil);
+        reply(request, @{ @"foreground": [foreground valueForKey:@"processIdentifier"], @"backgroundPolicies": [background valueForKey:@"activationPolicy"] }, nil);
     } else if ([action isEqual:@"confirmation"]) {
         if (request[@"response"]) confirmationResponse = [request[@"response"] boolValue] ? NSAlertSecondButtonReturn : NSAlertFirstButtonReturn;
         reply(request, lastConfirmation ?: NSNull.null, nil);
@@ -91,18 +88,11 @@ static void command(NSDictionary *request) {
 __attribute__((constructor)) static void loadNativeTestDriver(void) {
     @autoreleasepool {
         if (![NSBundle.mainBundle.bundleIdentifier isEqual:@"io.github.danvilig.codex-remote-web"] || [NSProcessInfo.processInfo.arguments containsObject:@"--background-agent"]) return;
-        const char *path = getenv("CRW_NATIVE_TEST_SOCKET");
-        struct sockaddr_un address = { .sun_family = AF_UNIX };
-        if (!path || strlcpy(address.sun_path, path, sizeof(address.sun_path)) >= sizeof(address.sun_path)) return;
-        int connection = socket(AF_UNIX, SOCK_STREAM, 0);
-        if (connection < 0) return;
-        if (connect(connection, (struct sockaddr *)&address, SUN_LEN(&address))) { close(connection); return; }
-        testOutput = [[NSFileHandle alloc] initWithFileDescriptor:connection closeOnDealloc:YES];
         Method modal = class_getInstanceMethod(NSAlert.class, @selector(runModal));
         method_setImplementation(modal, (IMP)testAlert);
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             @autoreleasepool {
-                FILE *input = fdopen(dup(connection), "r"); char *line = NULL; size_t capacity = 0;
+                FILE *input = fdopen(dup(STDIN_FILENO), "r"); char *line = NULL; size_t capacity = 0;
                 while (getline(&line, &capacity, input) > 0) {
                     NSData *data = [NSData dataWithBytes:line length:strlen(line)];
                     NSDictionary *request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];

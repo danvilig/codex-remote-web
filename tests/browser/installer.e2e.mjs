@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { command } from '../../scripts/distribution.ts';
 import { macAppSize } from '../../scripts/macos-size.ts';
-import { dmgLayout } from '../../scripts/macos-dmg.ts';
+import { detachMacVolume, dmgLayout } from '../../scripts/macos-dmg.ts';
 import { macOSValidationSystem, macosMinimumVersion } from '../../scripts/macos-validation.ts';
 const root=resolve(import.meta.dir,'../..'),installer=process.env.CODEX_WEBUI_INSTALLER;
 assert.ok(installer,'Test the actual installer, not a replacement build');
@@ -97,7 +97,7 @@ try {
   await command(['osascript','-e',`tell application \"Finder\" to duplicate (POSIX file ${applePath(app)} as alias) to (POSIX file ${applePath(destination)} as alias)`],root,{timeoutMs:120_000});
   evidence.checks.installedSize=await macAppSize(join(destination,'Codex Remote Web.app'));
   assert.ok(evidence.checks.installedSize.allocatedBytes<evidence.checks.installedSize.logicalBytes*0.8,'Copying out of DMG must preserve the reduced disk allocation');
-  await command(['hdiutil','detach',mount],root);mounted=false;
+  await detachMacVolume(mount,root);mounted=false;
   const contents=join(destination,'Codex Remote Web.app/Contents');
   await command(['codesign','--verify','--deep','--strict',join(destination,'Codex Remote Web.app')],root);
   for(const binary of ['Resources/gateway/codex-remote-web','Helpers/Background.app']) {
@@ -140,7 +140,7 @@ try {
   await mkdir(join(root,'.artifacts'),{recursive:true});
   await writeFile(join(root,'.artifacts/macos-installation-check.json'),JSON.stringify(evidence,null,2)+'\n');
  }
- if(mounted)await command(['hdiutil','detach',mount],root);
+ if(mounted)await detachMacVolume(mount,root);
  if(installed)await msi(['/x',installer]);
  await rm(temp,{recursive:true,force:true});
 }
