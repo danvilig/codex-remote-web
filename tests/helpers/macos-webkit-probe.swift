@@ -36,7 +36,7 @@ final class Assets: NSObject, WKURLSchemeHandler {
         else { web.load(URLRequest(url: URL(string: "crw-probe://settings/index.html")!)) }
         DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
             self.web.evaluateJavaScript("({text:document.body.innerText,focus:document.hasFocus(),width:innerWidth,height:innerHeight})") { value, error in
-                print("PROBE", self.mode, "visible", self.window.isVisible, "occlusion", self.window.occlusionState.rawValue, "web", self.web.frame, "layer", self.web.isLayerBacked, "dom", value ?? "nil", "error", String(describing: error)); fflush(stdout)
+                print("PROBE", self.mode, "visible", self.window.isVisible, "occlusion", self.window.occlusionState.rawValue, "web", self.web.frame, "layer", self.web.layer != nil, "dom", value ?? "nil", "error", String(describing: error)); fflush(stdout)
                 let capture = Process(); capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
                 capture.arguments = ["-x", CommandLine.arguments[1] + "/macos-webkit-probe-\(self.mode).png"]
                 try! capture.run(); capture.waitUntilExit()
