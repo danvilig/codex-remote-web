@@ -20,7 +20,7 @@ permissions:
 jobs:
   macos-shell-compile:
     name: compile-native-shell-macos-27
-    runs-on: xcode-27-xlarge
+    runs-on: xcode-27
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -159,7 +159,7 @@ jobs:
     needs: packages
     # The official xcode-27 preview image runs macOS 27; verify sw_vers below
     # so a changing runner label can never masquerade as this OS coverage.
-    runs-on: xcode-27-xlarge
+    runs-on: xcode-27
     timeout-minutes: 25
     env:
       CODEX_WEBUI_EXPECT_MACOS_MAJOR: '27'
