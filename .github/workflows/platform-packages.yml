@@ -31,6 +31,11 @@ jobs:
         run: |
           xcrun swiftc -O -whole-module-optimization -target arm64-apple-macosx15.0 -framework AppKit -framework WebKit desktop/macos/App.swift -o "$RUNNER_TEMP/crw-native-shell"
           xcrun clang -dynamiclib -fobjc-arc -framework AppKit -framework WebKit -mmacosx-version-min=15.0 tests/helpers/macos-native-driver.m -o "$RUNNER_TEMP/crw-test-driver.dylib"
+      - name: Diagnose the system WebKit compositor independently
+        run: |
+          mkdir -p .artifacts
+          xcrun swiftc -target arm64-apple-macosx15.0 -framework AppKit -framework WebKit tests/helpers/macos-webkit-probe.swift -o "$RUNNER_TEMP/crw-webkit-probe"
+          "$RUNNER_TEMP/crw-webkit-probe" "$PWD/.artifacts"
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
