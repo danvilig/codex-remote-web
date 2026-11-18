@@ -4,7 +4,7 @@ import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { mkdtemp, mkdir, cp, writeFile, readFile, access, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { createServer } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { desktopConfig, desktopDirectory } from '../../src/shared/desktop-config.js';
@@ -29,30 +29,43 @@ await writeFile(codex, `#!/bin/sh\nif [ "\${1-}" = "--version" ]; then printf 'c
 await writePrivate(join(directory, 'config.json'), desktopConfig({ initialized: true, enabled: false, autostart: false, cwd: home, codex, port, language: 'en' }, home));
 const driver = join(home, 'NativeTestDriver.dylib');
 await command(['xcrun', 'clang', '-dynamiclib', '-fobjc-arc', '-framework', 'AppKit', '-framework', 'WebKit', '-mmacosx-version-min=15.0', join(root, 'tests/helpers/macos-native-driver.m'), '-o', driver], root, { stream: true, timeoutMs: 60000 });
-const env = { ...process.env, HOME: home, CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), DYLD_INSERT_LIBRARIES: driver };
-let application;
+const transport = await mkdtemp('/tmp/crw-native-driver-');
+let application, instance = 0;
 async function launch() {
-  const child = spawn(executable, [], { env, stdio: ['pipe', 'pipe', 'pipe'] });
-  child.stdin.on('error', () => {});
+  const socketPath = join(transport, `${++instance}.sock`);
+  const server = createServer();
+  const connected = new Promise(resolve => server.once('connection', resolve));
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(socketPath, resolve); });
+  const stderr = join(home, `native-${instance}.stderr`);
+  const variables = { HOME: home, PATH: process.env.PATH, CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), CODEX_WEBUI_APP_SERVER_MODE: 'isolated', DYLD_INSERT_LIBRARIES: driver, CRW_NATIVE_TEST_SOCKET: socketPath };
+  const launchOptions = Object.entries(variables).flatMap(([key, value]) => ['--env', `${key}=${value}`]);
+  const child = spawn('/usr/bin/open', ['-W', '-n', '--stderr', stderr, ...launchOptions, resolve(executable, '../../..')], { stdio: ['ignore', 'ignore', 'pipe'] });
   const pending = new Map(); let sequence = 0, logs = '';
   child.stderr.on('data', chunk => { logs += chunk; });
-  const lines = createInterface({ input: child.stdout });
+  const fail = error => { for (const item of pending.values()) { clearTimeout(item.timer); item.reject(error); } pending.clear(); };
+  child.on('error', fail);
+  child.on('exit', code => { fail(new Error(`Native app exited ${code}: ${logs}`)); });
+  let socket;
+  const request = async (action, extra = {}) => new Promise((resolve, reject) => {
+    const id = ++sequence;
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Native request timed out: ${action}; ${logs}`)); }, 30000);
+    pending.set(id, { resolve, reject, timer }); socket.write(JSON.stringify({ id, action, ...extra }) + '\n');
+  });
+  const evaluate = script => request('evaluate', { script });
+  const app = { child, request, evaluate, logs: async () => logs + await readFile(stderr, 'utf8').catch(() => ''), dispose() { socket?.destroy(); server.close(); } };
+  application = app;
+  try {
+    socket = await Promise.race([connected, delay(15000, null, { ref: false })]);
+    assert.ok(socket, `Launch Services app did not connect: ${await app.logs()}`);
+  } catch (error) { app.dispose(); throw error; }
+  server.close(); socket.on('error', fail);
+  const lines = createInterface({ input: socket });
   lines.on('line', line => {
     let reply; try { reply = JSON.parse(line); } catch { return; }
     const entry = pending.get(reply.id); if (!entry) return;
     pending.delete(reply.id); clearTimeout(entry.timer);
     if (reply.error) entry.reject(new Error(reply.error)); else entry.resolve(reply.value);
   });
-  child.on('error', error => { for (const item of pending.values()) { clearTimeout(item.timer); item.reject(error); } pending.clear(); });
-  child.on('exit', code => { for (const item of pending.values()) { clearTimeout(item.timer); item.reject(new Error(`Native app exited ${code}: ${logs}`)); } pending.clear(); });
-  const request = (action, extra = {}) => new Promise((resolve, reject) => {
-    const id = ++sequence;
-    const timer = setTimeout(() => { pending.delete(id); reject(new Error(`Native request timed out: ${action}; ${logs}`)); }, 30000);
-    pending.set(id, { resolve, reject, timer }); child.stdin.write(JSON.stringify({ id, action, ...extra }) + '\n');
-  });
-  const evaluate = script => request('evaluate', { script });
-  const app = { child, request, evaluate, logs: () => logs };
-  application = app;
   await waitFor(async () => evaluate("return Boolean(document.querySelector('#localAddress')?.textContent.startsWith('http://'))"), 'rendered native window');
   return app;
 }
@@ -61,10 +74,10 @@ async function waitFor(probe, label) {
   let last;
   while (Date.now() < deadline) {
     try { const result = await probe(); if (result) return result; } catch (error) { last = error; }
-    assert.ok(!application || application.child.exitCode === null, `Native app exited while waiting for ${label}: ${application?.logs()}`);
+    if (application?.child.exitCode !== null && application) throw new Error(`Native app exited while waiting for ${label}: ${await application.logs()}`);
     await delay(150);
   }
-  throw new Error(`Timed out waiting for ${label}: ${last?.message || application?.logs()}`);
+  throw new Error(`Timed out waiting for ${label}: ${last?.message || await application?.logs()}`);
 }
 const evaluate = script => application.evaluate(script);
 async function click(selector) {
@@ -81,7 +94,7 @@ async function closeApplication() {
   await current.request('quit');
   await waitFor(() => current.child.exitCode !== null, 'real tray exit');
   assert.equal(current.child.exitCode, 0);
-  current.child.stdin.destroy(); application = null;
+  current.dispose(); application = null;
 }
 const menus = [];
 try {
@@ -124,7 +137,7 @@ try {
     }, `restore ${mode} window`);
   }
   const runningApps = await application.request('runningApps');
-  assert.deepEqual(runningApps.foreground, [application.child.pid]);
+  assert.deepEqual(runningApps.foreground, [runningApps.pid]);
   assert.ok(runningApps.backgroundPolicies.every(policy => policy === 2), 'Background helper must not appear in the Dock');
   await click('[data-page=configuration]');
   assert.equal(await evaluate("return document.querySelector('#projectPath').value"), home);
@@ -182,7 +195,7 @@ try {
   await application.request('confirmation', { response: true });
   await click('[data-page=diagnostics]'); await click('#cleanUninstall');
   await waitFor(() => application.child.exitCode !== null, 'clean uninstall');
-  assert.equal(application.child.exitCode, 0); application = null;
+  assert.equal(application.child.exitCode, 0); application.dispose(); application = null;
   assert.equal(await readFile(sentinel, 'utf8'), 'fixture account');
   await assert.rejects(access(join(directory, 'config.json')));
   await assert.rejects(access(join(directory, 'agent.json')));
@@ -193,7 +206,7 @@ try {
   assert.ok(pixels > 100, `Visible native window lost its WebKit composite: ${pixels} sidebar ink pixels`);
   console.log('PASS: actual native WKWebView UI, restricted asset/bridge access, native menus/dialogs, saved settings/language, gateway continuity and clean uninstall');
 } catch (error) {
-  console.error('Native application diagnostics:', application?.logs());
+  console.error('Native application diagnostics:', await application?.logs());
   if (application) {
     console.error('Native rendered failure state:', await evaluate(`return {url:location.href,title:document.title,text:document.querySelector('#message')?.textContent,saveDisabled:document.querySelector('#save')?.disabled,invalid:[...document.querySelectorAll(':invalid')].map(n=>({id:n.id,value:n.value})),busy:[...document.querySelectorAll('[aria-busy]')].map(n=>({id:n.id,value:n.getAttribute('aria-busy')})),form:document.querySelector('#configuration')?.checkValidity()}`).catch(error=>error.message));
     await application.request('snapshot', {path:join(root,'.artifacts/macos-desktop-failure-webkit.png')}).catch(()=>{});
@@ -201,8 +214,9 @@ try {
   await command(['screencapture', '-x', join(root, '.artifacts/macos-desktop-failure.png')], root).catch(() => {});
   throw error;
 } finally {
-  await closeApplication().catch(() => { application?.child.kill(); });
+  await closeApplication().catch(() => { application?.dispose(); application?.child.kill(); });
   await agentRequest(directory, 'shutdown').catch(() => {});
   for (let i = 0; i < 100; i++) { try { await agentRequest(directory, 'status', undefined, { timeoutMs: 100 }); } catch { break; } await delay(100); }
   await rm(home, { recursive: true, force: true });
+  await rm(transport, { recursive: true, force: true });
 }
