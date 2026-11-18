@@ -2,8 +2,11 @@ import AppKit
 import WebKit
 import Darwin
 
-let resources = Bundle.main.resourceURL!
-let installation = Bundle.main.executableURL!.path
+let isBackground = Bundle.main.bundleIdentifier == "io.github.danvilig.codex-remote-web.background"
+let hostBundle = isBackground ? Bundle(url: Bundle.main.bundleURL.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent())! : Bundle.main
+let resources = hostBundle.resourceURL!
+let installation = hostBundle.executableURL!.path
+let backgroundExecutable = hostBundle.bundleURL.appendingPathComponent("Contents/Helpers/Background.app/Contents/MacOS/Background")
 let gateway = resources.appendingPathComponent("gateway/codex-remote-web")
 let desktopURL = URL(string: "crw-desktop://settings/index.html")!
 let environment = ProcessInfo.processInfo.environment.filter { $0.key != "DYLD_INSERT_LIBRARIES" }
@@ -83,11 +86,12 @@ final class BackgroundSession: NSObject, NSApplicationDelegate {
 }
 
 @MainActor
-final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
+final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegate, NSMenuItemValidation, WKNavigationDelegate, WKUIDelegate, WKScriptMessageHandlerWithReply {
     var window: NSWindow!, webView: WKWebView!
     @objc var statusItem: NSStatusItem!
     var locale = "en", uiLock: Int32 = -1
     var nativeStrings: [String: [String: String]] = [:]
+    var gatewayPhase = "", gatewayInitialized = false, menuActionRunning = false
     let assets = DesktopAssets()
     let backendActions: Set<String> = ["status", "dependencies", "config", "start", "stop", "restart", "setup", "language"]
     let nativeActions: Set<String> = ["chooseDirectory", "chooseCodex", "chooseCloudflared", "openWorkspace", "removeBackground", "cleanUninstall"]
@@ -117,6 +121,7 @@ final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegat
                 nativeStrings = try JSONSerialization.jsonObject(with: localization) as? [String: [String: String]] ?? [:]
                 try await ensureAgent()
                 let state = try await operation("status")
+                updateGateway(state)
                 locale = language(((state["value"] as? [String: Any])?["config"] as? [String: Any])?["language"] as? String ?? "system")
                 createWindow(); createMenus(); showSettings()
                 if CommandLine.arguments.contains("--open-workspace") { _ = try await perform("openWorkspace", NSNull()) }
@@ -124,14 +129,14 @@ final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegat
         }
     }
     func ensureAgent() async throws {
-        if (try? await operation("status")) != nil { return }
+        if try await operation("prepareAgent")["value"] as? Bool == true { return }
         let process = Process()
-        process.executableURL = Bundle.main.executableURL; process.arguments = ["--background-agent"]
+        process.executableURL = backgroundExecutable
         process.environment = environment
         process.standardInput = FileHandle.nullDevice; process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.standardError
         try process.run()
         for _ in 0..<100 {
-            if (try? await operation("status")) != nil { return }
+            if let state = try? await operation("status"), (state["value"] as? [String: Any])?["runtime"] as? String == "macos-native" { return }
             try await Task.sleep(for: .milliseconds(100))
         }
         throw DesktopError(message: "Background agent could not start. Check installation and private directory permissions.")
@@ -159,23 +164,34 @@ final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegat
         window.contentViewController = viewController; window.center()
         webView.load(URLRequest(url: desktopURL))
     }
-    func showSettings() { window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
-    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showSettings(); return true }
+    func showSettings() {
+        guard let window else { return }
+        NSApp.unhide(nil)
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showSettings(); return false }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
     func windowShouldClose(_ sender: NSWindow) -> Bool { sender.orderOut(nil); return false }
-    func applicationWillTerminate(_ notification: Notification) { if uiLock >= 0 { close(uiLock) } }
+    func applicationWillTerminate(_ notification: Notification) {
+        if let statusItem { NSStatusBar.system.removeStatusItem(statusItem) }
+        if uiLock >= 0 { close(uiLock) }
+    }
     func showError(_ error: Error) { let alert = NSAlert(); alert.messageText = "Codex Remote Web"; alert.informativeText = error.localizedDescription; alert.runModal() }
 
     func item(_ title: String, _ action: Selector?, _ key: String = "") -> NSMenuItem {
         let result = NSMenuItem(title: t(title), action: action, keyEquivalent: key)
         result.target = self; return result
     }
-    func gatewayMenu() -> NSMenu {
-        let menu = NSMenu()
-        menu.addItem(item("Settings", #selector(settings))); menu.addItem(item("Open workspace", #selector(workspace)))
-        menu.addItem(.separator()); menu.addItem(item("Start gateway", #selector(start))); menu.addItem(item("Stop gateway", #selector(stop)))
-        menu.addItem(.separator()); menu.addItem(item("Quit tray (gateway continues)", #selector(quit), "q"))
-        return menu
+    func menu(_ title: String, _ entries: [NSMenuItem]) -> NSMenu {
+        let result = NSMenu(title: t(title))
+        for entry in entries { result.addItem(entry) }
+        return result
+    }
+    func addMenu(_ submenu: NSMenu, to main: NSMenu) {
+        let top = NSMenuItem(title: submenu.title, action: nil, keyEquivalent: "")
+        top.submenu = submenu; main.addItem(top)
     }
     func createMenus() {
         if statusItem == nil {
@@ -184,31 +200,63 @@ final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegat
             image?.isTemplate = true; image?.size = NSSize(width: 20, height: 20)
             statusItem.button?.image = image; statusItem.button?.toolTip = "Codex Remote Web"
         }
-        statusItem.menu = gatewayMenu()
+        statusItem.menu = menu("Codex Remote Web", [item("Show main window", #selector(settings)), item("Open workspace", #selector(workspace)), .separator(), item("Start gateway", #selector(start)), item("Stop gateway", #selector(stop)), item("Restart gateway", #selector(restart)), .separator(), item("Quit App (gateway keeps running)", #selector(quit))])
         let main = NSMenu()
-        let application = NSMenuItem(title: "Codex Remote Web", action: nil, keyEquivalent: "")
-        application.submenu = gatewayMenu()
-        let hide = NSMenuItem(title: t("Hide Codex Remote Web"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
-        application.submenu!.insertItem(hide, at: 6)
-        main.addItem(application)
+        let hideOthers = NSMenuItem(title: t("Hide Others"), action: #selector(NSApplication.hideOtherApplications(_:)), keyEquivalent: "h")
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        addMenu(menu("Codex Remote Web", [item("About Codex Remote Web", #selector(about)), .separator(), item("Settings…", #selector(preferences), ","), .separator(), NSMenuItem(title: t("Hide Codex Remote Web"), action: #selector(NSApplication.hide(_:)), keyEquivalent: "h"), hideOthers, NSMenuItem(title: t("Show All"), action: #selector(NSApplication.unhideAllApplications(_:)), keyEquivalent: ""), .separator(), item("Quit Codex Remote Web", #selector(quit), "q")]), to: main)
         for (title, commands) in [
             ("Edit", [("Undo", Selector(("undo:")), "z"), ("Redo", Selector(("redo:")), "Z"), ("Cut", #selector(NSText.cut(_:)), "x"), ("Copy", #selector(NSText.copy(_:)), "c"), ("Paste", #selector(NSText.paste(_:)), "v"), ("Select All", #selector(NSText.selectAll(_:)), "a")]),
-            ("View", [("Toggle Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "")]),
+            ("View", [("Toggle Full Screen", #selector(NSWindow.toggleFullScreen(_:)), "f")]),
             ("Window", [("Minimize", #selector(NSWindow.performMiniaturize(_:)), "m"), ("Zoom", #selector(NSWindow.performZoom(_:)), ""), ("Close", #selector(NSWindow.performClose(_:)), "w")])
         ] {
-            let top = NSMenuItem(title: t(title), action: nil, keyEquivalent: ""), menu = NSMenu(title: t(title))
-            for (label, selector, key) in commands { menu.addItem(NSMenuItem(title: t(label), action: selector, keyEquivalent: key)) }
-            top.submenu = menu; main.addItem(top)
-            if title == "Window" { NSApp.windowsMenu = menu }
+            if title == "Window" {
+                addMenu(menu("Gateway", [item("Open workspace", #selector(workspace)), .separator(), item("Start gateway", #selector(start)), item("Stop gateway", #selector(stop)), item("Restart gateway", #selector(restart))]), to: main)
+            }
+            let submenu = menu(title, commands.map { label, selector, key in
+                let entry = NSMenuItem(title: t(label), action: selector, keyEquivalent: key)
+                if label == "Toggle Full Screen" { entry.keyEquivalentModifierMask = [.control, .command] }
+                return entry
+            })
+            if title == "Window" { submenu.addItem(.separator()); submenu.addItem(item("Show main window", #selector(settings))); NSApp.windowsMenu = submenu }
+            addMenu(submenu, to: main)
         }
+        let help = menu("Help", [item("Codex Remote Web Guide", #selector(openGuide))])
+        addMenu(help, to: main); NSApp.helpMenu = help
         NSApp.mainMenu = main
     }
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(workspace): return gatewayPhase == "running"
+        case #selector(start): return gatewayInitialized && ["stopped", "failed"].contains(gatewayPhase) && !menuActionRunning
+        case #selector(stop), #selector(restart): return gatewayPhase == "running" && !menuActionRunning
+        default: return true
+        }
+    }
+    func updateGateway(_ reply: [String: Any]) {
+        guard let state = reply["value"] as? [String: Any], let local = state["local"] as? [String: Any], let phase = local["phase"] as? String else { return }
+        gatewayPhase = phase; gatewayInitialized = (state["config"] as? [String: Any])?["initialized"] as? Bool == true
+    }
     @objc func settings() { showSettings() }
+    @objc func preferences() {
+        showSettings()
+        webView.evaluateJavaScript("document.querySelector('[data-page=configuration]')?.click()", completionHandler: nil)
+    }
+    @objc func about() { NSApp.orderFrontStandardAboutPanel(nil) }
+    @objc func openGuide() { NSWorkspace.shared.open(resources.appendingPathComponent("Install Guide.html")) }
     @objc func workspace() { run("openWorkspace") }
     @objc func start() { run("start") }
     @objc func stop() { run("stop") }
+    @objc func restart() { run("restart") }
     @objc func quit() { NSApp.terminate(nil) }
-    func run(_ action: String) { Task { do { _ = try await perform(action, NSNull()) } catch { showError(error) } } }
+    func run(_ action: String) {
+        guard !menuActionRunning else { return }
+        menuActionRunning = true
+        Task {
+            defer { menuActionRunning = false }
+            do { _ = try await perform(action, NSNull()) } catch { showError(error) }
+        }
+    }
     func confirmation(_ action: String) -> Bool {
         let clean = action == "cleanUninstall", alert = NSAlert()
         alert.alertStyle = clean ? .warning : .informational
@@ -245,6 +293,7 @@ final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegat
             return result
         }
         var reply = try await operation(action, body)
+        updateGateway(reply)
         if action == "config" || action == "language" {
             locale = language(((reply["value"] as? [String: Any])?["config"] as? [String: Any])?["language"] as? String ?? "system")
             createMenus()
@@ -276,10 +325,14 @@ final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegat
 // AppKit starts on the process main thread. Make that actor boundary explicit
 // for both the macOS 15 and current SDK compilers.
 MainActor.assumeIsolated {
-    let background = CommandLine.arguments.contains("--background-agent")
+    if !isBackground && CommandLine.arguments.contains("--background-agent") {
+        var arguments = [strdup(backgroundExecutable.path), nil]
+        arguments.withUnsafeMutableBufferPointer { buffer in _ = execv(backgroundExecutable.path, buffer.baseAddress!) }
+        exit(1)
+    }
     let app = NSApplication.shared
-    app.setActivationPolicy(background ? .prohibited : .regular)
-    let delegate: NSApplicationDelegate = background ? BackgroundSession() : DesktopApplication()
+    app.setActivationPolicy(isBackground ? .prohibited : .regular)
+    let delegate: NSApplicationDelegate = isBackground ? BackgroundSession() : DesktopApplication()
     app.delegate = delegate
     withExtendedLifetime(delegate) { app.run() }
 }

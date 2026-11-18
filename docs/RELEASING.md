@@ -94,7 +94,7 @@ Beta.1 目标为 Linux x64/arm64、macOS Apple Silicon（macOS 15+）和 Windows
 
 `.github/workflows/platform-packages.yml` 在 PR 中生成可审阅 Artifact。发布工作流复用同一矩阵，使用原生 `ubuntu-24.04`、`ubuntu-24.04-arm`、`macos-15` 和 `windows-2025` runner。只有固定版本标签、受保护 main 历史和该提交成功的 main-push Verify 才能发布；不能使用未合并的 PR Artifact 冒充正式 Release。
 
-macOS 仍在 `macos-15` 构建，`LSMinimumSystemVersion` 必须保持 `15.0`。新增 `validate-dmg-macos-27-arm64` 在官方 `xcode-27` 预览镜像上复用 `release-darwin-arm64` 的原始 DMG；先核对 SHA-256，再执行挂载、复制安装、签名、实际 Electron 启动、浅色/深色设置界面与后台回归，不重新打包。两端通过 `sw_vers` 强制断言分别为 macOS 15/27，输出 `macos-installation-check.json` 和安装窗口/设置截图。`validation-macos-27-arm64` 仅存验收证据，不以 `release-*` 命名，避免发布时混入重复的系统专属安装包或改变十个正式产物的数量。原生流水线须包含该验证任务成功，才能称交付 DMG 已覆盖两个系统；Safari 隔离与人工 Gatekeeper 允许仍需实机验收。
+macOS 仍在 `macos-15` 构建，`LSMinimumSystemVersion` 必须保持 `15.0`。`validate-dmg-macos-27-arm64` 在标准 `xcode-27` 运行器上复用 `release-darwin-arm64` 的原始 DMG；先核对 SHA-256，再执行挂载、复制安装、签名、原生 AppKit 启动、界面与后台回归，不重新打包。两端通过 `sw_vers` 强制断言分别为 macOS 15/27，输出 `macos-installation-check.json` 和安装窗口/设置截图。`validation-macos-27-arm64` 仅存验收证据，不以 `release-*` 命名，避免发布时混入重复的系统专属安装包或改变十个正式产物的数量。原生流水线须包含该验证任务成功，才能称交付 DMG 已覆盖两个系统；Safari 隔离与人工 Gatekeeper 允许仍需实机验收。
 
 每个平台校验冻结安装、构建、目标架构和实际便携归档。回归覆盖异目录启动、完整页面及静态资源、受限文件读取/编辑、私有回执及 UUID 去重、持久队列访问、真实终端。Linux/macOS 验证受保护的临时连接器；Windows 的 CLI/便携包和桌面入口均使用独立 loopback 端口及每次运行的随机 Host 凭据，并校验 HTTP/WebSocket 边界，不降级为可公开访问的无认证源站。Linux 完整 Verify、依赖审计、浏览器和 Docker 验证继续运行。
 
@@ -110,6 +110,8 @@ Mac 测试包在最终应用组装和权限归一化后，对全部 Mach-O、嵌
 
 安装背景使用 `tiffutil -cathidpicheck` 合并 680×480 和 1360×960 两个表示，维持 680×480 点的 Finder 布局。指南图标通过 AppKit 写入挂载卷的资源叉，压缩后重新挂载验证 Finder 标志和图标数据。静态安装背景保留一行英文拖拽指引；独立指南按系统语言显示，并提供中英文切换。桌面语言选择即时持久化，同步界面、状态栏菜单、应用菜单及确认框，无需停止网关。
 
-macOS 打包在签名前裁剪 Node 本地符号及未支持语言资源，保留中英文与所有运行时许可；签名完成后用 `ditto --hfsCompression` 将应用复制进 HFS+ DMG。原生回归重新挂载、保留压缩属性复制安装，并检查签名、实际启动及终端。`macos-package-size.json` 记录裁剪前后逻辑大小与卷内分配；`macos-installation-check.json` 记录卷内及安装后大小。不能以 DMG 下载大小代替安装体积；不支持透明压缩的目标文件系统可能恢复逻辑大小。
+macOS DMG 使用系统 AppKit/WKWebView，并用单一 Bun 运行时提供网关、原生 PTY 和隔离工作进程。便携包与 Windows/Linux 桌面包继续保留各自的 Node 和 node-pty。签名完成后用 `ditto --hfsCompression` 将应用复制进 HFS+ DMG。`macos-package-size.json` 记录打包前后的逻辑大小与卷内分配；`macos-installation-check.json` 记录 Finder 复制安装后的实际大小。不支持透明压缩的目标文件系统可能恢复逻辑大小。
+
+macOS 的后台助手拥有独立的 Launch Services 身份，不显示在 Dock。退出应用会关闭主界面和菜单栏图标，网关继续运行；通过 Dock、Finder 或状态菜单可重新打开主窗口。重新安装时，仍在运行的同路径旧版后台代理会在首次打开时正常停止，并由新版本按原有设置恢复。
 
 诊断页保留“停止并移除后台组件”，另提供“清理并卸载”。确认后停止自有进程、移除登录项、清除应用设置、缓存和已保存的管理令牌；Mac 应用移入废纸篓。项目、`~/.codex` 与独立 headless 部署不在删除列表内。存在远程部署或未完成的恢复时拒绝清理，用户须先在远程访问页处理，防止删除云端资源的恢复记录。后台目录仅保留无个人信息的稳定锁与代际标记，以维护并发/旧回滚令牌边界；未知文件保留。

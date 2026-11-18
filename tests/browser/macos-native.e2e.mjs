@@ -111,7 +111,21 @@ try {
     }
     print(count)
   `, onscreen, String(geometry.left), String(geometry.top), String(geometry.screenWidth)], root));
-  assert.ok(pixels > 100, `Visible native window lost its WebKit composite: ${pixels} sidebar ink pixels`);
+  for (const mode of ['close', 'minimize']) {
+    await application.request('window', {mode});
+    await waitFor(async () => {
+      const state = await application.request('window');
+      return mode === 'close' ? !state.visible : state.minimized;
+    }, `${mode} main window`);
+    assert.equal(await application.request('window', {mode:'reopen'}), true, 'Launch Services must reopen the existing GUI process');
+    await waitFor(async () => {
+      const state = await application.request('window');
+      return state.visible && !state.minimized;
+    }, `restore ${mode} window`);
+  }
+  const runningApps = await application.request('runningApps');
+  assert.deepEqual(runningApps.foreground, [application.child.pid]);
+  assert.ok(runningApps.backgroundPolicies.every(policy => policy === 2), 'Background helper must not appear in the Dock');
   await click('[data-page=configuration]');
   assert.equal(await evaluate("return document.querySelector('#projectPath').value"), home);
   for (const theme of ['light', 'dark']) {
@@ -121,11 +135,14 @@ try {
     await application.request('snapshot', { path: join(root, `.artifacts/macos-desktop-settings-${theme}.png`) });
   }
   await select('#desktopTheme', 'system');
-  for (const [language, expected, title] of [['zh', ['设置', '打开工作区', '启动网关', '停止网关', '退出托盘（网关继续运行）'], '网关设置'], ['en', ['Settings', 'Open workspace', 'Start gateway', 'Stop gateway', 'Quit tray (gateway continues)'], 'Gateway settings']]) {
+  for (const [language, expected, title] of [['zh', ['显示主窗口', '打开工作区', '启动网关', '停止网关', '重启网关', '退出应用（网关继续运行）'], '网关设置'], ['en', ['Show main window', 'Open workspace', 'Start gateway', 'Stop gateway', 'Restart gateway', 'Quit App (gateway keeps running)'], 'Gateway settings']]) {
     await select('#desktopLanguage', language);
     await waitFor(async () => await ready() && await evaluate(`return document.querySelector('#pageTitle').textContent === ${JSON.stringify(title)}`), language + ' rendered language');
     const native = await application.request('menus');
-    assert.deepEqual(native.tray, expected); assert.equal(native.app[1], language === 'zh' ? '编辑' : 'Edit');
+    assert.deepEqual(native.tray, expected);
+    assert.deepEqual(native.app, language === 'zh' ? ['Codex Remote Web', '编辑', '显示', '网关', '窗口', '帮助'] : ['Codex Remote Web', 'Edit', 'View', 'Gateway', 'Window', 'Help']);
+    assert.ok(native.commands['Codex Remote Web'].includes(language === 'zh' ? '设置…' : 'Settings…'));
+    assert.deepEqual(native.commands[language === 'zh' ? '网关' : 'Gateway'], expected.slice(1, 5));
     menus.push({ language, ...native });
     await click('[data-page=diagnostics]'); await click('#removeBackground');
     await waitFor(async () => (await application.request('confirmation'))?.buttons?.[0] === (language === 'zh' ? '取消' : 'Cancel'), 'localized native confirmation');
@@ -172,6 +189,8 @@ try {
   await assert.rejects(access(legacy));
   await assert.rejects(access(executable), 'Disposable application moves to Trash');
   await writeFile(join(root, '.artifacts/macos-native-menus.json'), JSON.stringify(menus, null, 2) + '\n');
+  await writeFile(join(root, '.artifacts/macos-desktop-lifecycle.json'), JSON.stringify({ ...runningApps, closeAndMinimizeReopen: true, quitWithGatewayContinuity: true, relaunchAndCleanUninstall: true, sidebarInkPixels: pixels }, null, 2) + '\n');
+  assert.ok(pixels > 100, `Visible native window lost its WebKit composite: ${pixels} sidebar ink pixels`);
   console.log('PASS: actual native WKWebView UI, restricted asset/bridge access, native menus/dialogs, saved settings/language, gateway continuity and clean uninstall');
 } catch (error) {
   console.error('Native application diagnostics:', application?.logs());

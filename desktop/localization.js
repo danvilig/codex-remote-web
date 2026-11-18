@@ -20,6 +20,9 @@ const chinese = {
   Undo: '撤销', Redo: '重做', Cut: '剪切', Copy: '复制', Paste: '粘贴', 'Select All': '全选',
   Minimize: '最小化', Zoom: '缩放', 'Toggle Full Screen': '切换全屏', Close: '关闭窗口',
   'Hide Codex Remote Web': '隐藏 Codex Remote Web', 'Hide Others': '隐藏其他应用', 'Show All': '显示全部',
+  'About Codex Remote Web': '关于 Codex Remote Web', 'Settings…': '设置…', 'Quit Codex Remote Web': '退出 Codex Remote Web',
+  Gateway: '网关', 'Restart gateway': '重启网关', Help: '帮助', 'Codex Remote Web Guide': 'Codex Remote Web 指南',
+  'Show main window': '显示主窗口', 'Quit App (gateway keeps running)': '退出应用（网关继续运行）',
 };
 export const nativeTranslations = { en: {}, 'zh-CN': chinese };
 export function nativeText(message, locale) { return locale === 'zh-CN' ? chinese[message] || message : message; }

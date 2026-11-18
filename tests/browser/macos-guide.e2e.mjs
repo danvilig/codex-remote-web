@@ -10,7 +10,7 @@ try {
     await page.setViewportSize({ width, height });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.setContent(installationHelp);
-    await page.waitForFunction(() => document.querySelector('h1').textContent.length > 0);
+    await page.waitForFunction(() => document.querySelector('.intro').textContent.length > 0);
     assert.equal(await page.locator('html').getAttribute('lang'), 'en');
     assert.equal(/[\u3400-\u9fff]/.test(await page.locator('main').innerText()), false, 'English guide must not show parallel Chinese copy');
     assert.equal(await page.locator('.arrow').evaluate(el => getComputedStyle(el).animationName), 'drift');
@@ -21,7 +21,8 @@ try {
     await page.screenshot({ path: artifact(`macos-guide-${name}.png`), fullPage: true });
     await page.locator('#language').selectOption('zh');
     assert.equal(await page.locator('html').getAttribute('lang'), 'zh-CN');
-    assert.equal(await page.locator('h1').textContent(), '为你的工作区，就位。');
+    assert.equal(await page.locator('h1').textContent(), 'Codex Remote Web');
+    assert.match(await page.locator('.features').innerText(), /在浏览器里工作.*让网关保持运行.*从其他设备连接/s);
     assert.equal(await page.getByText('Drag Codex Remote Web into Applications.', {exact:true}).count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.screenshot({ path: artifact(`macos-guide-${name}-zh.png`), fullPage: true });

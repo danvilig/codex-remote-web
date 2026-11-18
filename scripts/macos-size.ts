@@ -1,6 +1,5 @@
 import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { command } from './distribution.ts';
 
 // Count inode blocks as well as logical bytes: Finder's apparent size and
 // actual disk allocation differ for transparently compressed macOS files.
@@ -17,16 +16,4 @@ export async function macAppSize(path: string) {
   }
   await visit(path);
   return result;
-}
-export async function trimMacApp(app: string, root: string) {
-  const before = await macAppSize(app);
-  // The native AppKit/WebKit shell has no Chromium payload. Strip only
-  // Node's debug/local symbols; the compiled Bun image must stay intact.
-  // All signatures are rebuilt after this final mutation.
-  await command(['strip', '-S', '-x', join(app, 'Contents/Resources/gateway/runtime/node')], root);
-  return { before, trimmed: await macAppSize(app), components: {
-    shell: await macAppSize(join(app, 'Contents/MacOS')),
-    gateway: await macAppSize(join(app, 'Contents/Resources/gateway')),
-    node: await macAppSize(join(app, 'Contents/Resources/gateway/runtime')),
-  } };
 }

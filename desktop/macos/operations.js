@@ -18,6 +18,22 @@ export async function macOperation(installation, action, body, { directory = des
   body ??= undefined;
   const options = { executable: installation, directory };
   const request = (name, value) => agentRequest(directory, name, value, { expectedInstallation: installation });
+  if (action === 'prepareAgent') {
+    const unavailable = error => ['AGENT_ABSENT', 'AGENT_OFFLINE'].includes(error.code);
+    async function current() {
+      try { return await agentRequest(directory, 'status', undefined, { expectedInstallation: installation, timeoutMs: 3000 }); }
+      catch (error) { if (unavailable(error)) return null; throw error; }
+    }
+    const running = await current();
+    if (!running) return false;
+    if (running.runtime === 'macos-native') return true;
+    await request('shutdown');
+    for (let attempt = 0; attempt < 150; attempt++) {
+      if (!await current()) return false;
+      await Bun.sleep(200);
+    }
+    throw new Error('Previous background agent is still shutting down. Try opening the application again.');
+  }
   if (action === 'removeBackground' || action === 'cleanUninstall') {
     if (action === 'cleanUninstall') await request('cleanupCheck');
     await uninstallBackground(options, installation);

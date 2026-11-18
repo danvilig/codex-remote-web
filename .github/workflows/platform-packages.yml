@@ -166,6 +166,7 @@ jobs:
             .artifacts/macos-installation-check.json
             .artifacts/macos-package-size.json
             .artifacts/macos-native-menus.json
+            .artifacts/macos-desktop-lifecycle.json
           if-no-files-found: error
 
   macos-27:
@@ -217,4 +218,5 @@ jobs:
             .artifacts/macos-installation-check.json
             .artifacts/macos-package-size.json
             .artifacts/macos-native-menus.json
+            .artifacts/macos-desktop-lifecycle.json
           if-no-files-found: error

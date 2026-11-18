@@ -100,13 +100,15 @@ try {
   await command(['hdiutil','detach',mount],root);mounted=false;
   const contents=join(destination,'Codex Remote Web.app/Contents');
   await command(['codesign','--verify','--deep','--strict',join(destination,'Codex Remote Web.app')],root);
-  for(const binary of ['gateway/codex-remote-web','gateway/runtime/node','gateway/node_modules/node-pty/build/Release/pty.node','gateway/node_modules/node-pty/build/Release/spawn-helper']) {
-   await command(['codesign','--verify','--strict',join(contents,'Resources',binary)],root);
+  for(const binary of ['Resources/gateway/codex-remote-web','Helpers/Background.app']) {
+   await command(['codesign','--verify','--strict',join(contents,binary)],root);
   }
   evidence.checks.relocatedApplicationAndRuntimeSignatures=true;
   await assert.rejects(access(join(contents,'Frameworks/Electron Framework.framework')),'Native macOS application must not bundle Chromium');
-  assert.ok(evidence.checks.installedSize.logicalBytes<250_000_000,'Native shell must reduce actual payload, not only filesystem allocation');
-  assert.ok(evidence.checks.installedSize.allocatedBytes<130_000_000,'Native shell disk budget');
+  await assert.rejects(access(join(contents,'Resources/gateway/runtime/node')),'macOS DMG must not bundle a second JS runtime');
+  await assert.rejects(access(join(contents,'Resources/gateway/node_modules/node-pty')));
+  assert.ok(evidence.checks.installedSize.logicalBytes<122_000_000,'Compact native payload budget');
+  assert.ok(evidence.checks.installedSize.allocatedBytes<62_000_000,'Compact native disk budget');
   evidence.checks.desktopRuntime='system AppKit/WebKit';
   process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(contents,'MacOS/Codex Remote Web');
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=join(contents,'Resources/gateway');

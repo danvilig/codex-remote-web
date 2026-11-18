@@ -5,7 +5,6 @@ import { createHash } from 'node:crypto';
 import { buildDesktop } from './desktop.ts';
 import { command } from './distribution.ts';
 import { signMacApp } from './macos-sign.ts';
-import { trimMacApp } from './macos-size.ts';
 import { nativeMacDesktop } from './macos-desktop.ts';
 
 const root = resolve(import.meta.dir, '..');
@@ -21,9 +20,7 @@ export async function desktopPackage(gateway: string, output: string) {
     const destination = await nativeMacDesktop(gateway, output, root, pkg);
     await distributionPermissions(destination);
     const application = join(destination, 'Codex Remote Web.app');
-    const size = await trimMacApp(application, root);
     await signMacApp(application);
-    await writeFile(join(root, '.artifacts/macos-package-size.json'), JSON.stringify(size, null, 2) + '\n');
     return destination;
   }
   const temp = await mkdtemp(join(output, '.desktop-'));

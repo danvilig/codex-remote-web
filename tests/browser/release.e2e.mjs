@@ -46,6 +46,7 @@ try {
   for (const image of documentationImages) assert.deepEqual(readFileSync(join(unpacked,image)),readFileSync(join(root,image)),`README image missing or changed in archive: ${image}`);
   assert.ok(existsSync(join(unpacked,'dist/isolated-worker.js')),'Packaged desktop isolated supervisor is required');
   const manifest=JSON.parse(readFileSync(join(unpacked,'release.json'),'utf8'));assert.equal(manifest.version,pkg.version);
+  const compactMac = portable && manifest.desktopRuntime === 'macos-native';
   if (existsSync(join(root,'SOURCE_PROVENANCE.json'))) {
     const provenance=JSON.parse(readFileSync(join(root,'SOURCE_PROVENANCE.json'),'utf8'));
     assert.equal(manifest.source,'public-snapshot');assert.equal(manifest.developmentCommit,provenance.developmentCommit);
@@ -64,14 +65,15 @@ try {
   // writable HOME. This also exercises installation on sandboxed release hosts.
   if (!portable) await run(['bun','install','--production','--frozen-lockfile'],unpacked,{BUN_INSTALL_CACHE_DIR:join(fixture,'bun-cache')});
   // PTY is a native dependency: validate source rebuild with installed headers, without downloading Node.
-  const nodePath=portable?join(unpacked,'runtime',target.node):realpathSync(Bun.which('node'));
+  const nodePath=portable&&!compactMac?join(unpacked,'runtime',target.node):realpathSync(Bun.which('node'));
   if (!portable) await run(['npm','rebuild','node-pty'],unpacked,{npm_config_nodedir:dirname(dirname(nodePath)),npm_config_cache:join(fixture,'npm-cache')});
   const executable=join(unpacked,target.executable);
   if (portable) {
     assert.equal(manifest.platform,process.platform);assert.equal(manifest.distribution,'portable');assert.equal(manifest.arch,process.arch);assert.equal(manifest.runtimeIncluded,true);
     assert.match(await run([executable,'--version'],fixture),new RegExp(pkg.version.replaceAll('.','\\.')));
     assert.match(await run([executable,'--help'],fixture),/Usage: codex-remote-web/);
-    assert.ok(readFileSync(join(unpacked,'runtime/NODE-LICENSE'),'utf8').includes('Node'));
+    if (compactMac) assert.equal(existsSync(join(unpacked,'runtime/NODE-LICENSE')),false);
+    else assert.ok(readFileSync(join(unpacked,'runtime/NODE-LICENSE'),'utf8').includes('Node'));
     assert.ok(readFileSync(join(unpacked,'runtime/BUN-LICENSE.md'),'utf8').includes('JavaScriptCore'));
     assert.ok(existsSync(join(unpacked,'dist/portable.js')),'Include relinkable application bundle');
   }
@@ -145,9 +147,11 @@ try {
   const ws=new WebSocket(`ws://127.0.0.1:${port}/terminal?cwd=${encodeURIComponent(project)}`);
   let terminal='';ws.on('message',data=>{terminal+=String(data);});
   await new Promise((resolve,reject)=>{ws.on('open',resolve);ws.on('error',reject);});
-  ws.send(Buffer.from(windows ? "echo PACKAGED_PTY_OK\r\nexit\r\n" : "printf 'PACKAGED_PTY_OK\\n'\nexit\n"));
+  if (compactMac) ws.send(JSON.stringify({type:'resize',cols:112,rows:37}));
+  ws.send(Buffer.from(windows ? "echo PACKAGED_PTY_OK\r\nexit\r\n" : compactMac ? "/bin/test -t 0 && /usr/bin/stty size\nprintf 'PACKAGED_PTY_OK\\n'\nexit\n" : "printf 'PACKAGED_PTY_OK\\n'\nexit\n"));
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{ws.terminate();reject(new Error('Packaged terminal timed out'));},15000);ws.on('close',()=>{clearTimeout(timer);resolve();});});
   assert.match(terminal,windows ? /(?:\r|\n)PACKAGED_PTY_OK(?:\r?\n|\x1b\[)/ : /(?:\r|\n)PACKAGED_PTY_OK\r?\n/);
+  if (compactMac) assert.match(terminal, /(?:\r|\n)37 112\r?\n/, 'Real PTY receives the new window size');
   let csrf,setupCookie;const base=`http://127.0.0.1:${port}`;
   const setupRequest=async(path,body)=>{
     const response=await fetch(base+'/api/setup/'+path,{method:body===undefined?'GET':'POST',headers:{origin:base,'x-setup-request':'1','content-type':'application/json',...(csrf?{'x-setup-csrf':csrf}:{}),...(setupCookie?{cookie:setupCookie}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});

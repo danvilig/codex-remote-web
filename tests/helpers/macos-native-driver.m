@@ -39,7 +39,27 @@ static void command(NSDictionary *request) {
         NSStatusItem *item = [(NSObject *)NSApp.delegate valueForKey:@"statusItem"];
         NSMutableArray *titles = [NSMutableArray array];
         for (NSMenuItem *entry in item.menu.itemArray) if (!entry.separatorItem) [titles addObject:entry.title];
-        reply(request, @{ @"tray": titles, @"app": [NSApp.mainMenu.itemArray valueForKey:@"title"] }, nil);
+        NSMutableDictionary *commands = [NSMutableDictionary dictionary];
+        for (NSMenuItem *top in NSApp.mainMenu.itemArray) {
+            [top.submenu update];
+            commands[top.title] = top.submenu ? [top.submenu.itemArray filteredArrayUsingPredicate:[NSPredicate predicateWithFormat:@"separatorItem == NO"]] : @[];
+            commands[top.title] = [commands[top.title] valueForKey:@"title"];
+        }
+        reply(request, @{ @"tray": titles, @"app": [NSApp.mainMenu.itemArray valueForKey:@"title"], @"commands": commands }, nil);
+    } else if ([action isEqual:@"window"]) {
+        if ([request[@"mode"] isEqual:@"close"]) [webView.window performClose:nil];
+        if ([request[@"mode"] isEqual:@"minimize"]) [webView.window performMiniaturize:nil];
+        if ([request[@"mode"] isEqual:@"reopen"]) {
+            [NSWorkspace.sharedWorkspace openApplicationAtURL:NSBundle.mainBundle.bundleURL configuration:NSWorkspaceOpenConfiguration.configuration completionHandler:^(NSRunningApplication *app, NSError *error) {
+                reply(request, @(app.processIdentifier == getpid()), error);
+            }];
+            return;
+        }
+        reply(request, @{ @"visible": @(webView.window.visible), @"minimized": @(webView.window.miniaturized) }, nil);
+    } else if ([action isEqual:@"runningApps"]) {
+        NSArray *foreground = [NSRunningApplication runningApplicationsWithBundleIdentifier:NSBundle.mainBundle.bundleIdentifier];
+        NSArray *background = [NSRunningApplication runningApplicationsWithBundleIdentifier:@"io.github.danvilig.codex-remote-web.background"];
+        reply(request, @{ @"foreground": [foreground valueForKey:@"processIdentifier"], @"backgroundPolicies": [background valueForKey:@"activationPolicy"] }, nil);
     } else if ([action isEqual:@"confirmation"]) {
         if (request[@"response"]) confirmationResponse = [request[@"response"] boolValue] ? NSAlertSecondButtonReturn : NSAlertFirstButtonReturn;
         reply(request, lastConfirmation ?: NSNull.null, nil);

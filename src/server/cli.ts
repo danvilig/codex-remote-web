@@ -1,4 +1,5 @@
 import { version } from '../../package.json';
+import { nativeMacRuntime } from './config/paths.js';
 
 const command = process.argv[2];
 if (command === '--version' || command === '-v') {
@@ -14,6 +15,12 @@ uninstall-desktop: stop and unregister this user's desktop background component.
 Configure your project with CODEX_WEBUI_CWD. Keep this installation directory
 intact: public assets, runtime and terminal workers accompany the executable.
 Codex CLI is required; cloudflared is needed for remote access.`);
+} else if (nativeMacRuntime && command === 'worker-isolated') {
+  await import('./bridge/isolated-worker.js');
+} else if (nativeMacRuntime && command === 'worker-connector') {
+  await import('./desktop/connector-worker.js');
+} else if (nativeMacRuntime && command === 'worker-quick') {
+  await import('./setup/quick-worker.js');
 } else if (command === 'native-operation' && process.platform === 'darwin') {
   const { nativeOperationInput } = await import('../../desktop/macos/operations.js');
   await nativeOperationInput(process.argv[3]);
