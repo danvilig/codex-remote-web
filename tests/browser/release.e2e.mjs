@@ -147,8 +147,9 @@ try {
   const ws=new WebSocket(`ws://127.0.0.1:${port}/terminal?cwd=${encodeURIComponent(project)}`);
   let terminal='';ws.on('message',data=>{terminal+=String(data);});
   await new Promise((resolve,reject)=>{ws.on('open',resolve);ws.on('error',reject);});
+  const stty = process.platform === 'darwin' ? '/bin/stty' : '/usr/bin/stty';
   if (compactMac) ws.send(JSON.stringify({type:'resize',cols:112,rows:37}));
-  ws.send(Buffer.from(windows ? "echo PACKAGED_PTY_OK\r\nexit\r\n" : compactMac ? "/bin/test -t 0 && /usr/bin/stty size\nprintf 'PACKAGED_PTY_OK\\n'\nexit\n" : "printf 'PACKAGED_PTY_OK\\n'\nexit\n"));
+  ws.send(Buffer.from(windows ? "echo PACKAGED_PTY_OK\r\nexit\r\n" : compactMac ? `/bin/test -t 0 && ${stty} size\nprintf 'PACKAGED_PTY_OK\\n'\nexit\n` : "printf 'PACKAGED_PTY_OK\\n'\nexit\n"));
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{ws.terminate();reject(new Error('Packaged terminal timed out'));},15000);ws.on('close',()=>{clearTimeout(timer);resolve();});});
   assert.match(terminal,windows ? /(?:\r|\n)PACKAGED_PTY_OK(?:\r?\n|\x1b\[)/ : /(?:\r|\n)PACKAGED_PTY_OK\r?\n/);
   if (compactMac) assert.match(terminal, /(?:\r|\n)37 112\r?\n/, 'Real PTY receives the new window size');
