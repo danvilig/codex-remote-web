@@ -70,7 +70,7 @@ jobs:
             arch: x64
             runner: windows-2025
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+    timeout-minutes: 45
     env:
       TARGET_OS: ${{ matrix.os }}
       TARGET_ARCH: ${{ matrix.arch }}
@@ -114,9 +114,12 @@ jobs:
         if: runner.os == 'macOS'
         run: bun test tests/live/macos-signing.test.ts
       - run: bun test tests/unit/desktop.test.ts tests/unit/desktop-session-recovery.test.ts tests/unit/desktop-uninstall.test.ts tests/unit/desktop-isolated.test.ts
-      - name: Install Linux desktop runtime dependencies
+      - name: Install pinned Rust for the system WebView shell
+        if: runner.os != 'macOS'
+        run: rustup toolchain install 1.95.0 --profile minimal
+      - name: Install Linux system WebView build and test dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-0t64 libnss3 libxss1 libasound2t64 libgbm1 xvfb
+        run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libxdo-dev librsvg2-dev xvfb dbus-x11 at-spi2-core python3-pyatspi
       - name: Verify NTFS privacy boundaries
         if: runner.os == 'Windows'
         run: bun test tests/live/windows-acl.test.ts
@@ -145,6 +148,8 @@ jobs:
             .artifacts/macos-package-size.json
             .artifacts/macos-native-menus.json
             .artifacts/macos-desktop-lifecycle.json
+            .artifacts/linux-desktop-installation.json
+            .artifacts/windows-desktop-installation.json
           if-no-files-found: error
 
   macos-27:

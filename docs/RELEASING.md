@@ -98,7 +98,7 @@ macOS 在 `macos-15` 构建，`LSMinimumSystemVersion` 必须保持 `15.0`。mac
 
 每个平台校验冻结安装、构建、目标架构和实际便携归档。回归覆盖异目录启动、完整页面及静态资源、受限文件读取/编辑、私有回执及 UUID 去重、持久队列访问、真实终端。Linux/macOS 验证受保护的临时连接器；Windows 的 CLI/便携包和桌面入口均使用独立 loopback 端口及每次运行的随机 Host 凭据，并校验 HTTP/WebSocket 边界，不降级为可公开访问的无认证源站。Linux 完整 Verify、依赖审计、浏览器和 Docker 验证继续运行。
 
-桌面安装包使用已通过测试的便携网关资源和锁定 Electron 构建。macOS runner 挂载 DMG、复制 `.app` 到含空格路径并运行真实桌面窗口/后台生命周期回归。Windows 使用固定 WiX 5.0.2 构建 per-user MSI，实际静默安装、检查开始菜单、运行回归、卸载并确认自有程序和快捷方式清理；另验证 NTFS 宽泛 ACL 和 junction 拒绝。Linux 两种架构安装实际 DEB，在 Xvfb 中验证沙箱窗口、退出托盘后网关继续运行、重新连接及停止，再移除 DEB。GUI 人工操作、TCC/Gatekeeper/SmartScreen 提示、真实注销/登录与公网邮箱验证仍需单独验收，自动化不冒充人工验收。
+桌面安装包使用已通过测试的便携网关。Windows/Linux 使用 Rust 1.95.0 与锁定 Cargo 依赖，分别链接系统 WebView2 和 WebKitGTK；macOS 仍使用 AppKit/WKWebView。Windows 以 WiX 5.0.2 构建 per-user MSI，实际安装、验证快捷方式和卸载；Linux 两种架构安装实际 DEB 并在 Xvfb 测试。两端使用系统无障碍接口操作安装后的窗口，报告安装包大小、逻辑字节和磁盘分配。发布验证安装报告的源提交和 SHA-256。TCC/Gatekeeper/SmartScreen 提示、真实注销/登录与公网邮箱验证仍需另行验收。
 
 Beta.2 共十个安装/归档文件：macOS DMG、Windows MSI、两种 Linux 架构的桌面 DEB、四个系统/架构的 CLI 便携包，以及两种 Linux 架构的原生部署包。Windows 便携包为 zip，其他归档为 tar.gz；每个文件附带同名 `.sha256`，汇总 `SHA256SUMS` 共十项。下载一个包时只核对它的校验文件，下载全部包时可用 `sha256sum -c SHA256SUMS`。GitHub 自动提供源码下载，无需重复上传源码包。
 

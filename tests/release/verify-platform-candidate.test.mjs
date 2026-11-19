@@ -19,9 +19,9 @@ async function candidate(t, failure = false) {
   };
   const archives = {
     'darwin-arm64/release': ['macos-arm64.dmg', 'macos-arm64.tar.gz'],
-    'win32-x64': ['windows-x64.msi', 'windows-x64.zip'],
-    'linux-arm64': ['linux-arm64.tar.gz', 'desktop-linux-arm64.deb', 'deployment-linux-arm64.tar.gz'],
-    'linux-x64': ['linux-x64.tar.gz', 'desktop-linux-x64.deb', 'deployment-linux-x64.tar.gz'],
+    'win32-x64/release': ['windows-x64.msi', 'windows-x64.zip'],
+    'linux-arm64/release': ['linux-arm64.tar.gz', 'desktop-linux-arm64.deb', 'deployment-linux-arm64.tar.gz'],
+    'linux-x64/release': ['linux-x64.tar.gz', 'desktop-linux-x64.deb', 'deployment-linux-x64.tar.gz'],
   };
   for (const [platform, suffixes] of Object.entries(archives)) {
     for (const suffix of suffixes) {
@@ -29,6 +29,14 @@ async function candidate(t, failure = false) {
       const path = `release-${platform}/${name}`;
       await write(path, 'archive fixture');
       await write(`${path}.sha256`, `${hash}  ${name}\n`);
+      if (/\.(?:msi|deb)$/.test(name)) {
+        const [os, arch] = platform.split('/')[0].split('-'), windows = os === 'win32';
+        await write(`release-${platform.split('/')[0]}/${windows ? 'windows' : 'linux'}-desktop-installation.json`, {
+          format: 1, platform: os, arch, renderer: windows ? 'system-webview2' : 'system-webkitgtk', sourceCommit: sha,
+          installer: name, sha256: hash, installerBytes: Buffer.byteLength('archive fixture'), installed: { allocatedBytes: 32768, logicalBytes: 21777 },
+          nativeControls: true, gatewaySurvivedWindowExit: true, uninstall: true,
+        });
+      }
     }
   }
   const conclusion = failure ? 'failure' : 'success';

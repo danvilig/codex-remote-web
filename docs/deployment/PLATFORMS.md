@@ -1,6 +1,6 @@
 # Desktop gateway / 桌面网关
 
-The macOS DMG uses an AppKit status bar/window and the system WKWebView. Windows per-user MSI and Linux desktop DEB use Electron for the settings interface. All three ship the native Go gateway and native terminal; standalone archives provide the command-line distribution. Electron is pinned in the lockfile, and its MIT/Chromium notices accompany Windows/Linux desktop packages. Install Codex CLI and Git separately; remote access also needs cloudflared.
+All three desktop installers use a system WebView for settings: AppKit/WKWebView on macOS, WebView2 on Windows, and GTK/WebKitGTK on Linux. Each includes the native Go gateway and native terminal. Standalone archives provide the command-line distribution without a desktop WebView. Install Codex CLI and Git separately; remote access also needs cloudflared.
 
 ## 初始化与日常使用
 
@@ -53,16 +53,16 @@ Windows 独立 App Server 模式使用隐藏的 Windows PowerShell Job 辅助进
 
 ## 开发和验收
 
-`bun run desktop:dev` 构建并打开桌面界面；首次需要执行 `node node_modules/electron/install.js` 下载锁定的 Electron 运行时。`bun run test:desktop` 使用隔离项目、协议/Cloudflare fixture 验证设置交互和后台生命周期，不访问个人账户或模型。`tests/browser/desktop-native.e2e.mjs` 检查 Windows/Linux 的真实 Electron 窗口沙箱及 preload 隔离。Mac 使用 `tests/browser/macos-native.e2e.mjs` 检查 DMG 中实际安装的 AppKit/WKWebView 应用，覆盖受限资源读取、桥接动作与消息大小、真实原生菜单/确认框、中英文持久化、浅色/深色界面、配置保存、后台连续运行和干净卸载。测试通过外部注入的专用 dylib 操作真实 WebKit；该驱动仅在测试临时目录编译，不进入安装包，应用本身不提供脚本执行/自动确认的调试接口。
+`bun run desktop:dev` 仍可使用锁定的 Electron 开发外壳预览和调试设置界面；它不随安装包分发。Windows/Linux 发布构建使用 `desktop/system/Cargo.lock` 与 Rust 1.95.0，构建依赖见 [系统桌面外壳](../../desktop/system/README.md)。`tests/browser/system-desktop.e2e.mjs` 通过操作系统的无障碍接口操作已安装的设置窗口，检查网关启动、退出窗口进程后持续运行、重新打开与停止。Mac 用 `tests/browser/macos-native.e2e.mjs` 检查从实际 DMG 安装的 AppKit/WKWebView 界面，包括资源与桥接限制、菜单、确认框、主题、语言、后台控制和干净卸载。测试驱动不进入安装包。
 
-原生 CI 构建并测试 DMG/MSI/DEB；GUI 人工操作、系统信任提示、注销/登录真实桌面会话与真实公网邮箱验证需要单独报告，不能由 fixture 测试代替。保留源码、锁文件、第三方许可证与 Electron 的 Chromium 通知，签名、公证和正式发布单独进行。
+原生 CI 构建并测试 DMG/MSI/DEB；系统信任提示、真实注销/登录与真实公网邮箱验证须另行验收。Windows/Linux 安装包保留锁定的 Rust 依赖许可证；系统 WebView 由操作系统更新，下载和安装报告只计算应用本身。
 
 桌面语言可在网关运行时即时切换，原生菜单与窗口使用相同选择。诊断页的“清理并卸载”在确认后清除应用设置/缓存/管理令牌并退出，Mac 同时将应用移至废纸篓；项目和 Codex 账户保持不变。有远程部署时，请先在远程访问页移除部署后再清理。少量稳定锁/代际标记与未知文件保留；其他独立部署不受影响。Mac 测试包使用透明文件系统压缩，验收时请区分逻辑大小与实际磁盘占用。
 
 ### macOS 体积与原生界面
 
-Mac 包使用系统自带的 AppKit/WebKit，不再携带独立 Chromium/Electron。应用代码和完整网关仍随包提供，不在首次启动下载运行时，也不要求用户安装 Node。最低部署版本保持 15.0；Windows/Linux 与 CLI 便携包的运行时不变。原生界面仅从固定自定义 scheme 读取明确列出的界面资源，禁止界面导航到外部页面，主帧桥接只允许设置动作；账户与控制令牌留在后台进程。WebKit 使用非持久化数据存储。
+Mac 包使用系统自带的 AppKit/WebKit。应用代码和网关随包提供，最低部署版本保持 15.0。原生界面仅从固定自定义 scheme 读取明确列出的界面资源，禁止界面导航到外部页面，主帧桥接只允许设置动作；账户与控制令牌留在后台进程。WebKit 使用非持久化数据存储。
 
 网关退出界面后继续运行；原生后台 launcher 通过生命周期管道管理代理，launcher 结束时 EOF 触发代理关闭。登录自启继续使用相同 LaunchAgent 格式与安装归属校验。“清理并卸载”也清理上一版 Electron 留下的应用缓存，保留项目和 Codex 账户。
 
-原生验证在实际 Finder 复制后分别报告逻辑字节和占用块数，防止把下载压缩率当成安装体积。测试要求应用逻辑体积小于 250 MB、实际占用小于 130 MB，并核对应用中没有 Electron framework；具体数字以每次 `macos-installation-check.json` 为准。
+原生验证在实际 Finder 复制后分别报告逻辑字节和占用块数；具体数字以每次 `macos-installation-check.json` 为准。Windows 11 须有 WebView2 Evergreen Runtime；Linux DEB 由软件包管理器安装 WebKitGTK、GTK 3 和 Ayatana AppIndicator 依赖。Windows 和 Linux 的验收要求安装包小于 16 MB，应用安装后的逻辑大小和磁盘分配均小于 32 MB。实际结果见各平台的 `*-desktop-installation.json`。

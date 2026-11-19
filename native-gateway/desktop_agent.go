@@ -213,10 +213,14 @@ func (a *desktopAgent) status() map[string]any {
 }
 
 func desktopRuntime() string {
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		return "macos-native"
+	case "windows":
+		return "windows-webview2"
+	default:
+		return "linux-webkitgtk"
 	}
-	return "electron"
 }
 
 func (a *desktopAgent) validateConfig(ctx context.Context, body json.RawMessage) (desktopConfig, error) {

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Codex Remote Web",
+  "identifier": "io.github.danvilig.codex-remote-web",
+  "app": {
+    "windows": [],
+    "security": {
+      "freezePrototype": true,
+      "capabilities": ["settings"]
+    }
+  },
+  "bundle": { "active": false }
+}

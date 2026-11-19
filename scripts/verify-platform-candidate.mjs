@@ -4,6 +4,7 @@ import { createReadStream } from 'node:fs';
 import { lstat, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { systemDesktopBudget } from './system-desktop-size.ts';
 
 const mac27Job = 'validate-dmg-macos-27-arm64';
 const mac27Step = 'Mount, install, launch and inspect the same DMG on macOS 27';
@@ -91,7 +92,7 @@ export async function verifyCandidate(directory, tag, commit, { manualHash = '',
   assert.equal(run.conclusion, mac27.conclusion, 'Unexpected native workflow conclusion');
 
   const prefix = `codex-remote-web-${tag.slice(1)}-`;
-  const assets = [], sums = new Map();
+  const assets = [], sums = new Map(), desktopResults = [];
   let dmgSize;
   for (const [platform, suffixes] of Object.entries(packages)) {
     const artifact = join(directory, `release-${platform}`);
@@ -110,6 +111,22 @@ export async function verifyCandidate(directory, tag, commit, { manualHash = '',
       sums.set(name, line);
       assets.push(path, `${path}.sha256`);
       if (name.endsWith('.dmg')) dmgSize = bytes;
+      if (/\.(?:msi|deb)$/.test(name)) {
+        const [os, arch] = platform.split('-'), windows = os === 'win32';
+        const report = await json(join(artifact, windows ? 'windows-desktop-installation.json' : 'linux-desktop-installation.json'));
+        assert.equal(report.format, 1);
+        assert.equal(report.sourceCommit, commit, `${platform} installer source commit`);
+        assert.equal(report.platform, os);
+        assert.equal(report.arch, arch);
+        assert.equal(report.renderer, windows ? 'system-webview2' : 'system-webkitgtk');
+        assert.equal(report.installer, name);
+        assert.equal(report.sha256, sha, `${platform} tested a different desktop installer`);
+        assert.equal(report.installerBytes, bytes);
+        assert.ok(bytes < systemDesktopBudget.installerBytes);
+        for (const measure of ['allocatedBytes', 'logicalBytes']) assert.ok(Number.isSafeInteger(report.installed[measure]) && report.installed[measure] > 0 && report.installed[measure] < systemDesktopBudget.installedBytes, `${platform} installed ${measure}`);
+        for (const check of ['nativeControls', 'gatewaySurvivedWindowExit', 'uninstall']) assert.equal(report[check], true, `${platform} ${check}`);
+        desktopResults.push(`- ${platform} system WebView installer passed installed controls, gateway continuity and uninstall. Download: ${bytes} bytes; installed: ${report.installed.allocatedBytes} allocated bytes (${report.installed.logicalBytes} logical bytes).`);
+      }
     }
   }
   const dmg = `${prefix}macos-arm64.dmg`;
@@ -154,7 +171,7 @@ export async function verifyCandidate(directory, tag, commit, { manualHash = '',
   await writeFile(checksumPath, [...sums].sort(([a], [b]) => a.localeCompare(b)).map(([, line]) => line).join('\n') + '\n');
   await writeFile(join(directory, 'assets.txt'), [...assets, checksumPath].join('\n') + '\n');
   const { allocatedBytes, logicalBytes } = mac15.report.checks.installedSize;
-  await writeFile(join(directory, 'acceptance.md'), `- macOS ${systemLabel(mac15)} passed installation, gateway, PTY, lifecycle and visible UI. Minimum macOS is 15.0.\n- ${mac27Note}\n- The macOS DMG is ${dmgSize} bytes (SHA-256: \`${sha}\`); Finder installation used ${allocatedBytes} allocated bytes (${logicalBytes} logical bytes).\n- Windows x64 and Linux x64/arm64 passed native packaging and installed gateway checks.\n`);
+  await writeFile(join(directory, 'acceptance.md'), `- macOS ${systemLabel(mac15)} passed installation, gateway, PTY, lifecycle and visible UI. Minimum macOS is 15.0.\n- ${mac27Note}\n- The macOS DMG is ${dmgSize} bytes (SHA-256: \`${sha}\`); Finder installation used ${allocatedBytes} allocated bytes (${logicalBytes} logical bytes).\n${desktopResults.join('\n')}\n`);
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

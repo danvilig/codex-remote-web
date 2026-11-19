@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, cp, mkdir, access, rm, readFile, readlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, cp, mkdir, access, rm, readFile, readlink, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -7,11 +7,12 @@ import { command } from '../../scripts/distribution.ts';
 import { macAppSize } from '../../scripts/macos-size.ts';
 import { detachMacVolume, dmgLayout } from '../../scripts/macos-dmg.ts';
 import { macOSValidationSystem, macosMinimumVersion } from '../../scripts/macos-validation.ts';
+import { installedSystemDesktopSize, systemDesktopBudget } from '../../scripts/system-desktop-size.ts';
 const root=resolve(import.meta.dir,'../..'),installer=process.env.CODEX_WEBUI_INSTALLER;
 assert.ok(installer,'Test the actual installer, not a replacement build');
 const temp=await mkdtemp(join(tmpdir(),'crw-installer-'));
 let mounted=false,installed=false;
-let evidence;
+let evidence, windowsEvidence;
 const mount=join(temp,'mount'),destination=join(temp,'Installed application with spaces');
 async function msi(args) {
  console.error(`Verifying msiexec ${args[0]}`);
@@ -122,13 +123,16 @@ try {
   await msi(['/i',installer,`INSTALLFOLDER=${destination}`]);installed=true;
   await access(join(destination,'Codex Remote Web.exe'));
   await access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk'));
+  const installerBytes=(await stat(installer)).size;
+  assert.ok(installerBytes<systemDesktopBudget.installerBytes,`Windows installer size ${installerBytes}`);
+  windowsEvidence={format:1,platform:'win32',arch:process.arch,renderer:'system-webview2',sourceCommit:await command(['git','rev-parse','HEAD'],root),installer:basename(installer),sha256:createHash('sha256').update(await readFile(installer)).digest('hex'),installerBytes,installed:await installedSystemDesktopSize(destination)};
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=join(destination,'resources/gateway');
   process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(destination,'Codex Remote Web.exe');
  } else throw new Error('Native installer test requires macOS or Windows');
  await command(['bun','run','test:portable'],root,{stream:true,timeoutMs:240_000});
  if(evidence)evidence.checks.installedGatewayAndPty=true;
  try {
-  await command(['node',process.platform==='darwin'?'tests/browser/macos-native.e2e.mjs':'tests/browser/desktop-native.e2e.mjs'],root,{stream:true,timeoutMs:300_000});
+  await command(['node',process.platform==='darwin'?'tests/browser/macos-native.e2e.mjs':'tests/browser/system-desktop.e2e.mjs'],root,{stream:true,timeoutMs:300_000});
  } catch(error) {
   if(evidence&&error.exitCode===42) {
    const lifecycle=await readFile(join(root,'.artifacts/macos-desktop-lifecycle.json'),'utf8').then(JSON.parse).catch(()=>null);
@@ -149,6 +153,7 @@ try {
   const uninstallLog=await readFile(join(temp,'uninstall.log'),'utf8');
   await assert.rejects(access(join(destination,'Codex Remote Web.exe')),`Installed executable remained after uninstall: ${uninstallLog}`);
   await assert.rejects(access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk')),'Start menu shortcut remained after uninstall');
+  await writeFile(join(root,'.artifacts/windows-desktop-installation.json'),JSON.stringify({...windowsEvidence,nativeControls:true,gatewaySurvivedWindowExit:true,uninstall:true},null,2)+'\n');
  }
  console.log('PASS: exact native installer, installation into a path with spaces, installed gateway/files/submissions/PTY and MSI uninstall');
 } finally {
