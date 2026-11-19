@@ -134,6 +134,11 @@ func readDesktopJSON(path string, dest any) (bool, error) {
 
 func writeDesktopFile(path string, data []byte) error {
 	directory := filepath.Dir(path)
+	root, err := os.OpenRoot(directory)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
 	file, err := os.CreateTemp(directory, ".codex-desktop-*")
 	if err != nil {
 		return err
@@ -149,7 +154,9 @@ func writeDesktopFile(path string, data []byte) error {
 	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(file.Name(), path); err != nil {
+	// On Windows Root.Rename can replace a file while existing readers
+	// finish reading its old contents through handles that share deletion.
+	if err := root.Rename(filepath.Base(file.Name()), filepath.Base(path)); err != nil {
 		return err
 	}
 	return syncDesktopDirectory(directory)

@@ -76,6 +76,31 @@ func TestWindowsPrivateFileRejectsLinkAndPublicACL(t *testing.T) {
 	}
 }
 
+func TestWindowsPrivateStateCanBeReplacedDuringRead(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := ensureDesktopDirectory(dir); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "state.json")
+	if err := writeDesktopFile(path, []byte(`{"revision":1}`)); err != nil {
+		t.Fatal(err)
+	}
+	reader, err := desktopOpen(path, os.O_RDONLY, desktopStateLimit, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reader.Close()
+	if err := writeDesktopFile(path, []byte(`{"revision":2}`)); err != nil {
+		t.Fatal(err)
+	}
+	if data, err := io.ReadAll(reader); err != nil || string(data) != `{"revision":1}` {
+		t.Fatalf("Old snapshot: %q, %v", data, err)
+	}
+	if data, err := readDesktopFile(path, true); err != nil || string(data) != `{"revision":2}` {
+		t.Fatalf("Current snapshot: %q, %v", data, err)
+	}
+}
+
 func TestWindowsProcessPipeHonorsWriteDeadlineAndEOF(t *testing.T) {
 	r, w, err := isolatedInputPipe()
 	if err != nil {
