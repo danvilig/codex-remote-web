@@ -96,6 +96,8 @@ Beta.2 目标为 Linux x64/arm64、macOS Apple Silicon（macOS 15+）和 Windows
 
 macOS 在 `macos-15` 构建，`LSMinimumSystemVersion` 必须保持 `15.0`。macOS 27 标准运行器核对 SHA-256 后复用原始 DMG，验证挂载、复制安装、签名、启动、界面与生命周期。两端通过 `sw_vers` 断言系统版本并输出安装报告与截图。`validation-macos-27-arm64` 只存验收证据。仅当 CI 的安装、网关、PTY 与桌面生命周期通过，唯一失败为可见 WebKit 合成时，可以由维护者在物理 macOS 27 实机安装、启动、检查可见 UI 后，输入相同 DMG 的 `macos27_manual_sha256` 和 `macos27_manual_version`（如 `27.0.1 (26A434)`）。发布说明明确区分自动化失败与人工结果。Safari 隔离与人工 Gatekeeper 允许仍需实机验收。
 
+`macOS Safari display diagnostic` 是独立的显示诊断。它截取 Safari 窗口并检查测试页面的色块，保留失败日志和实际截图。编译与安装包验收仍由 `Native platform packages` 独立判定。
+
 每个平台校验冻结安装、构建、目标架构和实际便携归档。回归覆盖异目录启动、完整页面及静态资源、受限文件读取/编辑、私有回执及 UUID 去重、持久队列访问、真实终端。Linux/macOS 验证受保护的临时连接器；Windows 的 CLI/便携包和桌面入口均使用独立 loopback 端口及每次运行的随机 Host 凭据，并校验 HTTP/WebSocket 边界，不降级为可公开访问的无认证源站。Linux 完整 Verify、依赖审计、浏览器和 Docker 验证继续运行。
 
 桌面安装包使用已通过测试的便携网关。Windows/Linux 使用 Rust 1.95.0 与锁定 Cargo 依赖，分别链接系统 WebView2 和 WebKitGTK；macOS 仍使用 AppKit/WKWebView。Windows 以 WiX 5.0.2 构建 per-user MSI，实际安装、验证快捷方式和卸载；Linux 两种架构安装实际 DEB 并在 Xvfb 测试。两端使用系统无障碍接口操作安装后的窗口，报告安装包大小、逻辑字节和磁盘分配。发布验证安装报告的源提交和 SHA-256。TCC/Gatekeeper/SmartScreen 提示、真实注销/登录与公网邮箱验证仍需另行验收。

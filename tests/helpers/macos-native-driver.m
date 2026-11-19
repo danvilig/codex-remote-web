@@ -78,9 +78,17 @@ static void command(NSDictionary *request) {
             reply(request, @YES, writeError);
         }];
     } else if ([action isEqual:@"geometry"]) {
-        NSRect frame = [webView.window convertRectToScreen:[webView convertRect:webView.bounds toView:nil]];
-        NSRect screen = webView.window.screen.frame;
-        reply(request, @{ @"left": @(NSMinX(frame)), @"top": @(NSMaxY(screen)-NSMaxY(frame)), @"screenWidth": @(NSWidth(screen)) }, nil);
+        NSWindow *window = webView.window;
+        NSScreen *display = window.screen;
+        if (!display || window.windowNumber <= 0) {
+            reply(request, nil, [NSError errorWithDomain:@"test" code:3 userInfo:@{NSLocalizedDescriptionKey:@"WebKit window has no display or WindowServer ID"}]);
+            return;
+        }
+        NSRect frame = [window convertRectToScreen:[webView convertRect:webView.bounds toView:nil]];
+        NSRect screen = display.frame, bounds = window.frame;
+        reply(request, @{ @"left": @(NSMinX(frame)-NSMinX(screen)), @"top": @(NSMaxY(screen)-NSMaxY(frame)), @"screenWidth": @(NSWidth(screen)),
+            @"windowID": @(window.windowNumber), @"windowWidth": @(NSWidth(bounds)), @"windowLeft": @(NSMinX(frame)-NSMinX(bounds)),
+            @"windowTop": @(NSMaxY(bounds)-NSMaxY(frame)), @"visible": @(window.visible && !window.miniaturized && (window.occlusionState & NSWindowOcclusionStateVisible)) }, nil);
     } else if ([action isEqual:@"security"]) {
         reply(request, @{ @"persistent": @(webView.configuration.websiteDataStore.persistent), @"url": webView.URL.absoluteString ?: @"", @"inspectable": @(webView.inspectable) }, nil);
     } else { reply(request, nil, [NSError errorWithDomain:@"test" code:2 userInfo:@{NSLocalizedDescriptionKey:@"Unknown test command"}]); }

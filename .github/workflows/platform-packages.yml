@@ -22,33 +22,6 @@ jobs:
         run: |
           xcrun swiftc -O -whole-module-optimization -target arm64-apple-macosx15.0 -framework AppKit -framework WebKit desktop/macos/App.swift -o "$RUNNER_TEMP/crw-native-shell"
           xcrun clang -dynamiclib -fobjc-arc -framework AppKit -framework WebKit -mmacosx-version-min=15.0 tests/helpers/macos-native-driver.m -o "$RUNNER_TEMP/crw-test-driver.dylib"
-      - name: Diagnose the system WebKit compositor independently
-        run: |
-          set -o pipefail
-          mkdir -p .artifacts
-          xcrun swiftc -target arm64-apple-macosx15.0 -framework AppKit -framework WebKit tests/helpers/macos-webkit-probe.swift -o "$RUNNER_TEMP/crw-webkit-probe"
-          probe_app="$RUNNER_TEMP/WebKit Probe.app"
-          mkdir -p "$probe_app/Contents/MacOS"
-          cp "$RUNNER_TEMP/crw-webkit-probe" "$probe_app/Contents/MacOS/Probe"
-          cat > "$probe_app/Contents/Info.plist" <<'PLIST'
-          <?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleIdentifier</key><string>io.github.danvilig.webkit-probe</string><key>CFBundleExecutable</key><string>Probe</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleVersion</key><string>1</string><key>LSMinimumSystemVersion</key><string>15.0</string><key>NSHighResolutionCapable</key><true/><key>NSPrincipalClass</key><string>NSApplication</string></dict></plist>
-          PLIST
-          codesign --force --sign - "$probe_app"
-          "$probe_app/Contents/MacOS/Probe" "$PWD/.artifacts" 2>&1 | tee .artifacts/macos-webkit-probe.txt
-          cat > .artifacts/macos-webkit-safari.html <<'HTML'
-          <!doctype html><body style="background:#145bd7;color:white;font:40px system-ui">Safari rendering control<input value="Native test">
-          HTML
-          open -a Safari "$PWD/.artifacts/macos-webkit-safari.html"
-          sleep 5
-          screencapture -x .artifacts/macos-webkit-safari.png
-          pkill -x Safari || true
-          /usr/bin/log show --last 2m --style compact --predicate '(process CONTAINS "WebKit") AND (messageType == error OR messageType == fault)' > .artifacts/macos-webkit-system.txt
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: webkit-compositor-diagnostics
-          include-hidden-files: true
-          path: .artifacts/macos-webkit-*
 
   packages:
     name: package-${{ matrix.os }}-${{ matrix.arch }}

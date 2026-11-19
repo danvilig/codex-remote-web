@@ -75,10 +75,7 @@ async function click(selector) {
 }
 const select = (selector, value) => evaluate(`const node = document.querySelector(${JSON.stringify(selector)}); node.value = ${JSON.stringify(value)}; node.dispatchEvent(new Event('change', {bubbles:true})); return true`);
 const ready = () => evaluate("return !document.querySelector('#desktopLanguage').disabled && !document.querySelector('[aria-busy=true]')");
-async function visibleSidebar(suffix = '') {
-  const geometry = await application.request('geometry');
-  const onscreen = join(root, `.artifacts/macos-desktop-onscreen${suffix}.png`);
-  await command(['screencapture', '-x', onscreen], root);
+async function sidebarPixels(image, left, top, width) {
   return Number(await command(['swift', '-e', `import AppKit
     let bitmap = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))!
     let scale = Double(bitmap.pixelsWide) / Double(CommandLine.arguments[4])!
@@ -86,16 +83,44 @@ async function visibleSidebar(suffix = '') {
     let xs = Int((left + 20) * scale)..<Int((left + 200) * scale)
     let ys = Int((top + 90) * scale)..<Int((top + 300) * scale)
     guard xs.lowerBound >= 0, ys.lowerBound >= 0, xs.upperBound <= bitmap.pixelsWide, ys.upperBound <= bitmap.pixelsHigh else {
-      fatalError("Sidebar sampling window lies outside the captured screen")
+      fatalError("Sidebar sampling window lies outside the capture")
     }
-    var count = 0
+    var count = 0, light = 0
     for y in ys {
       for x in xs {
-        if let color = bitmap.colorAt(x:x,y:y)?.usingColorSpace(.deviceRGB), max(color.redComponent,color.greenComponent,color.blueComponent) < 0.65 { count += 1 }
+        guard let color = bitmap.colorAt(x:x,y:y)?.usingColorSpace(.deviceRGB) else { continue }
+        if max(color.redComponent,color.greenComponent,color.blueComponent) < 0.65 { count += 1 }
+        if min(color.redComponent,color.greenComponent,color.blueComponent) > 0.8 { light += 1 }
       }
     }
-    print(count)
-  `, onscreen, String(geometry.left), String(geometry.top), String(geometry.screenWidth)], root));
+    print(light > xs.count * ys.count / 2 ? count : 0)
+  `, image, String(left), String(top), String(width)], root));
+}
+async function visibleSidebar(suffix = '') {
+  await waitFor(async () => (await application.request('geometry')).visible, 'WindowServer visibility');
+  const geometry = await application.request('geometry');
+  const onscreen = join(root, `.artifacts/macos-desktop-onscreen${suffix}.png`);
+  let displayPixels = 0, displayError;
+  try {
+    await command(['screencapture', '-x', onscreen], root);
+    displayPixels = await sidebarPixels(onscreen, geometry.left, geometry.top, geometry.screenWidth);
+  } catch (error) { displayError = error; }
+  if (displayPixels > 100) return displayPixels;
+
+  // WindowServer can capture the compositor's own window surface separately
+  // from the display. Neither path asks WKWebView to redraw into a bitmap.
+  const window = join(root, `.artifacts/macos-desktop-window${suffix}.png`);
+  try {
+    await command(['screencapture', '-x', '-o', '-l', String(geometry.windowID), window], root);
+    const windowPixels = await sidebarPixels(window, geometry.windowLeft, geometry.windowTop, geometry.windowWidth);
+    console.log(`WindowServer${suffix}: display=${displayError ? displayError.message : displayPixels}, window=${windowPixels} sidebar ink pixels`);
+    if (windowPixels > 100) return windowPixels;
+    if (!displayError) return Math.max(displayPixels, windowPixels);
+  } catch (error) {
+    console.error(`WindowServer${suffix}: display=${displayPixels}; window capture failed: ${error.message}`);
+    if (!displayError) return displayPixels;
+  }
+  throw displayError;
 }
 async function closeApplication() {
   if (!application) return;
