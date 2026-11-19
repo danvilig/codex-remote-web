@@ -105,6 +105,17 @@ func (r scheduleRun) active() bool {
 func (s *conversationScheduler) path() string { return filepath.Join(s.directory, "schedules.json") }
 
 func (s *conversationScheduler) read() (scheduleState, error) {
+	// NTFS can unlink the old file while a reader holds its handle. Keep
+	// the private-file validation and read under the same lock as replacement.
+	release, err := lockConversation(s.directory, "write.lock", s.owner.Host, 5*time.Second)
+	if err != nil {
+		return scheduleState{}, err
+	}
+	defer release()
+	return s.readLocked()
+}
+
+func (s *conversationScheduler) readLocked() (scheduleState, error) {
 	state := scheduleState{Format: 1, Jobs: []scheduleJob{}, Runs: []scheduleRun{}}
 	data, err := readConversationPrivate(s.path(), schedulerStateLimit)
 	if errors.Is(err, os.ErrNotExist) {
@@ -130,7 +141,7 @@ func (s *conversationScheduler) transaction(change func(*scheduleState) (bool, e
 		return err
 	}
 	defer release()
-	state, err := s.read()
+	state, err := s.readLocked()
 	if err != nil {
 		return err
 	}
