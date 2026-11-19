@@ -150,6 +150,9 @@ jobs:
   macos-27:
     name: validate-dmg-macos-27-arm64
     needs: packages
+    # A broken Windows/Linux package must not hide the DMG result. If the
+    # macOS 15 artifact is itself missing, download and validation still fail.
+    if: ${{ !cancelled() }}
     # The standard xcode-27 image runs macOS 27; verify sw_vers below
     # so a changing runner label can never masquerade as this OS coverage.
     runs-on: xcode-27

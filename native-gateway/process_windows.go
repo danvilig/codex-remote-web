@@ -186,7 +186,8 @@ func isolatedInputPipe() (*os.File, *os.File, error) {
 
 func windowsProcessPipe(parentReads bool) (*os.File, *os.File, error) {
 	const namePrefix = `\\.\pipe\codex-remote-web-stdio-`
-	name, err := windows.UTF16PtrFromString(namePrefix + rand.Text())
+	path := namePrefix + rand.Text()
+	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -200,29 +201,29 @@ func windowsProcessPipe(parentReads bool) (*os.File, *os.File, error) {
 	}
 	sa := windows.SecurityAttributes{SecurityDescriptor: sd}
 	sa.Length = uint32(unsafe.Sizeof(sa))
-	// Parent IO must be overlapped for bounded RPC writes, but the inheritable
-	// read end must use blocking IO like a normal child stdin.
-	mode, access := uint32(windows.PIPE_ACCESS_OUTBOUND), uint32(windows.GENERIC_READ)
+	// Keep the server end synchronous for child stdio and ConPTY. Opening the
+	// overlapped client end with os.OpenFile registers it with the Go poller;
+	// os.NewFile cannot reliably discover existing pipe completion modes.
+	mode, access := uint32(windows.PIPE_ACCESS_INBOUND), os.O_WRONLY
 	if parentReads {
-		mode, access = windows.PIPE_ACCESS_INBOUND, windows.GENERIC_WRITE
+		mode, access = windows.PIPE_ACCESS_OUTBOUND, os.O_RDONLY
 	}
-	server, err := windows.CreateNamedPipe(name, mode|windows.FILE_FLAG_FIRST_PIPE_INSTANCE|windows.FILE_FLAG_OVERLAPPED,
+	server, err := windows.CreateNamedPipe(name, mode|windows.FILE_FLAG_FIRST_PIPE_INSTANCE,
 		windows.PIPE_TYPE_BYTE|windows.PIPE_REJECT_REMOTE_CLIENTS, 1, 65536, 65536, 0, &sa)
 	if err != nil {
 		return nil, nil, err
 	}
-	client, err := windows.CreateFile(name, access, 0, nil, windows.OPEN_EXISTING, windows.FILE_ATTRIBUTE_NORMAL, 0)
+	client, err := os.OpenFile(path, access|windows.FILE_FLAG_OVERLAPPED, 0600)
 	if err == nil {
-		err = windows.ConnectNamedPipe(server, &windows.Overlapped{})
+		err = windows.ConnectNamedPipe(server, nil)
 		if err == nil || errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
-			clientFile := os.NewFile(uintptr(client), "process-pipe-client")
 			serverFile := os.NewFile(uintptr(server), "process-pipe-server")
 			if parentReads {
-				return serverFile, clientFile, nil
+				return client, serverFile, nil
 			}
-			return clientFile, serverFile, nil
+			return serverFile, client, nil
 		}
-		windows.CloseHandle(client)
+		client.Close()
 	}
 	windows.CloseHandle(server)
 	return nil, nil, err

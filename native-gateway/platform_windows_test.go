@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -14,6 +15,20 @@ import (
 
 	"golang.org/x/sys/windows"
 )
+
+func TestMain(m *testing.M) {
+	// Run the real Job supervisor when a fixture starts it with this .exe.
+	if len(os.Args) > 1 && os.Args[1] == "windows-owned-process" {
+		main()
+		return
+	}
+	if strings.EqualFold(filepath.Base(os.Args[0]), "gateway-fixture.exe") && os.Getenv("CODEX_WEBUI_DESKTOP_CHILD") == "1" {
+		fmt.Printf("http://127.0.0.1:%s\n", os.Getenv("PORT"))
+		_, _ = io.Copy(io.Discard, os.Stdin)
+		return
+	}
+	os.Exit(m.Run())
+}
 
 func exposeTestFile(path string) error {
 	user, err := windows.GetCurrentProcessToken().GetTokenUser()

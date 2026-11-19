@@ -109,7 +109,19 @@ func TestDesktopAgentLifecycle(t *testing.T) {
 	home := t.TempDir()
 	directory := desktopDirectory(home)
 	binary := filepath.Join(home, "gateway-fixture")
-	if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf 'http://127.0.0.1:%s\\n' \"$PORT\"\nexec /bin/sleep 30\n"), 0700); err != nil {
+	fixture := []byte("#!/bin/sh\nprintf 'http://127.0.0.1:%s\\n' \"$PORT\"\nexec /bin/sleep 30\n")
+	if runtime.GOOS == "windows" {
+		binary += ".exe"
+		executable, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture, err = os.ReadFile(executable)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(binary, fixture, 0700); err != nil {
 		t.Fatal(err)
 	}
 	config, _ := parseDesktopConfig(nil, home)
@@ -120,7 +132,7 @@ func TestDesktopAgentLifecycle(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	const installation = "/fixture/Codex Remote Web.app/Contents/MacOS/Codex Remote Web"
+	installation := filepath.Join(home, "fixture", "Codex Remote Web")
 	var done chan error
 	start := func() {
 		done = make(chan error, 1)
@@ -149,7 +161,7 @@ func TestDesktopAgentLifecycle(t *testing.T) {
 	if ready, err := waitDesktopAgent(ctx, directory, installation); !ready || err != nil {
 		t.Fatalf("The matching agent should remain running: %v %v", ready, err)
 	}
-	_, foreign := desktopAgentRequest(ctx, directory, "/fixture/other-installation", "stop", nil, time.Second)
+	_, foreign := desktopAgentRequest(ctx, directory, filepath.Join(home, "other-installation"), "stop", nil, time.Second)
 	if desktopErrorCode(foreign) != "AGENT_FOREIGN" || getPID() != previousPID {
 		t.Fatalf("Foreign agent should be untouched: %v", foreign)
 	}
@@ -208,7 +220,9 @@ func TestDesktopControlAndOperationProtocol(t *testing.T) {
 			t.Fatalf("Header %q: got %d want %d", test.header, w.Code, test.want)
 		}
 	}
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	for _, test := range []struct {
 		body   string
 		ok     bool
@@ -218,7 +232,7 @@ func TestDesktopControlAndOperationProtocol(t *testing.T) {
 		{strings.Repeat(" ", desktopRequestLimit+1), false, 413},
 	} {
 		var output bytes.Buffer
-		if err := runDesktopOperation("/fixture/app", strings.NewReader(test.body), &output); err != nil {
+		if err := runDesktopOperation(filepath.Join(home, "fixture", "app"), strings.NewReader(test.body), &output); err != nil {
 			t.Fatal(err)
 		}
 		var reply struct {

@@ -18,6 +18,9 @@ func TestReviewUndoReapplyAndProtectedPath(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatal(err, string(out))
 	}
+	if out, err := exec.Command("git", "-C", repo, "config", "--local", "core.autocrlf", "false").CombinedOutput(); err != nil {
+		t.Fatal(err, string(out))
+	}
 	path := filepath.Join(repo, "README.md")
 	if err := os.WriteFile(path, []byte("after\n"), 0600); err != nil {
 		t.Fatal(err)
