@@ -876,6 +876,8 @@ Object.assign(ZH_CN, {
   "Back": "返回",
   "No matching tasks": "没有匹配的任务",
   "No subfolders": "没有子文件夹",
+  "Cannot browse folder": "无法浏览文件夹",
+  "Could not load project chats": "无法加载项目会话",
   "Loading folders…": "正在加载文件夹…",
   "No folder selected": "尚未选择文件夹",
   "Use this folder": "使用此文件夹",

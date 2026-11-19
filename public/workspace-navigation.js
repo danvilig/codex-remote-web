@@ -1,9 +1,10 @@
 // Browser-owned projects, pins and sidebar organization. Native thread data stays authoritative.
-export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, onOpen, onDelete, onAddProject, onSelectProject, menu }) {
+export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, onOpen, onDelete, onAddProject, onSelectProject, onExpandProject, onMoreProjectChats, menu }) {
   const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
   const pinsKey = 'codex-remote-web-pins', sectionsKey = 'codex-remote-web-sections', projectsKey = 'codex-remote-web-projects', preferencesKey = 'codex-remote-web-sidebar';
   const saved = read(pinsKey, []), pins = new Set(Array.isArray(saved) ? saved.filter(id => typeof id === 'string') : []);
-  const registered = read(projectsKey, []), projects = new Set(Array.isArray(registered) ? registered.filter(path => typeof path === 'string' && path.startsWith('/')) : []);
+  const absoluteProjectPath = path => typeof path === 'string' && /^(?:\/|[a-z]:[\\/]|\\\\)/i.test(path);
+  const registered = read(projectsKey, []), projects = new Set(Array.isArray(registered) ? registered.filter(absoluteProjectPath) : []);
   const savedSections = read(sectionsKey, {}), sections = savedSections && typeof savedSections === 'object' && !Array.isArray(savedSections) ? savedSections : {};
   const preferences = read(preferencesKey, {});
   let grouping = ['project', 'connection', 'list'].includes(preferences?.grouping) ? preferences.grouping : 'project';
@@ -48,8 +49,9 @@ export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, on
     project.addEventListener('toggle', () => { if (!project.isConnected || snapshot.query.trim()) return; sections[projectKey] = project.open; localStorage.setItem(sectionsKey, JSON.stringify(sections)); });
     const summary = document.createElement('summary'), name = document.createElement('span');
     summary.innerHTML = `<span class="project-folder-icon">${codexIcon('folder')}${codexIcon('globe', 'project-remote-badge')}</span>`;
-    name.className = 'project-label'; name.textContent = cwd === snapshot.home ? t('Home') : cwd.split('/').filter(Boolean).at(-1) || cwd;
+    name.className = 'project-label'; name.textContent = cwd === snapshot.home ? t('Home') : cwd.split(/[/\\]/).filter(Boolean).at(-1) || cwd;
     summary.title = cwd; summary.append(name);
+    summary.addEventListener('click', () => { if (!project.open) onExpandProject(cwd); });
     const connection = document.createElement('span'); connection.className = 'project-connection'; connection.textContent = t('Remote server');
     const status = document.createElement('span'); status.className = `project-connection-dot${snapshot.connected ? ' connected' : ''}`; status.setAttribute('aria-label', t(snapshot.connected ? 'Codex connected' : 'Connecting'));
     summary.append(connection, status); project.append(summary);
@@ -57,6 +59,10 @@ export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, on
       const start = document.createElement('button'); start.type = 'button'; start.className = 'project-new-chat'; start.textContent = t('New chat'); start.onclick = () => onSelectProject(cwd); project.append(start);
     }
     for (const item of items) project.append(threadRow(item));
+    if (!snapshot.query.trim() && snapshot.projectThreadPages?.get(cwd)?.nextCursor) {
+      const more = document.createElement('button'); more.type = 'button'; more.className = 'project-new-chat'; more.textContent = t('Load more chats');
+      more.onclick = () => onMoreProjectChats(cwd); project.append(more);
+    }
     return project;
   }
   function render(next) {
@@ -88,14 +94,16 @@ export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, on
     else for (const [cwd, items] of groups) container.append(projectGroup(cwd, items));
     if (!groups.size && grouping !== 'list') { const empty = document.createElement('p'); empty.className = 'workspace-list-hint'; empty.textContent = t('Add a project to get started.'); projectSection.append(empty); }
     const recent = disclosure('Recents', 'recents');
-    for (const thread of threads.slice(0, 30)) recent.append(threadRow(thread));
-    if (!threads.length) { const empty = document.createElement('p'); empty.className = 'workspace-list-hint'; empty.textContent = t(query ? 'No matching tasks' : 'Your chats will appear here.'); recent.append(empty); }
+    const recentThreads = threads.filter(thread => !next.projectOnlyIds?.has(thread.id)).slice(0, 30);
+    for (const thread of recentThreads) recent.append(threadRow(thread));
+    if (!recentThreads.length) { const empty = document.createElement('p'); empty.className = 'workspace-list-hint'; empty.textContent = t(query ? 'No matching tasks' : 'Your chats will appear here.'); recent.append(empty); }
     root.replaceChildren(pinned, projectSection, recent);
   }
   return {
     render,
     toggleNotifications(){notificationSort=!notificationSort;savePreferences();syncNotificationButton();if(snapshot)render(snapshot);},
     notify(threadId){if(threadId&&threadId!==snapshot?.activeId){unread.set(threadId,Date.now());if(unread.size>500)unread.delete(unread.keys().next().value);}if(snapshot)render(snapshot);},
-    registerProject(cwd) { if (!cwd?.startsWith('/') || projects.has(cwd)) return; projects.add(cwd); localStorage.setItem(projectsKey, JSON.stringify([...projects])); if (snapshot) render(snapshot); },
+    registerProject(cwd) { if (!absoluteProjectPath(cwd) || projects.has(cwd)) return; projects.add(cwd); localStorage.setItem(projectsKey, JSON.stringify([...projects])); if (snapshot) render(snapshot); },
+    revealProject(cwd) { sections.projects = sections[`project:${cwd}`] = true; localStorage.setItem(sectionsKey, JSON.stringify(sections)); },
   };
 }

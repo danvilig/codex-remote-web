@@ -64,6 +64,7 @@ const browserState={history:[],index:-1,loadTimer:null,loadRequest:0};
 const sidePanelTabs=createSidePanelTabs({container:$('.side-panel-tabs'),t,icon:codexIcon,onSelect:view=>setSidePanelView(view),onClose:closeSidePanelTool,onEmpty:()=>setSidePanelOpen(false)});
 const accountRequestGate=createLatestRequestGate();
 const workspaceContextRequestGate=createLatestRequestGate();
+const folderRequestGate=createLatestRequestGate();
 const permissionProfileRequestGate=createLatestRequestGate();
 const threadNavigationRequestGate=createLatestRequestGate();
 const autocompleteState={match:null,items:[],selected:0,requestId:0,message:''};
@@ -160,6 +161,7 @@ function setStatus(kind,text){
 }
 async function loadInitial(refreshAccount=false){
   loadAccount(refreshAccount);
+  if (state.workspaceContext?.cwd) loadProjectThreads(state.workspaceContext.cwd, { refresh: true });
   try{const [models,threads,profiles]=await Promise.all([rpc('model/list',{limit:50}),rpc('thread/list',{limit:50,sortKey:'recency_at',sortDirection:'desc'}),rpc('permissionProfile/list',{cwd:permissionProfileCwd(),limit:100}).catch(()=>({data:[]}))]);
     state.models=filterAppModels(models.data||[]);renderModels();applyThreadSummaries(threads.data||[]);setPermissionProfiles(profiles.data||[]);scheduleThreadListRefresh();const rememberedThread=localStorage.getItem(ACTIVE_THREAD_STORAGE_KEY);if(!state.active&&rememberedThread)await openThread(rememberedThread);
   }catch(e){if(!e?.silentTransportSwitch)toast(e.message);}
@@ -246,7 +248,37 @@ function openPermissionMenu(){closeModelMenu();syncPermissionControl();$('#permi
 function closePermissionMenu(){const menu=$('#permissionMenu');menu.hidden=true;$('#modeButton').setAttribute('aria-expanded','false')}
 function togglePermissionMenu(){if($('#permissionMenu').hidden)openPermissionMenu();else closePermissionMenu()}
 function choosePermissionMode(mode){closePermissionMenu();if(mode==='full-access'&&state.permissionMode!=='full-access'){pendingFullAccessAction='select';const dialog=$('#fullAccessDialog');if(!dialog.open)dialog.showModal();return}setPermissionMode(mode)}
-async function loadFolders(path=folderBrowse.path){const list=$('#folderList');list.innerHTML='<div class="list-state">Loading folders…</div>';try{const response=await fetch(`/api/folders?path=${encodeURIComponent(path)}`),data=await response.json();if(!response.ok)throw new Error(data.error||'Cannot browse folder');folderBrowse={path:data.path,parent:data.parent,selected:data.path};$('#folderPathInput').value=data.path;$('#folderSelection').textContent=data.path;$('#folderConfirm').disabled=false;$('#folderUp').disabled=!data.parent;list.innerHTML='';for(const folder of data.folders){const b=document.createElement('button');b.type='button';b.className='folder-item';b.innerHTML=`${icons.file}<span>${escapeHtml(folder.name)}</span>`;b.ondblclick=()=>loadFolders(folder.path);b.onclick=()=>{folderBrowse.selected=folder.path;$('#folderSelection').textContent=folder.path;$('#folderConfirm').disabled=false;list.querySelectorAll('.folder-item').forEach(x=>x.classList.remove('selected'));b.classList.add('selected')};list.append(b)}if(!data.folders.length)list.innerHTML='<div class="list-state">No subfolders</div>'}catch(e){list.innerHTML=`<div class="list-state">${escapeHtml(e.message)}</div>`}}
+async function loadFolders(path=folderBrowse.path){
+  const request=folderRequestGate.next(),list=$('#folderList');
+  const current=()=>folderRequestGate.isCurrent(request)&&$('#folderDialog').open;
+  folderBrowse.selected=null;
+  $('#folderConfirm').disabled=true;
+  $('#folderSelection').textContent=t('No folder selected');
+  $('#folderPathInput').value=path;
+  list.innerHTML=`<div class="list-state">${escapeHtml(t('Loading folders…'))}</div>`;
+  try{
+    const response=await fetch(`/api/folders?path=${encodeURIComponent(path)}`),data=await response.json();
+    if(!response.ok)throw new Error(data.error||t('Cannot browse folder'));
+    if(!current())return;
+    folderBrowse={path:data.path,parent:data.parent,selected:data.path};
+    $('#folderPathInput').value=data.path;
+    $('#folderSelection').textContent=data.path;
+    $('#folderConfirm').disabled=false;
+    $('#folderUp').disabled=!data.parent;
+    list.replaceChildren();
+    for(const folder of data.folders){
+      const button=document.createElement('button');button.type='button';button.className='folder-item';
+      button.innerHTML=`${icons.file}<span>${escapeHtml(folder.name)}</span>`;
+      button.onclick=()=>{
+        const hadFocus=document.activeElement===button;
+        loadFolders(folder.path).then(loaded=>{if(loaded&&hadFocus&&document.activeElement===document.body)(list.querySelector('button')||$('#folderConfirm')).focus()});
+      };
+      list.append(button);
+    }
+    if(!data.folders.length)list.innerHTML=`<div class="list-state">${escapeHtml(t('No subfolders'))}</div>`;
+    return true;
+  }catch(error){if(current())list.innerHTML=`<div class="list-state">${escapeHtml(error.message)}</div>`}
+}
 function openFolderPicker(){const dialog=$('#folderDialog');folderBrowse.selected=null;dialog.showModal();loadFolders(state.projectless?(state.config.defaultCwd||'~/projects'):($('#projectPath').textContent||'~/projects'));$('#projectlessOption').classList.toggle('selected',state.projectless)}
 async function syncWorkspaceContext(path){const requestId=workspaceContextRequestGate.next();try{const response=await fetch(`/api/workspace/context?cwd=${encodeURIComponent(path)}`,{cache:'no-store'}),context=await response.json();if(!response.ok)throw new Error(context.error||'Workspace context unavailable');if(!workspaceContextRequestGate.isCurrent(requestId)||state.projectless)return;state.workspaceContext=context;if(!state.active)showEmpty()}catch{if(workspaceContextRequestGate.isCurrent(requestId)&&!state.projectless){state.workspaceContext={cwd:path,project:path.split('/').filter(Boolean).at(-1)||path,environment:'Local',branch:'No branch'};if(!state.active)showEmpty()}}}
 function syncProjectControl(){const label=$('#composerProjectLabel');$('#composerWorkspaceBar').hidden=Boolean(state.active);label.textContent=state.projectless?t('Choose project'):($('#projectName').textContent||t('Choose project'))}
@@ -257,7 +289,16 @@ function resetReviewState(){state.turnDiffs.clear();state.activeReview=null;revi
 function clearConversationRuntime(){runtimeProgress.clear();state.requestCards.clear();for(const animation of state.motion.values())animation?.destroy?.();state.items.clear();state.turns.clear();state.activities.clear();state.activityItems.clear();state.sideTasks.clear();state.dividers.clear();state.motion.clear();renderSideTasks()}
 function rememberActiveThread(id){if(id)localStorage.setItem(ACTIVE_THREAD_STORAGE_KEY,String(id));else localStorage.removeItem(ACTIVE_THREAD_STORAGE_KEY)}
 function startNewTask(){conversationLoad?.finish();conversationLoad=null;saveComposerDraft();threadNavigationRequestGate.next();if(mobileSidebarEnabled())setSidebarOpen(false);resetActiveThreadSync();setActiveTurnId('');rememberActiveThread(null);state.active=null;state.goalMode=false;state.composerMentions=[];state.turnWindow=null;clearConversationRuntime();state.changes.clear();resetReviewState();closeComposerAutocomplete();$('#threadTitle').textContent=t('New task');$('#threadPath').textContent=state.projectless?'':$('#projectPath').textContent;restoreComposerDraft();setPlanMode(false);syncProjectControl();renderContextTray();renderContextUsage();resizePrompt();if(!$('#summaryPanel').hidden)syncSummaryPanel();showEmpty();renderThreads();$('#prompt').focus();dispatchEvent(new Event('codex-webui:workspace-change'))}
-function useSelectedFolder(){if(!folderBrowse.selected)return;setWorkspace(folderBrowse.selected);$('#folderDialog').close();startNewTask()}
+function useSelectedFolder(){
+  const cwd=folderBrowse.selected;
+  if(!cwd)return;
+  setWorkspace(cwd);
+  workspaceNavigation.revealProject(cwd);
+  $('#folderDialog').close();
+  startNewTask();
+  if(mobileSidebarEnabled())setSidebarOpen(true);
+  loadProjectThreads(cwd,{refresh:true,reportError:true});
+}
 function useProjectless(){setProjectless();$('#folderDialog').close();startNewTask()}
 function titleOf(t){return (t.name||t.preview||'Untitled task').replace(/\s+/g,' ').trim().slice(0,110)}
 function shortPath(path=''){const home=state.config.home;return home&&path.startsWith(home)?'~'+path.slice(home.length):path}
@@ -268,6 +309,8 @@ async function deleteThread(thread){
   try{
     await rpc('thread/delete',{threadId:thread.id});
     const wasActive=state.active?.id===thread.id;
+    recentThreadSummaries=recentThreadSummaries.filter(item=>item.id!==thread.id);
+    for(const page of projectThreadPages.values())page.data=page.data.filter(item=>item.id!==thread.id);
     state.threads=state.threads.filter(item=>item.id!==thread.id);
     await refreshThreadList();
     if(wasActive)startNewTask();else renderThreads();
@@ -275,7 +318,7 @@ async function deleteThread(thread){
     toast(t('Thread deleted'));
   }catch(error){console.error('Could not delete thread',error);toast(t('Could not delete thread'))}
 }
-const workspaceNavigation = createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, onOpen: id => { if(mobileSidebarEnabled())setSidebarOpen(false);openThread(id) }, onDelete: deleteThread, menu: workspaceMenu, onAddProject: openFolderPicker, onSelectProject: cwd => { setWorkspace(cwd); startNewTask(); if(mobileSidebarEnabled())setSidebarOpen(false) } });
+const workspaceNavigation = createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, onOpen: id => { if(mobileSidebarEnabled())setSidebarOpen(false);openThread(id) }, onDelete: deleteThread, menu: workspaceMenu, onAddProject: openFolderPicker, onSelectProject: cwd => { setWorkspace(cwd); startNewTask(); if(mobileSidebarEnabled())setSidebarOpen(false) }, onExpandProject: cwd => loadProjectThreads(cwd,{reportError:true}), onMoreProjectChats: cwd => loadProjectThreads(cwd,{more:true,reportError:true}) });
 const workspaceChrome = createWorkspaceChrome({ rpc, $, state, t, codexIcon, menu: workspaceMenu, returnToWorkspace, openSettings, openReview: () => openReviewPanel(), openBrowser: () => openUtilityPanel('browser'), openFolderPicker, startNewTask, setWorkspace: path => path === '~' ? setProjectless() : setWorkspace(path), openThread, searchChats: () => { setSidebarOpen(true); setSidebarSearchOpen(true) }, openImageViewer });
 
 async function forkRequest(payload){const response=await fetch('/api/conversation/fork',{method:'POST',headers:{'content-type':'application/json','x-workspace-request':'1'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok)throw new Error(t(result.error));return result;}
@@ -298,7 +341,12 @@ const currentFilesWorkspaceKey=()=>`${state.active?.id||''}:${state.active?.cwd|
 function refreshWorkspaceFiles(){const key=currentFilesWorkspaceKey();if(key!==filesWorkspaceKey)$('#sideFileSearch').value='';filesWorkspaceKey=key;void fileBrowser.open('files')}
 $('#sideFileSearch').oninput=()=>fileBrowser.search();
 addEventListener('codex-webui:workspace-change',()=>{if(!$('#sidePanel').hidden&&!$('#utilityPanelContent').hidden&&filesWorkspaceKey!==currentFilesWorkspaceKey())refreshWorkspaceFiles();});
-function renderThreads(){workspaceChrome.recordNavigation(state.active?.id, state.projectless ? '~' : state.workspaceContext?.cwd);workspaceNavigation.render({ threads: state.threads, activeId: state.active?.id, query: $('#threadSearch').value, pending: new Set([...state.serverRequests.values()].map(item=>item.params?.threadId).filter(Boolean)), home: state.config.home, connected: state.connected })}
+function renderThreads(){
+  workspaceChrome.recordNavigation(state.active?.id, state.projectless ? '~' : state.workspaceContext?.cwd);
+  const projectOnlyIds=new Set([...projectThreadPages.values()].flatMap(page=>page.data.map(thread=>thread.id)));
+  for(const thread of recentThreadSummaries)projectOnlyIds.delete(thread.id);
+  workspaceNavigation.render({ threads: state.threads, projectThreadPages, projectOnlyIds, activeId: state.active?.id, query: $('#threadSearch').value, pending: new Set([...state.serverRequests.values()].map(item=>item.params?.threadId).filter(Boolean)), home: state.config.home, connected: state.connected });
+}
 
 async function openThread(id,fallbackSummary=null){
   const navigationId=threadNavigationRequestGate.next();
@@ -581,8 +629,34 @@ function invalidatePendingApprovals(){
   if(state.serverRequests.size)toast(t('Pending approvals from the earlier connection are no longer actionable. Native approval recovery may be unavailable.'),7000);
   for(const id of [...state.serverRequests.keys()])removeServerRequest(id);
 }
-function threadSummarySignature(threads){return JSON.stringify(threads.map(thread=>[thread.id,thread.updatedAt,thread.recencyAt,thread.status]))}
-function applyThreadSummaries(threads){const nextSignature=threadSummarySignature(threads),changed=nextSignature!==threadListSignature;threadListSignature=nextSignature;state.threads=threads;const summary=state.active&&threads.find(thread=>thread.id===state.active.id);if(summary){const turns=state.active.turns;state.active={...state.active,...summary,turns};if(summary.status?.type==='active')scheduleActiveThreadSync(0)}if(changed)renderThreads()}
+let recentThreadSummaries=[];
+const projectThreadPages=new Map(),projectThreadRequests=new Set();
+function threadSummarySignature(threads){return JSON.stringify(threads.map(thread=>[thread.id,thread.cwd,thread.name,thread.preview,thread.updatedAt,thread.recencyAt,thread.status]))}
+function applyThreadSummaries(threads=recentThreadSummaries,{render=false}={}){
+  recentThreadSummaries=threads;
+  const byId=new Map(threads.map(thread=>[thread.id,thread]));
+  for(const page of projectThreadPages.values())for(const thread of page.data)if(!byId.has(thread.id))byId.set(thread.id,thread);
+  state.threads=[...byId.values()];
+  const nextSignature=JSON.stringify([threadSummarySignature(state.threads),threads.map(thread=>thread.id)]),changed=nextSignature!==threadListSignature;
+  threadListSignature=nextSignature;
+  const summary=state.active&&threads.find(thread=>thread.id===state.active.id);
+  if(summary){const turns=state.active.turns;state.active={...state.active,...summary,turns};if(summary.status?.type==='active')scheduleActiveThreadSync(0)}
+  if(changed||render)renderThreads();
+}
+async function loadProjectThreads(cwd,{more=false,refresh=false,reportError=false}={}){
+  if(!state.connected||!cwd||projectThreadRequests.has(cwd))return;
+  const previous=projectThreadPages.get(cwd),cursor=more?previous?.nextCursor:null;
+  if((more&&!cursor)||(!more&&!refresh&&previous))return;
+  projectThreadRequests.add(cwd);
+  try{
+    const page=await rpc('thread/list',{cwd,modelProviders:[],limit:100,sortKey:'recency_at',sortDirection:'desc',...(cursor?{cursor}:{})},{timeoutMs:30_000});
+    const data=new Map((more?previous.data:[]).map(thread=>[thread.id,thread]));
+    for(const thread of page.data||[])if(thread.cwd===cwd&&!thread.projectless)data.set(thread.id,thread);
+    projectThreadPages.set(cwd,{data:[...data.values()],nextCursor:page.nextCursor!==cursor?page.nextCursor:null});
+    applyThreadSummaries(undefined,{render:true});
+  }catch(error){if(reportError&&!error?.silentTransportSwitch)toast(t('Could not load project chats'))}
+  finally{projectThreadRequests.delete(cwd)}
+}
 function scheduleThreadListRefresh(delay=THREAD_LIST_POLL_MS){if(accessSession?.required)return;clearTimeout(threadListTimer);threadListTimer=setTimeout(refreshThreadList,document.visibilityState==='hidden'?Math.max(delay,8000):delay)}
 async function refreshThreadList(){if(threadListInFlight){scheduleThreadListRefresh(1000);return}threadListInFlight=true;try{const result=await rpc('thread/list',{limit:50,sortKey:'recency_at',sortDirection:'desc'});applyThreadSummaries(result.data||[])}catch{}finally{threadListInFlight=false;scheduleThreadListRefresh()}}
 function refreshThreadsSoon(){scheduleThreadListRefresh(600)}
