@@ -15,9 +15,7 @@ import (
 	"regexp"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode/utf16"
 )
@@ -31,19 +29,6 @@ type conversationOwner struct {
 	Host     string `json:"host"`
 	Stamp    string `json:"stamp,omitempty"`
 	Instance string `json:"instance"`
-}
-
-func conversationStamp(pid int) string {
-	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-	if err != nil {
-		return ""
-	}
-	if end := bytes.LastIndex(data, []byte(") ")); end != -1 {
-		if fields := strings.Fields(string(data[end+2:])); len(fields) > 19 {
-			return fields[19]
-		}
-	}
-	return ""
 }
 
 func uuidConversation() string {
@@ -63,12 +48,11 @@ func (owner conversationOwner) alive(host string) bool {
 	if owner.Host != host || owner.PID < 1 {
 		return false
 	}
-	err := syscall.Kill(owner.PID, 0)
-	return errors.Is(err, syscall.EPERM) || (err == nil && (owner.Stamp == "" || owner.Stamp == conversationStamp(owner.PID)))
+	return processAlive(owner.PID, owner.Stamp)
 }
 
 func readConversationPrivate(path string, limit int) ([]byte, error) {
-	file, err := desktopOpen(path, syscall.O_RDONLY, limit, true)
+	file, err := desktopOpen(path, os.O_RDONLY, limit, true)
 	if err != nil {
 		return nil, err
 	}

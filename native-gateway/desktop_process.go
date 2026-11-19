@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -26,6 +25,7 @@ type desktopProcess struct {
 	mu         sync.Mutex
 	status     desktopProcessStatus
 	child      *exec.Cmd
+	stdin      *os.File
 	done       chan struct{}
 	desired    bool
 	generation uint64
@@ -78,8 +78,11 @@ func (p *desktopProcess) launchLocked(spec desktopLaunch, generation uint64) err
 	p.status = desktopProcessStatus{Phase: "starting"}
 	child := exec.Command(spec.binary, spec.args...)
 	child.Dir, child.Env = spec.cwd, spec.env
-	child.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	lifetime, stdin, err := os.Pipe()
+	err := configureOwnedCommand(child)
+	var lifetime, stdin *os.File
+	if err == nil {
+		lifetime, stdin, err = os.Pipe()
+	}
 	if err != nil {
 		p.desired = false
 		p.status = desktopProcessStatus{Phase: "failed"}
@@ -107,7 +110,7 @@ func (p *desktopProcess) launchLocked(spec desktopLaunch, generation uint64) err
 	}
 	done, ready := make(chan struct{}), make(chan struct{})
 	pid := child.Process.Pid
-	p.child, p.done, p.status.PID = child, done, &pid
+	p.child, p.stdin, p.done, p.status.PID = child, stdin, done, &pid
 	p.mu.Unlock()
 	go func() {
 		defer output.Close()
@@ -127,7 +130,7 @@ func (p *desktopProcess) launchLocked(spec desktopLaunch, generation uint64) err
 		output.Close()
 		p.mu.Lock()
 		defer p.mu.Unlock()
-		p.child = nil
+		p.child, p.stdin = nil, nil
 		defer close(done)
 		if !p.desired || p.generation != generation {
 			p.status = desktopProcessStatus{Phase: "stopped"}
@@ -192,8 +195,8 @@ func (p *desktopProcess) stopGeneration(generation uint64) {
 		return
 	}
 	p.status.Phase = "stopping"
-	pid := child.Process.Pid
-	_ = syscall.Kill(-pid, syscall.SIGTERM)
+	_ = p.stdin.Close()
+	_ = stopOwnedCommand(child, false)
 	p.mu.Unlock()
 	timer := time.NewTimer(8 * time.Second)
 	defer timer.Stop()
@@ -202,7 +205,7 @@ func (p *desktopProcess) stopGeneration(generation uint64) {
 	case <-timer.C:
 		p.mu.Lock()
 		if p.child == child {
-			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			_ = stopOwnedCommand(child, true)
 		}
 		p.mu.Unlock()
 		<-done
@@ -211,7 +214,7 @@ func (p *desktopProcess) stopGeneration(generation uint64) {
 
 func desktopChildEnvironment(home string, config desktopConfig) []string {
 	values := []string{}
-	for _, key := range []string{"LANG", "LC_ALL", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "CODEX_HOME", "CODEX_AUTH_PATH", "CODEX_WEBUI_APP_SERVER_MODE", "CODEX_WEBUI_APP_SERVER_SOCKET"} {
+	for _, key := range append([]string{"LANG", "LC_ALL", "TMPDIR", "SSL_CERT_FILE", "SSL_CERT_DIR", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "CODEX_HOME", "CODEX_AUTH_PATH", "CODEX_WEBUI_APP_SERVER_MODE", "CODEX_WEBUI_APP_SERVER_SOCKET"}, desktopPlatformEnv()...) {
 		if value := os.Getenv(key); value != "" {
 			values = append(values, key+"="+value)
 		}
@@ -223,11 +226,11 @@ func desktopChildEnvironment(home string, config desktopConfig) []string {
 }
 
 func desktopPath(home string) string {
-	entries := []string{filepath.Join(home, ".local/bin"), filepath.Join(home, ".bun/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"}
+	entries := desktopPathEntries(home)
 	if path := os.Getenv("PATH"); path != "" {
 		entries = append([]string{path}, entries...)
 	}
-	return strings.Join(entries, ":")
+	return strings.Join(entries, string(os.PathListSeparator))
 }
 
 func desktopExecutable(name, preferred, path string) string {
@@ -262,14 +265,10 @@ func (b *desktopOutput) Write(p []byte) (int, error) {
 func desktopExec(ctx context.Context, binary string, args, env []string, cwd string, limit int) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, binary, args...)
 	cmd.Dir, cmd.Env = cwd, env
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); errors.Is(err, syscall.ESRCH) {
-			return os.ErrProcessDone
-		} else {
-			return err
-		}
+	if err := configureOwnedCommand(cmd); err != nil {
+		return nil, err
 	}
+	cmd.Cancel = func() error { return stopOwnedCommand(cmd, true) }
 	cmd.WaitDelay = time.Second
 	out := &desktopOutput{limit: limit}
 	cmd.Stdout = out

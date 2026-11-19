@@ -10,7 +10,6 @@ import (
 	"regexp"
 	"slices"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -101,7 +100,7 @@ func developerSaveRegistry(root *os.Root, items []developerWorktree) error {
 		return developerFailure("TOOLS_UNSAFE_PATH", 403)
 	}
 	temp := workspaceUUID() + ".tmp"
-	f, err := root.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	f, err := root.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, 0600)
 	if err != nil {
 		return err
 	}
@@ -183,7 +182,7 @@ func developerExclude(ctx context.Context, repo string) error {
 	const line = "/.codex-remote-web/"
 	f, _, err := developerOpenRegular(parent, name, os.O_RDWR|os.O_APPEND, 1<<20)
 	if os.IsNotExist(err) {
-		f, err = parent.OpenFile(name, os.O_RDWR|os.O_APPEND|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0644)
+		f, err = parent.OpenFile(name, os.O_RDWR|os.O_APPEND|os.O_CREATE|os.O_EXCL|noFollow, 0644)
 	}
 	if err != nil {
 		return err

@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -26,7 +27,11 @@ func workspaceFixture(t *testing.T) (*workspace, string, string) {
 			t.Fatal(err)
 		}
 	}
-	t.Setenv("CODEX_HOME", filepath.Join(root, "home", "profile"))
+	profile := filepath.Join(root, "home", "profile")
+	if err := makePrivateDirectory(profile); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", profile)
 	t.Setenv("CODEX_AUTH_PATH", filepath.Join(project, "private.txt"))
 	t.Setenv("CODEX_WEBUI_AUTH_STORE", filepath.Join(project, "second-private.txt"))
 	t.Setenv("CODEX_WEBUI_DOWNLOAD_ROOTS", "")
@@ -242,7 +247,7 @@ func TestWorkspaceDocumentVersionPermissionsAndOrigin(t *testing.T) {
 		t.Fatalf("save: %d %s", r.Code, r.Body)
 	}
 	info, err := os.Stat(filepath.Join(project, document))
-	if err != nil || info.Mode().Perm() != 0640 {
+	if err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0640) {
 		t.Fatalf("mode after save: %v %v", info, err)
 	}
 	read, err := os.ReadFile(filepath.Join(project, document))
@@ -319,7 +324,7 @@ func TestWorkspaceSkillInstallIsScopedAndExclusive(t *testing.T) {
 		}
 	}
 	info, err := os.Stat(filepath.Join(dir, "scripts", "run.sh"))
-	if err != nil || info.Mode().Perm() != 0700 {
+	if err != nil || (runtime.GOOS != "windows" && info.Mode().Perm() != 0700) {
 		t.Fatalf("script mode: %v %v", info, err)
 	}
 	if _, err := s.installSkill(t.Context(), source); err == nil {

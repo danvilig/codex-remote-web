@@ -50,9 +50,11 @@ func TestWorkspaceAttachmentsLifecycle(t *testing.T) {
 		t.Fatalf("upload: %d %s", response.Code, response.Body)
 	}
 	metadata := filepath.Join(s.attachments.path, item.ID, "metadata.json")
-	if info, err := os.Stat(metadata); err != nil || info.Mode().Perm() != 0600 {
-		t.Fatalf("metadata permissions: %v %v", info, err)
+	privateFile, err := desktopOpen(metadata, os.O_RDONLY, desktopStateLimit, true)
+	if err != nil {
+		t.Fatalf("metadata permissions: %v", err)
 	}
+	privateFile.Close()
 	get := func(path string, q url.Values) *httptest.ResponseRecorder {
 		return workspaceRequest(mux, "GET", "/api/attachments"+path, q, "", "")
 	}
@@ -83,7 +85,8 @@ func TestWorkspaceAttachmentsLifecycle(t *testing.T) {
 		t.Fatalf("duplicate attachment IDs: %d %s", response.Code, response.Body)
 	}
 	response = resolve(map[string]any{"cwd": project, "ids": []string{item.ID}})
-	if response.Code != 200 || !strings.Contains(response.Body.String(), filepath.Join(s.attachments.path, item.ID, "content.txt")) {
+	contentPath, _ := json.Marshal(filepath.Join(s.attachments.path, item.ID, "content.txt"))
+	if response.Code != 200 || !strings.Contains(response.Body.String(), string(contentPath)) {
 		t.Fatalf("resolution: %d %s", response.Code, response.Body)
 	}
 	for range 2 {
@@ -100,7 +103,7 @@ func TestWorkspaceAttachmentsLifecycle(t *testing.T) {
 	if response := get("/file", url.Values{"id": {"../metadata.json"}}); response.Code != 400 {
 		t.Fatalf("invalid file id: %d %s", response.Code, response.Body)
 	}
-	if err := os.Chmod(metadata, 0644); err != nil {
+	if err := exposeTestFile(metadata); err != nil {
 		t.Fatal(err)
 	}
 	if response := get("/file", byID); response.Code != 400 {

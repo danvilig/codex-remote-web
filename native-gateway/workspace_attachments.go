@@ -13,7 +13,6 @@ import (
 	"slices"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 	"unicode/utf16"
 )
@@ -81,13 +80,9 @@ func attachmentImage(head []byte, name string) bool {
 	return false
 }
 
-func attachmentPrivate(info os.FileInfo) bool {
-	return desktopOwned(info) && info.Mode().Perm()&0077 == 0
-}
-
 func (a *workspaceAttachments) openRoot(create bool) (*os.Root, error) {
 	if create {
-		if err := os.MkdirAll(a.workspace.privateRoot, 0700); err != nil {
+		if err := makePrivateDirectory(a.workspace.privateRoot); err != nil {
 			return nil, err
 		}
 	}
@@ -100,7 +95,7 @@ func (a *workspaceAttachments) openRoot(create bool) (*os.Root, error) {
 		return nil, err
 	}
 	defer parent.Close()
-	if info, err := parent.Stat("."); err != nil || !desktopOwned(info) || info.Mode().Perm()&0022 != 0 {
+	if _, ok := rootOwnedDir(parent, 0022); !ok {
 		return nil, workspaceUnavailable
 	}
 	name := filepath.Base(a.path)
@@ -117,14 +112,14 @@ func attachmentOpenDir(root *os.Root, name string) (*os.Root, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !before.IsDir() || !attachmentPrivate(before) {
+	if !before.IsDir() {
 		return nil, workspaceUnavailable
 	}
 	dir, err := root.OpenRoot(name)
 	if err != nil {
 		return nil, err
 	}
-	if info, err := dir.Stat("."); err != nil || !attachmentPrivate(info) || !os.SameFile(before, info) {
+	if info, ok := rootOwnedDir(dir, 0077); !ok || !os.SameFile(before, info) {
 		dir.Close()
 		return nil, workspaceUnavailable
 	}
@@ -136,15 +131,15 @@ func attachmentOpenFile(root *os.Root, name string, limit int64) (*os.File, os.F
 	if err != nil {
 		return nil, nil, err
 	}
-	if !before.Mode().IsRegular() || !attachmentPrivate(before) {
+	if !before.Mode().IsRegular() {
 		return nil, nil, workspaceUnavailable
 	}
-	f, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	f, err := root.OpenFile(name, os.O_RDONLY|noFollow|noBlock, 0)
 	if err != nil {
 		return nil, nil, err
 	}
 	info, err := f.Stat()
-	if err != nil || !os.SameFile(before, info) || !attachmentPrivate(info) || info.Size() > limit || info.Sys().(*syscall.Stat_t).Nlink != 1 {
+	if err != nil || !os.SameFile(before, info) || !fileOwned(f, info, 0077) || info.Size() > limit || !singleLink(f, info) {
 		f.Close()
 		return nil, nil, workspaceUnavailable
 	}
@@ -169,7 +164,7 @@ func attachmentWriteJSON(root *os.Root, name string, target any) error {
 	if err != nil {
 		return err
 	}
-	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	f, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, 0600)
 	if err != nil {
 		return err
 	}
@@ -311,7 +306,7 @@ func (a *workspaceAttachments) upload(r *http.Request) (workspaceAttachment, err
 		return item, err
 	}
 	defer dir.Close()
-	file, err := dir.OpenFile("upload.part", os.O_RDWR|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	file, err := dir.OpenFile("upload.part", os.O_RDWR|os.O_CREATE|os.O_EXCL|noFollow, 0600)
 	if err != nil {
 		return item, err
 	}

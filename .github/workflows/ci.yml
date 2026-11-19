@@ -28,6 +28,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native-gateway/go.mod
+          cache-dependency-path: native-gateway/go.sum
+      - run: node --test tests/release/verify-platform-candidate.test.mjs
+      - name: Check Go gateway contracts
+        working-directory: native-gateway
+        run: go vet -mod=readonly ./... && go test -mod=readonly -race ./...
       - name: Validate public history before installing dependencies
         if: hashFiles('SOURCE_PROVENANCE.json') != ''
         run: bun run source:scan -- --published

@@ -9,11 +9,30 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 )
 
 const desktopStateLimit = 256 << 10
+
+func regularFileHandle(f *os.File, info os.FileInfo) bool {
+	_, _, _, ok := fileIdentity(f, info)
+	return ok
+}
+
+func singleLink(f *os.File, info os.FileInfo) bool {
+	_, _, links, ok := fileIdentity(f, info)
+	return ok && links == 1
+}
+
+func rootOwnedDir(root *os.Root, forbidden os.FileMode) (os.FileInfo, bool) {
+	f, err := root.OpenFile(".", os.O_RDONLY|noFollow, 0)
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	return info, err == nil && info.IsDir() && fileOwned(f, info, forbidden)
+}
 
 type desktopError struct {
 	Message string `json:"error"`
@@ -38,37 +57,41 @@ func desktopDirectory(home string) string {
 	return filepath.Join(home, ".config", "codex-remote-web", "desktop")
 }
 
-func desktopOwned(info os.FileInfo) bool {
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	return ok && stat.Uid == uint32(os.Getuid())
-}
-
 func ensureDesktopDirectory(directory string) error {
-	if err := os.MkdirAll(directory, 0700); err != nil {
+	if err := makePrivateDirectory(directory); err != nil {
 		return err
 	}
-	info, err := os.Lstat(directory)
+	before, err := os.Lstat(directory)
 	if err != nil {
 		return err
 	}
-	if !info.IsDir() || !desktopOwned(info) || info.Mode().Perm()&0077 != 0 {
+	if !before.IsDir() {
+		return errors.New("Desktop state must be in a private local directory")
+	}
+	f, err := openDesktopNoFollow(directory, os.O_RDONLY)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil || !os.SameFile(before, info) || !fileOwned(f, info, 0077) {
 		return errors.New("Desktop state must be in a private local directory")
 	}
 	return nil
 }
 
 func desktopOpen(path string, flags, limit int, private bool) (*os.File, error) {
-	fd, err := syscall.Open(path, flags|syscall.O_NOFOLLOW|syscall.O_CLOEXEC|syscall.O_NONBLOCK, 0600)
+	file, err := openDesktopNoFollow(path, flags)
 	if err != nil {
-		if errors.Is(err, syscall.ELOOP) {
-			return nil, errors.New("Unsafe desktop state file")
-		}
 		return nil, err
 	}
-	file := os.NewFile(uintptr(fd), path)
 	info, err := file.Stat()
 	if err == nil {
-		if !info.Mode().IsRegular() || !desktopOwned(info) || info.Sys().(*syscall.Stat_t).Nlink != 1 || info.Size() > int64(limit) || (private && info.Mode().Perm()&0077 != 0) {
+		var forbidden os.FileMode
+		if private {
+			forbidden = 0077
+		}
+		if !info.Mode().IsRegular() || !fileOwned(file, info, forbidden) || !singleLink(file, info) || info.Size() > int64(limit) {
 			err = errors.New("Unsafe desktop state file")
 		}
 	}
@@ -80,7 +103,7 @@ func desktopOpen(path string, flags, limit int, private bool) (*os.File, error) 
 }
 
 func readDesktopFile(path string, private bool) ([]byte, error) {
-	file, err := desktopOpen(path, syscall.O_RDONLY, desktopStateLimit, private)
+	file, err := desktopOpen(path, os.O_RDONLY, desktopStateLimit, private)
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -107,15 +130,6 @@ func readDesktopJSON(path string, dest any) (bool, error) {
 		return false, errors.New("Invalid desktop state file")
 	}
 	return true, nil
-}
-
-func syncDesktopDirectory(path string) error {
-	dir, err := os.Open(path)
-	if err != nil {
-		return err
-	}
-	defer dir.Close()
-	return dir.Sync()
 }
 
 func writeDesktopFile(path string, data []byte) error {
@@ -176,8 +190,8 @@ var desktopLocks = struct {
 }{held: make(map[string]bool)}
 
 // The old agent holds SQLite's BEGIN IMMEDIATE transaction in this stable
-// inode. Claim the same POSIX lock range without loading SQLite. Using flock
-// here would let an old agent and a native agent both become owners.
+// file. Claim the same lock range without loading SQLite. A separate lock
+// mechanism would let an old agent and a native agent both become owners.
 func lockDesktop(directory, name string, timeout time.Duration) (func(), error) {
 	directory, err := filepath.EvalSymlinks(directory)
 	if err != nil {
@@ -206,18 +220,17 @@ func lockDesktop(directory, name string, timeout time.Duration) (func(), error) 
 		delete(desktopLocks.held, path)
 		desktopLocks.Unlock()
 	}
-	file, err := desktopOpen(path, syscall.O_RDWR|syscall.O_CREAT, 1<<20, true)
+	file, err := desktopOpen(path, os.O_RDWR|os.O_CREATE, 1<<20, true)
 	if err != nil {
 		forget()
 		return nil, err
 	}
-	lock := syscall.Flock_t{Type: syscall.F_WRLCK, Whence: io.SeekStart, Start: 0x40000000, Len: 512}
 	for {
-		err = syscall.FcntlFlock(file.Fd(), syscall.F_SETLK, &lock)
-		if err == nil {
+		locked, err := trySQLiteLock(file)
+		if locked {
 			return sync.OnceFunc(func() { file.Close(); forget() }), nil
 		}
-		if !errors.Is(err, syscall.EACCES) && !errors.Is(err, syscall.EAGAIN) && !errors.Is(err, syscall.EINTR) {
+		if err != nil {
 			file.Close()
 			forget()
 			return nil, fmt.Errorf("Desktop lock: %w", err)

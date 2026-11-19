@@ -1000,6 +1000,12 @@ Object.assign(ZH_CN, {
 Object.assign(ZH_CN, {
   "Configuration recovery could not finish. Retry after checking the connection.": "配置恢复未能完成，请检查连接后重试。",
   "Recover configuration": "恢复配置",
+  "Switch to the native gateway": "切换到原生网关",
+  "Recover gateway migration": "恢复网关迁移",
+  "Finish the interrupted gateway migration before changing the deployment.": "请先恢复中断的网关迁移，再修改部署。",
+  "Switching the service to the native gateway briefly disconnects remote sessions.": "切换到原生网关会暂时断开远程会话。",
+  "Run codex-remote-web setup on the server to migrate the service.": "请在服务器上运行 codex-remote-web setup 迁移服务。",
+  "The managed Linux service now runs the native gateway": "Linux 服务已切换到原生网关",
   "Change the hostname, domain, existing Tunnel, port or allowed email in the current Cloudflare account. Saving restarts the protected service and may briefly interrupt remote access.": "可修改当前 Cloudflare 账户中的域名、DNS 区域、已有 Tunnel、端口和允许登录的邮箱。保存会重启受保护服务，公网访问可能短暂中断。",
   "A configuration change needs recovery. Recover it before making other changes.": "配置修改尚未完成，请先恢复配置，再进行其他操作。",
   "Restart the protected service and move the managed Cloudflare route. Existing connections and web terminals will disconnect.": "重启受保护服务并迁移托管的 Cloudflare 路由，现有连接和网页终端将断开。",

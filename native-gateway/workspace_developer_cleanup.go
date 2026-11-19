@@ -7,7 +7,6 @@ import (
 	"os"
 	"regexp"
 	"slices"
-	"syscall"
 	"time"
 )
 
@@ -31,15 +30,16 @@ type developerCleanupCandidate struct {
 var developerCleanupChanged = developerFailure("TOOLS_CLEANUP_CHANGED", 409)
 
 func developerCleanupSnapshot(root *os.Root, name string) (developerCleanupFile, error) {
-	info, err := root.Lstat(name)
+	f, info, err := attachmentOpenFile(root, name, 1<<62)
 	if err != nil {
-		return developerCleanupFile{}, err
+		return developerCleanupFile{}, errors.Join(developerCleanupChanged, err)
 	}
-	stat, ok := info.Sys().(*syscall.Stat_t)
-	if !info.Mode().IsRegular() || !attachmentPrivate(info) || !ok || stat.Nlink != 1 {
+	defer f.Close()
+	device, inode, links, ok := fileIdentity(f, info)
+	if !ok || links != 1 {
 		return developerCleanupFile{}, developerCleanupChanged
 	}
-	return developerCleanupFile{name, info.Size(), info.ModTime().UnixNano(), uint64(stat.Dev), uint64(stat.Ino)}, nil
+	return developerCleanupFile{name, info.Size(), info.ModTime().UnixNano(), device, inode}, nil
 }
 
 func developerDirectoryNames(root *os.Root, limit int) ([]string, error) {

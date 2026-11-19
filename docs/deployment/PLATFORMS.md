@@ -1,6 +1,6 @@
 # Desktop gateway / 桌面网关
 
-The macOS DMG uses a native AppKit status bar/window and the system WKWebView. Windows per-user MSI and Linux desktop DEB use Electron. All three render the same settings interface. The standalone archives remain command-line distributions for headless use. Desktop packages include the existing Bun/Node gateway and native terminal; Codex CLI, Git and cloudflared are external prerequisites. Electron is pinned in the lockfile, and its MIT/Chromium notices accompany Windows/Linux desktop packages. macOS includes no Chromium or Electron framework; the Bun/Node gateway and native PTY remain self-contained.
+The macOS DMG uses an AppKit status bar/window and the system WKWebView. Windows per-user MSI and Linux desktop DEB use Electron for the settings interface. All three ship the native Go gateway and native terminal; standalone archives provide the command-line distribution. Electron is pinned in the lockfile, and its MIT/Chromium notices accompany Windows/Linux desktop packages. Install Codex CLI and Git separately; remote access also needs cloudflared.
 
 ## 初始化与日常使用
 

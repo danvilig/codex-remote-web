@@ -124,6 +124,9 @@ func (a *desktopAgent) cloudWaitConnector(ctx context.Context, client desktopClo
 }
 
 func (a *desktopAgent) cloudInstallNative(ctx context.Context, r *desktopDeploymentReceipt, persist func() error) error {
+	if a.systemd != nil {
+		return a.systemd.install(ctx, r, persist)
+	}
 	owner, err := desktopGeneration()
 	if err != nil {
 		return err
@@ -300,15 +303,21 @@ func (a *desktopAgent) cloudApply(ctx context.Context, client desktopCloud, plan
 			if len(token) < 16 || len(token) > 16384 || strings.ContainsAny(token, "\x00\r\n") {
 				return cloudConflict("Invalid connector token")
 			}
-			r.Connector = &desktopOwnedConnector{Binary: binary, Owner: id}
-			if err := persist(); err != nil {
-				return err
-			}
-			if err := writeDesktopJSON(filepath.Join(a.directory, "tunnel-token.json"), map[string]string{"owner": id, "token": token}); err != nil {
-				return err
-			}
-			if err := a.startConnector(r.Connector); err != nil {
-				return err
+			if a.systemd != nil {
+				if err := a.systemd.installConnector(binary, token, r, persist); err != nil {
+					return err
+				}
+			} else {
+				r.Connector = &desktopOwnedConnector{Binary: binary, Owner: id}
+				if err := persist(); err != nil {
+					return err
+				}
+				if err := writeDesktopJSON(filepath.Join(a.directory, "tunnel-token.json"), map[string]string{"owner": id, "token": token}); err != nil {
+					return err
+				}
+				if err := a.startConnector(r.Connector); err != nil {
+					return err
+				}
 			}
 			if err := a.cloudWaitConnector(ctx, client, *input, true); err != nil {
 				return err
@@ -481,15 +490,21 @@ func (a *desktopAgent) cloudCleanup(ctx context.Context, client desktopCloud, r 
 		}
 	}
 	if r.Local != nil {
-		path := filepath.Join(a.directory, "protected-gateway.json")
-		if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
-			if err := a.assertOwnedDeployment(r); err != nil {
+		if a.systemd != nil {
+			if err := a.systemd.removeService(r.Local); err != nil {
 				return err
 			}
-		}
-		a.protected.stop()
-		if err := removeDesktopFile(path); err != nil {
-			return err
+		} else {
+			path := filepath.Join(a.directory, "protected-gateway.json")
+			if _, err := os.Lstat(path); !errors.Is(err, os.ErrNotExist) {
+				if err := a.assertOwnedDeployment(r); err != nil {
+					return err
+				}
+			}
+			a.protected.stop()
+			if err := removeDesktopFile(path); err != nil {
+				return err
+			}
 		}
 	}
 	if r.CreatedTunnel {
@@ -538,6 +553,9 @@ func (a *desktopAgent) cloudCleanup(ctx context.Context, client desktopCloud, r 
 func (a *desktopAgent) cloudRemoveConnector(owner *desktopOwnedConnector) error {
 	if owner == nil {
 		return nil
+	}
+	if a.systemd != nil {
+		return a.systemd.removeConnector(owner)
 	}
 	path := filepath.Join(a.directory, "tunnel-token.json")
 	var current struct{ Owner string }

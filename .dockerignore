@@ -7,7 +7,14 @@
 !Dockerfile
 !scripts/
 !scripts/build.ts
-!scripts/setup.ts
+!scripts/native-gateway.ts
+!native-gateway/
+!native-gateway/*.go
+!native-gateway/go.mod
+!native-gateway/go.sum
+!native-gateway/licenses/
+!native-gateway/licenses/*.txt
+!native-gateway/windows-session.ps1
 !src/
 !src/**
 !public/

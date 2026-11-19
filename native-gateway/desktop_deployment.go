@@ -23,13 +23,16 @@ type desktopRemoteInput struct {
 }
 
 type desktopOwnedEnvironment struct {
-	Owner       string `json:"owner"`
+	Owner       string `json:"owner,omitempty"`
 	Environment string `json:"environment"`
+	Unit        string `json:"unit,omitempty"`
 }
 
 type desktopOwnedConnector struct {
-	Owner  string `json:"owner"`
-	Binary string `json:"binary"`
+	Owner       string `json:"owner,omitempty"`
+	Binary      string `json:"binary,omitempty"`
+	Unit        string `json:"unit,omitempty"`
+	TokenDigest string `json:"tokenDigest,omitempty"`
 }
 
 type desktopDeploymentReceipt struct {
@@ -63,6 +66,9 @@ func (a *desktopAgent) readDeployment() (*desktopDeploymentReceipt, error) {
 }
 
 func (a *desktopAgent) assertOwnedDeployment(receipt *desktopDeploymentReceipt, alternatives ...string) error {
+	if a.systemd != nil {
+		return a.systemd.assertOwned(receipt.Local, alternatives...)
+	}
 	var current desktopOwnedEnvironment
 	found, err := readDesktopJSON(filepath.Join(a.directory, "protected-gateway.json"), &current)
 	if err != nil {

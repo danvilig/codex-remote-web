@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 	"unicode/utf8"
 )
@@ -57,7 +56,7 @@ func (d *developerTools) project(cwd string) (string, error) {
 }
 
 func (d *developerTools) root() (*os.Root, error) {
-	if err := os.MkdirAll(d.w.privateRoot, 0700); err != nil {
+	if err := makePrivateDirectory(d.w.privateRoot); err != nil {
 		return nil, err
 	}
 	private := workspaceCanonical(d.w.privateRoot)
@@ -66,7 +65,7 @@ func (d *developerTools) root() (*os.Root, error) {
 		return nil, err
 	}
 	defer parent.Close()
-	if info, err := parent.Stat("."); err != nil || !desktopOwned(info) || info.Mode().Perm()&0022 != 0 {
+	if _, ok := rootOwnedDir(parent, 0022); !ok {
 		return nil, developerFailure("TOOLS_UNSAFE_PATH", 403)
 	}
 	name := filepath.Base(d.path)
@@ -232,12 +231,12 @@ func developerOpenRegular(root *os.Root, name string, flags int, limit int64) (*
 	if !before.Mode().IsRegular() {
 		return nil, nil, developerFailure("TOOLS_UNSAFE_PATH", 403)
 	}
-	file, err := root.OpenFile(name, flags|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := root.OpenFile(name, flags|noFollow|noBlock, 0)
 	if err != nil {
 		return nil, nil, err
 	}
 	info, err := file.Stat()
-	if err != nil || !os.SameFile(before, info) || info.Sys().(*syscall.Stat_t).Nlink != 1 || info.Size() > limit {
+	if err != nil || !os.SameFile(before, info) || !singleLink(file, info) || info.Size() > limit {
 		file.Close()
 		return nil, nil, developerFailure("TOOLS_UNSAFE_PATH", 403)
 	}
@@ -342,7 +341,7 @@ func (d *developerTools) agentsSave(token string) (any, error) {
 		mode = before.info.Mode().Perm()
 	}
 	temp := ".codex-remote-agents-" + workspaceUUID()
-	f, err := dir.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	f, err := dir.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, 0600)
 	if err != nil {
 		return nil, err
 	}

@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 )
 
@@ -250,7 +249,7 @@ func workspaceOpenDirectory(boundary, path string) (*os.Root, error) {
 	if !workspaceWithin(path, boundary) || !filepath.IsAbs(path) {
 		return nil, workspaceOutsideRoots
 	}
-	base := string(filepath.Separator)
+	base := filepath.VolumeName(path) + string(filepath.Separator)
 	rel, err := filepath.Rel(base, path)
 	if err != nil {
 		return nil, err
@@ -305,12 +304,12 @@ func (s *workspace) openFile(input, cwd string, roots []string, limit int64, ima
 			return nil, nil, err
 		}
 		defer dir.Close()
-		file, err := dir.OpenFile(filepath.Base(path), os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+		file, err := dir.OpenFile(filepath.Base(path), os.O_RDONLY|noBlock|noFollow, 0)
 		if err != nil {
 			return nil, nil, err
 		}
 		info, err := file.Stat()
-		if err != nil || !info.Mode().IsRegular() || info.Size() > limit || !os.SameFile(before, info) || s.privateFile(info) {
+		if err != nil || !info.Mode().IsRegular() || info.Size() > limit || !os.SameFile(before, info) || s.privateFile(info) || !regularFileHandle(file, info) {
 			file.Close()
 			return nil, nil, workspaceUnavailable
 		}

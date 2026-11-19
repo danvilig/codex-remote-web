@@ -4,19 +4,6 @@ on:
     branches: [develop, main, 'release/**']
   pull_request:
   workflow_dispatch:
-    inputs:
-      native_gateway:
-        description: Validate the Go gateway candidate in the macOS installer
-        type: boolean
-        default: false
-  workflow_call:
-    inputs:
-      revision:
-        type: string
-        required: true
-      tag:
-        type: string
-        required: true
 concurrency:
   group: native-packages-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
@@ -30,7 +17,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.revision || '' }}
           persist-credentials: false
       - name: Compile the system WebKit shell and external test driver for macOS 15
         run: |
@@ -63,33 +49,6 @@ jobs:
           name: webkit-compositor-diagnostics
           include-hidden-files: true
           path: .artifacts/macos-webkit-*
-      - uses: actions/setup-node@v4
-        if: ${{ !inputs.native_gateway }}
-        with:
-          node-version-file: .node-version
-      - uses: oven-sh/setup-bun@v2
-        if: ${{ !inputs.native_gateway }}
-        with:
-          bun-version-file: .bun-version
-      - if: ${{ !inputs.native_gateway }}
-        run: bun install --frozen-lockfile
-      - name: Build and smoke-test the native shell on the preview SDK
-        if: ${{ !inputs.native_gateway }}
-        env:
-          CODEX_WEBUI_EXPECT_MACOS_MAJOR: '27'
-        run: |
-          npm_config_nodedir="$(node -p 'require("path").dirname(require("path").dirname(process.execPath))')" npm rebuild node-pty
-          bun scripts/package-platform.ts
-      - uses: actions/upload-artifact@v4
-        if: ${{ always() && !inputs.native_gateway }}
-        with:
-          name: native-shell-preview-smoke
-          overwrite: true
-          include-hidden-files: true
-          path: |
-            .artifacts/macos-*.json
-            .artifacts/macos-*.png
-          if-no-files-found: warn
 
   packages:
     name: package-${{ matrix.os }}-${{ matrix.arch }}
@@ -115,14 +74,11 @@ jobs:
     env:
       TARGET_OS: ${{ matrix.os }}
       TARGET_ARCH: ${{ matrix.arch }}
-      RELEASE_TAG: ${{ inputs.tag || '' }}
       CODEX_WEBUI_EXPECT_MACOS_MAJOR: ${{ matrix.macos-major || '' }}
-      CODEX_WEBUI_BUILD_NATIVE_GATEWAY: ${{ matrix.os == 'darwin' && inputs.native_gateway && '1' || '' }}
-      CODEX_WEBUI_EXPECT_NATIVE_GATEWAY: ${{ matrix.os == 'darwin' && inputs.native_gateway && '1' || '' }}
+      CODEX_WEBUI_EXPECT_NATIVE_GATEWAY: '1'
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.revision || '' }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -131,12 +87,14 @@ jobs:
         with:
           bun-version-file: .bun-version
       - uses: actions/setup-go@v6
-        if: matrix.os == 'darwin' && inputs.native_gateway
         with:
           go-version-file: native-gateway/go.mod
           cache-dependency-path: native-gateway/go.sum
-      - name: Verify the Go gateway on macOS 15
-        if: matrix.os == 'darwin' && inputs.native_gateway
+      - name: Verify native gateway
+        working-directory: native-gateway
+        run: go test -mod=readonly ./...
+      - name: Check Unix gateway for races
+        if: runner.os != 'Windows'
         working-directory: native-gateway
         run: go test -mod=readonly -race ./...
       - run: bun install --frozen-lockfile
@@ -198,11 +156,10 @@ jobs:
     timeout-minutes: 25
     env:
       CODEX_WEBUI_EXPECT_MACOS_MAJOR: '27'
-      CODEX_WEBUI_EXPECT_NATIVE_GATEWAY: ${{ inputs.native_gateway && '1' || '' }}
+      CODEX_WEBUI_EXPECT_NATIVE_GATEWAY: '1'
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.revision || '' }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:

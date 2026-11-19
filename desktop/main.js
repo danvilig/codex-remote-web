@@ -56,12 +56,49 @@ else {
   }
   const pageURL = pathToFileURL(join(here, 'index.html')).href;
   const sessionOptions = { executable: process.execPath, args: launchArgs, directory, command: controlCommand };
+  async function nativeOperation(action, body) {
+    const child = spawn(controlCommand[0], ['native-operation', process.execPath], { cwd: root, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore'] });
+    const reply = await new Promise((resolve, reject) => {
+      const fail = () => reject(new Error('Desktop background operation could not complete'));
+      const timer = setTimeout(() => { child.kill(); fail(); }, 125000);
+      let output = '', size = 0;
+      child.stdout.setEncoding('utf8');
+      child.stdout.on('data', value => {
+        size += Buffer.byteLength(value);
+        if (size > 1024 * 1024) { child.kill(); fail(); return; }
+        output += value;
+      });
+      child.once('error', () => { clearTimeout(timer); fail(); });
+      child.once('close', code => {
+        clearTimeout(timer);
+        if (code !== 0) return fail();
+        try { resolve(JSON.parse(output)); } catch { fail(); }
+      });
+      child.stdin.on('error', fail);
+      child.stdin.end(JSON.stringify({ action, body }));
+    });
+    if (!reply?.ok) throw Object.assign(new Error(reply?.error || 'Desktop operation failed'), { code: reply?.code, status: reply?.status });
+    return reply.value;
+  }
+  const requestAgent = (action, body) => app.isPackaged ? nativeOperation(action, body) : agentRequest(directory, action, body);
+  const removeBackground = () => app.isPackaged ? nativeOperation('removeBackground') : uninstallBackground(sessionOptions, process.execPath);
+  function endBackground() {
+    if (app.isPackaged) backgroundChild?.stdin?.end();
+    else if (backgroundChild?.connected) backgroundChild.disconnect();
+  }
   async function ensureAgent() {
-    try { await agentRequest(directory, 'status', undefined, { timeoutMs: 1000 }); return; } catch {}
+    if (app.isPackaged) {
+      if (await nativeOperation('prepareAgent')) return;
+    } else {
+      try { await agentRequest(directory, 'status', undefined, { timeoutMs: 1000 }); return; } catch {}
+    }
     const child = spawn(process.execPath, [...launchArgs, '--background-agent'], { detached: true, windowsHide: true, stdio: 'ignore' });
     child.on('error', () => {}); child.unref();
     for (let attempt = 0; attempt < 100; attempt++) {
-      try { await agentRequest(directory, 'status', undefined, { timeoutMs: 500 }); return; } catch {}
+      try {
+        const state = await requestAgent('status');
+        if (!app.isPackaged || state.gatewayImplementation === 'go' && state.gatewayVersion === app.getVersion()) return;
+      } catch (error) { if (app.isPackaged && !['AGENT_ABSENT', 'AGENT_OFFLINE'].includes(error.code)) throw error; }
       await new Promise(resolve => setTimeout(resolve, 100));
     }
     throw new Error('Background agent could not start. Check installation and private directory permissions.');
@@ -84,13 +121,16 @@ else {
       const result = await dialog.showOpenDialog(window, { properties: [action === 'chooseDirectory' ? 'openDirectory' : 'openFile'] });
       return result.canceled ? null : result.filePaths[0];
     }
-    if (action === 'openWorkspace') { const state = await agentRequest(directory, 'status'); await external(state.url); return; }
+    if (action === 'openWorkspace') { const state = await requestAgent('status'); await external(state.url); return; }
     if (action === 'cleanUninstall') {
       const confirm = await dialog.showMessageBox(window, { type: 'warning', message: t('Clean up and quit?'), detail: t('Remove app settings, caches, logs and saved management tokens. Projects and your Codex account are preserved.') + '\n' + t(process.platform === 'darwin' && app.isPackaged ? 'The application will move to the Trash.' : 'Then uninstall the application using your system package manager.'), buttons: [t('Cancel'), t('Clean up')], cancelId: 0, defaultId: 0 });
       if (confirm.response !== 1) return;
-      await agentRequest(directory, 'cleanupCheck', undefined, { expectedInstallation: process.execPath });
-      await uninstallBackground(sessionOptions, process.execPath);
-      await promisify(execFile)(controlCommand[0], [...controlCommand.slice(1), 'cleanup-desktop'], { cwd: root, windowsHide: true, timeout: 20000 });
+      if (app.isPackaged) await nativeOperation('cleanUninstall');
+      else {
+        await agentRequest(directory, 'cleanupCheck', undefined, { expectedInstallation: process.execPath });
+        await removeBackground();
+        await promisify(execFile)(controlCommand[0], [...controlCommand.slice(1), 'cleanup-desktop'], { cwd: root, windowsHide: true, timeout: 20000 });
+      }
       const session = window.webContents.session;
       await session.clearStorageData(); await session.clearCache(); await session.clearAuthCache();
       if (process.platform === 'darwin' && app.isPackaged) await shell.trashItem(dirname(dirname(dirname(process.execPath))));
@@ -104,18 +144,18 @@ else {
     if (action === 'removeBackground') {
       const confirm = await dialog.showMessageBox(window, { type: 'question', message: t('Stop and remove the background component?'), detail: t('Your projects, credentials and remote deployment records will be preserved.'), buttons: [t('Cancel'), t('Remove')], cancelId: 0, defaultId: 0 });
       if (confirm.response !== 1) return;
-      await uninstallBackground(sessionOptions, process.execPath); return;
+      await removeBackground(); return;
     }
     if (!['status', 'dependencies', 'config', 'start', 'stop', 'restart', 'setup', 'language'].includes(action)) throw new Error('Unsupported desktop operation');
-    if (action === 'config') {
+    if (action === 'config' && !app.isPackaged) {
       // Reject invalid settings before touching the user's login registration.
       await agentRequest(directory, 'validateConfig', body);
       const restore = await configureSession(body.autostart, sessionOptions);
       try { const state = await agentRequest(directory, action, body); updateMenus(state.config.language); return state; }
       catch (error) { await restore(); throw error; }
     }
-    const result = await agentRequest(directory, action, body);
-    if (action === 'language') updateMenus(result.config.language);
+    const result = await requestAgent(action, body);
+    if (action === 'language' || action === 'config') updateMenus(result.config.language);
     return action === 'status' ? { ...result, systemLocale: desktopLocale('system', systemLanguages()) } : result;
   }
   app.on('second-instance', (_event, argv, _cwd, data) => { if (data?.uninstall) { if (data.executable === process.execPath) { quitting = true; app.quit(); } } else if (!background) { if (argv.includes('--open-workspace')) void operation('openWorkspace').catch(() => {}); else void openWindow(); } });
@@ -123,26 +163,32 @@ else {
   app.on('window-all-closed', () => { if (!background && !tray && !quitting) app.quit(); });
   app.on('before-quit', event => {
     quitting = true;
-    if (backgroundChild?.connected) { event.preventDefault(); backgroundChild.disconnect(); setTimeout(() => app.exit(0), 12000).unref(); }
+    if (backgroundChild && backgroundChild.exitCode === null && backgroundChild.signalCode === null) {
+      event.preventDefault(); endBackground(); setTimeout(() => app.exit(0), 12000).unref();
+    }
   });
   void app.whenReady().then(async () => {
   trace('native application ready');
   if (uninstall) {
     try {
-      await uninstallBackground(sessionOptions, process.execPath);
+      await removeBackground();
       app.exit(0);
     } catch { app.exit(1); }
   } else if (background) {
-    await privateDirectory(directory);
+    if (!app.isPackaged) await privateDirectory(directory);
     if (process.platform === 'darwin') app.dock?.hide();
     const command = [...controlCommand, 'agent'];
-    backgroundChild = spawn(command[0], command.slice(1), { cwd: root, env: { ...process.env, CODEX_WEBUI_DESKTOP_INSTALLATION: process.execPath }, windowsHide: true, serialization: 'json', stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    backgroundChild = spawn(command[0], command.slice(1), { cwd: root,
+      env: { ...process.env, CODEX_WEBUI_DESKTOP_INSTALLATION: process.execPath, ...(app.isPackaged ? { CODEX_WEBUI_DESKTOP_PIPE_PARENT: '1' } : {}) },
+      windowsHide: true, serialization: 'json', stdio: app.isPackaged ? ['pipe', 'ignore', 'ignore'] : ['ignore', 'ignore', 'ignore', 'ipc'],
+    });
+    backgroundChild.stdin?.on('error', () => {});
     backgroundChild.once('error', () => app.exit(1)); backgroundChild.once('exit', code => app.exit(code || 0));
-    powerMonitor.on('shutdown', () => { backgroundChild?.disconnect(); });
+    powerMonitor.on('shutdown', endBackground);
     // A hidden native window receives Windows logoff/session-end messages.
-    if (process.platform === 'win32') { sessionWindow = new BrowserWindow({ show: false, skipTaskbar: true, webPreferences: { sandbox: true } }); sessionWindow.on('session-end', () => { backgroundChild?.disconnect(); }); }
+    if (process.platform === 'win32') { sessionWindow = new BrowserWindow({ show: false, skipTaskbar: true, webPreferences: { sandbox: true } }); sessionWindow.on('session-end', endBackground); }
   } else {
-    await privateDirectory(directory);
+    if (!app.isPackaged) await privateDirectory(directory);
     ipcMain.handle('desktop:operation', async (event, action, body) => {
       if (event.senderFrame !== window?.webContents.mainFrame || event.senderFrame.url !== pageURL || JSON.stringify(body || {}).length > 16384) throw new Error('Untrusted desktop request');
       try { return { ok: true, value: await operation(action, body) }; }
@@ -150,7 +196,7 @@ else {
     });
     await ensureAgent().catch(error => dialog.showErrorBox('Codex Remote Web', error.message));
     let preference = 'system';
-    try { preference = (await agentRequest(directory, 'status')).config.language; } catch {}
+    try { preference = (await requestAgent('status')).config.language; } catch {}
     updateMenus(preference);
     try {
       if (process.platform === 'linux') {

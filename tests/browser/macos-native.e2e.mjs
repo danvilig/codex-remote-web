@@ -106,6 +106,7 @@ async function closeApplication() {
   current.child.stdin.destroy(); application = null;
 }
 const menus = [];
+let visibleCompositeFailure;
 try {
   await launch();
   assert.deepEqual(await application.request('security'), { persistent: false, url: 'crw-desktop://settings/index.html', inspectable: false });
@@ -202,8 +203,8 @@ try {
   await assert.rejects(access(executable), 'Disposable application moves to Trash');
   await writeFile(join(root, '.artifacts/macos-native-menus.json'), JSON.stringify(menus, null, 2) + '\n');
   await writeFile(join(root, '.artifacts/macos-desktop-lifecycle.json'), JSON.stringify({ ...runningApps, closeAndMinimizeReopen: true, quitWithGatewayContinuity: true, relaunchAndCleanUninstall: true, sidebarInkPixels: pixels, reopenedSidebarInkPixels: reopenedPixels }, null, 2) + '\n');
-  assert.ok(pixels > 100, `Visible native window lost its WebKit composite: ${pixels} sidebar ink pixels`);
-  console.log('PASS: actual native WKWebView UI, restricted asset/bridge access, native menus/dialogs, saved settings/language, gateway continuity and clean uninstall');
+  if (pixels <= 100) visibleCompositeFailure = `Visible native window lost its WebKit composite: ${pixels} sidebar ink pixels`;
+  else console.log('PASS: actual native WKWebView UI, restricted asset/bridge access, native menus/dialogs, saved settings/language, gateway continuity and clean uninstall');
 } catch (error) {
   console.error('Native application diagnostics:', application?.logs());
   if (application) {
@@ -217,4 +218,8 @@ try {
   await agentRequest(directory, 'shutdown').catch(() => {});
   for (let i = 0; i < 100; i++) { try { await agentRequest(directory, 'status', undefined, { timeoutMs: 100 }); } catch { break; } await delay(100); }
   await rm(home, { recursive: true, force: true });
+}
+if (visibleCompositeFailure) {
+  console.error(visibleCompositeFailure);
+  process.exitCode = 42;
 }

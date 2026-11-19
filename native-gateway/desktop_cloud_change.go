@@ -473,30 +473,16 @@ func (a *desktopAgent) cloudChange(ctx context.Context, client desktopCloud, pla
 		if plan.Identity {
 			next.Route = old.Route
 		}
-		var environment map[string]string
-		if err := json.Unmarshal([]byte(old.Local.Environment), &environment); err != nil || environment == nil {
-			return cloudConflict("The protected gateway environment is invalid.")
-		}
-		environment["PORT"] = fmt.Sprint(next.Input.Port)
-		environment["CODEX_WEBUI_PUBLIC_ORIGIN"] = "https://" + next.Input.Hostname
-		environment["CODEX_WEBUI_CF_ACCESS_ALLOWED_EMAIL"] = next.Input.Email
-		environment["CODEX_WEBUI_CF_ACCESS_AUD"] = next.AUD
-		data, err := json.Marshal(environment)
+		environment, err := a.cloudUpdatedEnvironment(old, next)
 		if err != nil {
 			return err
 		}
-		next.Local.Environment = string(data)
+		next.Local.Environment = environment
 		change.NativeIntent = true
 		if err := persist(); err != nil {
 			return err
 		}
-		if err := writeDesktopJSON(filepath.Join(a.directory, "protected-gateway.json"), next.Local); err != nil {
-			return err
-		}
-		if err := a.activateProtected(next); err != nil {
-			return err
-		}
-		if err := cloudProtectedReady(ctx, next); err != nil {
+		if err := a.cloudConfigureLocal(ctx, next, old.Local.Environment); err != nil {
 			return err
 		}
 		a.cloudStep("Protected service configuration updated")
@@ -614,6 +600,12 @@ func (a *desktopAgent) restoreCloudChange(ctx context.Context, client desktopClo
 		return err
 	}
 	if change.Committed {
+		if err := a.assertOwnedDeployment(next); err != nil {
+			return err
+		}
+		if _, err := cloudSourceState(ctx, client, next); err != nil {
+			return err
+		}
 		return a.finishCloudChange(ctx, client, change)
 	}
 	if change.RouteIntent {
@@ -640,13 +632,7 @@ func (a *desktopAgent) restoreCloudChange(ctx context.Context, client desktopClo
 		}
 	}
 	if change.NativeIntent {
-		if err := writeDesktopJSON(filepath.Join(a.directory, "protected-gateway.json"), old.Local); err != nil {
-			return err
-		}
-		if err := a.activateProtected(old); err != nil {
-			return err
-		}
-		if err := cloudProtectedReady(ctx, old); err != nil {
+		if err := a.cloudConfigureLocal(ctx, old, next.Local.Environment); err != nil {
 			return err
 		}
 	}
@@ -688,14 +674,9 @@ func (a *desktopAgent) cloudRecover(ctx context.Context, client desktopCloud, r 
 		if _, err := cloudWritePolicy(ctx, client, r, change.NextPolicy, change.Policy); err != nil {
 			return err
 		}
+		currentEnvironment := r.Local.Environment
 		r.Input, r.Local, r.Policy = change.Input, change.Local, change.Policy
-		if err := writeDesktopJSON(filepath.Join(a.directory, "protected-gateway.json"), r.Local); err != nil {
-			return err
-		}
-		if err := a.activateProtected(r); err != nil {
-			return err
-		}
-		if err := cloudProtectedReady(ctx, r); err != nil {
+		if err := a.cloudConfigureLocal(ctx, r, currentEnvironment); err != nil {
 			return err
 		}
 		r.Phase, r.IdentityChange = "complete", nil
@@ -708,4 +689,36 @@ func (a *desktopAgent) cloudRecover(ctx context.Context, client desktopCloud, r 
 	a.cloudStep("Configuration recovery completed")
 	a.cloudComplete(ctx, r)
 	return nil
+}
+
+func (a *desktopAgent) cloudUpdatedEnvironment(old, next *desktopDeploymentReceipt) (string, error) {
+	if a.systemd != nil {
+		return a.systemd.updatedEnvironment(old, next)
+	}
+	var environment map[string]string
+	if err := json.Unmarshal([]byte(old.Local.Environment), &environment); err != nil || environment == nil {
+		return "", cloudConflict("The protected gateway environment is invalid.")
+	}
+	environment["PORT"] = fmt.Sprint(next.Input.Port)
+	environment["CODEX_WEBUI_PUBLIC_ORIGIN"] = "https://" + next.Input.Hostname
+	environment["CODEX_WEBUI_CF_ACCESS_ALLOWED_EMAIL"] = next.Input.Email
+	environment["CODEX_WEBUI_CF_ACCESS_AUD"] = next.AUD
+	data, err := json.Marshal(environment)
+	return string(data), err
+}
+
+func (a *desktopAgent) cloudConfigureLocal(ctx context.Context, r *desktopDeploymentReceipt, alternatives ...string) error {
+	if a.systemd != nil {
+		return a.systemd.configure(ctx, r, alternatives...)
+	}
+	if err := a.assertOwnedDeployment(r, alternatives...); err != nil {
+		return err
+	}
+	if err := writeDesktopJSON(filepath.Join(a.directory, "protected-gateway.json"), r.Local); err != nil {
+		return err
+	}
+	if err := a.activateProtected(r); err != nil {
+		return err
+	}
+	return cloudProtectedReady(ctx, r)
 }

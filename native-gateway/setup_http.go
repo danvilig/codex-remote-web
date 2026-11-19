@@ -26,6 +26,7 @@ type setupHTTP struct {
 	quick                  *quickTunnel
 	desktop                bool
 	standalone             bool
+	managed                *desktopAgent
 	key, id, csrf          string
 	keyUntil, sessionUntil time.Time
 }
@@ -156,6 +157,13 @@ func (s *setupHTTP) handle(w http.ResponseWriter, r *http.Request) bool {
 	}
 	s.sessionUntil = now.Add(30 * time.Minute)
 	if path == "/api/setup/lock" && r.Method == "POST" {
+		if s.managed != nil {
+			if s.managed.setupBusy() {
+				setupError(w, 409, "A setup operation is already running.")
+				return true
+			}
+			_ = s.managed.cloudLock(false)
+		}
 		s.id, s.csrf = "", ""
 		http.SetCookie(w, &http.Cookie{Name: "crw_setup_session", HttpOnly: true, SameSite: http.SameSiteStrictMode, Path: "/api/setup", MaxAge: -1})
 		jsonReply(w, 200, map[string]bool{"locked": true})
@@ -164,6 +172,9 @@ func (s *setupHTTP) handle(w http.ResponseWriter, r *http.Request) bool {
 	var body json.RawMessage
 	if r.Method == "POST" && decodeOne(http.MaxBytesReader(w, r.Body, 8192), &body) != nil {
 		setupError(w, 400, "Invalid setup request")
+		return true
+	}
+	if s.managed != nil && s.handleManaged(w, r, path, body) {
 		return true
 	}
 	switch {
@@ -195,6 +206,45 @@ func (s *setupHTTP) handle(w http.ResponseWriter, r *http.Request) bool {
 	default:
 		setupError(w, 404, "Unknown setup endpoint")
 	}
+	return true
+}
+
+func (s *setupHTTP) handleManaged(w http.ResponseWriter, r *http.Request, path string, body json.RawMessage) bool {
+	action := strings.TrimPrefix(path, "/api/setup/")
+	method, status := http.MethodPost, http.StatusOK
+	switch action {
+	case "status", "resources":
+		method = http.MethodGet
+	case "connect", "preview", "change/preview", "doctor", "credential/forget", "credential/retry":
+	case "apply", "remove", "change/recover", "migrate":
+		status = http.StatusAccepted
+		if !s.standalone && (action == "migrate" || s.access != nil) {
+			setupError(w, 409, "Open the standalone setup command to restart or replace the managed service.")
+			return true
+		}
+	default:
+		return false
+	}
+	if r.Method != method {
+		setupError(w, 405, "Method not allowed")
+		return true
+	}
+	requestPath := action
+	if r.URL.RawQuery != "" {
+		requestPath += "?" + r.URL.RawQuery
+	}
+	request, _ := json.Marshal(map[string]any{"path": requestPath, "body": body})
+	result, err := s.managed.setupRequest(r.Context(), request)
+	if err != nil {
+		failure := desktopSafeError(err)
+		jsonReply(w, failure.Status, failure)
+		return true
+	}
+	if action == "status" {
+		out := result.(map[string]any)
+		out["standaloneMaintenance"] = s.standalone
+	}
+	jsonReply(w, status, result)
 	return true
 }
 
@@ -284,7 +334,14 @@ func runSetup() error {
 		return err
 	}
 	defer root.Close()
-	s := &setupHTTP{root: root, quick: newQuickTunnel(nil, ""), standalone: true}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	s := &setupHTTP{root: root, quick: newQuickTunnel(nil, ""), standalone: true, managed: newHeadlessSetup(home, filepath.Dir(exe))}
+	if s.managed != nil {
+		defer s.managed.closeSetup()
+	}
 	listener, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		return err
@@ -292,7 +349,7 @@ func runSetup() error {
 	defer listener.Close()
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
-	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 10 * time.Second, IdleTimeout: 30 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := &http.Server{ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 10 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 30 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.handle(w, r) {
 			http.NotFound(w, r)
 		}

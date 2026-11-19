@@ -22,9 +22,8 @@ var desktopConnectorID = regexp.MustCompile(`(?i)Generated Connector ID:\s*([a-f
 // Keep cloudflared tied to the agent even if the agent is killed. Raw
 // connector output can include sensitive diagnostics; emit only fixed markers.
 func runDesktopConnectorWorker(binary, tokenPath string) error {
-	group := os.Getpid()
 	directory, err := os.Getwd()
-	if err != nil || syscall.Getpgrp() != group || !validDesktopPath(binary) ||
+	if err != nil || !workerOwnsProcess() || !validDesktopPath(binary) ||
 		!validDesktopPath(tokenPath) || !desktopConnectorTokenFile.MatchString(filepath.Base(tokenPath)) {
 		return errors.New("Invalid desktop connector supervisor")
 	}
@@ -86,9 +85,12 @@ func runDesktopConnectorWorker(binary, tokenPath string) error {
 		return errors.New("Cloudflare connector exited")
 	case <-ctx.Done():
 	}
+	if !gracefulOwnedWorker() {
+		return nil
+	}
 	// This worker still owns its process group until it exits. Escalate once
 	// if the connector ignores termination, including any child it started.
-	_ = syscall.Kill(-group, syscall.SIGTERM)
+	stopOwnedWorker(false)
 	timer := time.NewTimer(2 * time.Second)
 	defer timer.Stop()
 	select {
@@ -96,7 +98,7 @@ func runDesktopConnectorWorker(binary, tokenPath string) error {
 		return nil
 	case <-timer.C:
 		_ = os.Remove(tokenPath)
-		_ = syscall.Kill(-group, syscall.SIGKILL)
+		stopOwnedWorker(true)
 		return nil
 	}
 }

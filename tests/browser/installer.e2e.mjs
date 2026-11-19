@@ -108,14 +108,12 @@ try {
   await assert.rejects(access(join(contents,'Resources/gateway/runtime/node')),'macOS DMG must not bundle a second JS runtime');
   await assert.rejects(access(join(contents,'Resources/gateway/node_modules/node-pty')));
   const gatewayManifest=JSON.parse(await readFile(join(contents,'Resources/gateway/release.json'),'utf8'));
-  const goGateway=gatewayManifest.desktopRuntime==='native-go';
-  if (process.env.CODEX_WEBUI_EXPECT_NATIVE_GATEWAY==='1') assert.ok(goGateway,'Validation requires the Go candidate');
-  if (goGateway) {
-   await assert.rejects(access(join(contents,'Resources/gateway/runtime')),'Go candidate must omit all JS runtimes');
-   await assert.rejects(access(join(contents,'Resources/gateway/dist')),'Go candidate must omit the JS server');
-  }
-  assert.ok(evidence.checks.installedSize.logicalBytes<(goGateway?28_000_000:122_000_000),'Native payload budget');
-  assert.ok(evidence.checks.installedSize.allocatedBytes<(goGateway?18_000_000:62_000_000),'Native disk budget');
+  assert.equal(gatewayManifest.desktopRuntime,'native-go','macOS must ship the native Go gateway');
+  assert.equal(gatewayManifest.runtimeIncluded,false);
+  await assert.rejects(access(join(contents,'Resources/gateway/runtime')),'Go package must omit all JS runtimes');
+  await assert.rejects(access(join(contents,'Resources/gateway/dist')),'Go package must omit the JS server');
+  assert.ok(evidence.checks.installedSize.logicalBytes<28_000_000,'Native payload budget');
+  assert.ok(evidence.checks.installedSize.allocatedBytes<18_000_000,'Native disk budget');
   evidence.checks.gatewayRuntime=gatewayManifest.desktopRuntime;
   evidence.checks.desktopRuntime='system AppKit/WebKit';
   process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(contents,'MacOS/Codex Remote Web');
@@ -129,7 +127,18 @@ try {
  } else throw new Error('Native installer test requires macOS or Windows');
  await command(['bun','run','test:portable'],root,{stream:true,timeoutMs:240_000});
  if(evidence)evidence.checks.installedGatewayAndPty=true;
- await command(['node',process.platform==='darwin'?'tests/browser/macos-native.e2e.mjs':'tests/browser/desktop-native.e2e.mjs'],root,{stream:true,timeoutMs:300_000});
+ try {
+  await command(['node',process.platform==='darwin'?'tests/browser/macos-native.e2e.mjs':'tests/browser/desktop-native.e2e.mjs'],root,{stream:true,timeoutMs:300_000});
+ } catch(error) {
+  if(evidence&&error.exitCode===42) {
+   const lifecycle=await readFile(join(root,'.artifacts/macos-desktop-lifecycle.json'),'utf8').then(JSON.parse).catch(()=>null);
+   if(lifecycle?.closeAndMinimizeReopen===true&&lifecycle.quitWithGatewayContinuity===true&&lifecycle.relaunchAndCleanUninstall===true&&Number.isInteger(lifecycle.sidebarInkPixels)&&lifecycle.sidebarInkPixels>=0&&lifecycle.sidebarInkPixels<=100) {
+    evidence.checks.installedDesktopLaunchAndLifecycle=true;
+    evidence.failureCode='MACOS_VISIBLE_COMPOSITE';
+   }
+  }
+  throw error;
+ }
  if(evidence) {
   for(const file of ['macos-desktop-overview.png','macos-desktop-settings-light.png','macos-desktop-settings-dark.png'])await access(join(root,'.artifacts',file));
   evidence.checks.installedDesktopLaunchUiAndLifecycle=true;
@@ -143,12 +152,12 @@ try {
  }
  console.log('PASS: exact native installer, installation into a path with spaces, installed gateway/files/submissions/PTY and MSI uninstall');
 } finally {
+ if(mounted)await detachMacVolume(mount,root);
+ if(installed)await msi(['/x',installer]);
+ await rm(temp,{recursive:true,force:true});
  if(evidence) {
   if(evidence.status!=='passed')evidence.status='failed';
   await mkdir(join(root,'.artifacts'),{recursive:true});
   await writeFile(join(root,'.artifacts/macos-installation-check.json'),JSON.stringify(evidence,null,2)+'\n');
  }
- if(mounted)await detachMacVolume(mount,root);
- if(installed)await msi(['/x',installer]);
- await rm(temp,{recursive:true,force:true});
 }

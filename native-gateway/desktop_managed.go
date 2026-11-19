@@ -216,6 +216,9 @@ func (a *desktopAgent) cloudDiscover(ctx context.Context, id string) (any, error
 }
 
 func (a *desktopAgent) connectorBinary() (string, error) {
+	if a.systemd != nil {
+		return a.systemd.connectorBinary()
+	}
 	binary := desktopExecutable("cloudflared", a.currentConfig().Cloudflared, desktopPath(a.home))
 	if binary == "" {
 		return "", desktopFailure(400, "", "Install cloudflared on this machine before creating a Tunnel. Then refresh the preview.")
@@ -281,6 +284,9 @@ func (a *desktopAgent) cloudInput(ctx context.Context, client desktopCloud, body
 }
 
 func (a *desktopAgent) cloudPreflight(port int, current *desktopDeploymentReceipt) error {
+	if a.systemd != nil {
+		return a.systemd.preflight(port, current)
+	}
 	if port == a.currentConfig().Port {
 		return cloudConflict("The local gateway and fixed-domain gateway need different ports")
 	}
@@ -384,6 +390,9 @@ func cloudTargetAvailable(snapshot desktopCloudSnapshot, input desktopRemoteInpu
 }
 
 func (a *desktopAgent) withCloudDiskLock(work func() error) error {
+	if err := ensureDesktopDirectory(a.directory); err != nil {
+		return err
+	}
 	path := filepath.Join(a.directory, "setup.lock")
 	claim := func() (*os.File, error) {
 		return desktopOpen(path, syscall.O_WRONLY|syscall.O_CREAT|syscall.O_EXCL, 64, true)
@@ -395,7 +404,7 @@ func (a *desktopAgent) withCloudDiskLock(work func() error) error {
 			return readErr
 		}
 		var pid int
-		if _, scanErr := fmt.Sscanf(string(data), "%d", &pid); scanErr != nil || pid <= 0 || !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
+		if _, scanErr := fmt.Sscanf(string(data), "%d", &pid); scanErr != nil || pid <= 0 || !processMissing(pid) {
 			return cloudConflict("Remote access is managed by another process. Stop it before retrying.")
 		}
 		// This agent already owns the desktop agent lock, so no other desktop
@@ -463,12 +472,20 @@ func (a *desktopAgent) setupRequest(ctx context.Context, raw json.RawMessage) (a
 		if receipt != nil {
 			status["deployment"] = map[string]any{"phase": receipt.Phase, "input": receipt.Input, "identityRecovery": desktopPendingChange(receipt.IdentityChange), "configurationRecovery": desktopPendingChange(receipt.ConfigurationChange)}
 		}
+		if a.systemd != nil {
+			status["migrationRequired"], status["migrationPending"] = a.systemdMigrationStatus(receipt)
+		}
 		return status, nil
 	case "quick/status", "quick/start", "quick/stop":
 		return a.desktopQuickRequest(ctx, path, request.Body)
 	}
 	if a.setupBusy() {
 		return nil, cloudConflict("A setup operation is already running.")
+	}
+	if a.systemd != nil && (path == "apply" || path == "preview" || path == "change/preview" || path == "remove" || path == "change/recover") {
+		if _, pending := a.systemdMigrationStatus(nil); pending {
+			return nil, cloudConflict("Recover the pending systemd migration first.")
+		}
 	}
 	switch path {
 	case "resources":
@@ -480,12 +497,12 @@ func (a *desktopAgent) setupRequest(ctx context.Context, raw json.RawMessage) (a
 		accounts, err := a.cloudConnect(ctx, form.Token, true)
 		return map[string]any{"accounts": accounts}, err
 	case "preview", "change/preview":
-		if path == "preview" && a.local.snapshot().Phase != "running" {
+		if path == "preview" && a.systemd == nil && a.local.snapshot().Phase != "running" {
 			return nil, cloudConflict("Initialize and start the local gateway first")
 		}
 		return a.cloudPreview(ctx, request.Body, path != "preview")
 	case "apply":
-		if a.local.snapshot().Phase != "running" {
+		if a.systemd == nil && a.local.snapshot().Phase != "running" {
 			return nil, cloudConflict("Start the local gateway first")
 		}
 		client, err := a.cloudClient()
@@ -510,6 +527,21 @@ func (a *desktopAgent) setupRequest(ctx context.Context, raw json.RawMessage) (a
 				return a.cloudChange(ctx, client, plan)
 			}
 			return a.cloudApply(ctx, client, plan)
+		})
+		return a.setupStatus(), nil
+	case "migrate":
+		if a.systemd == nil {
+			return nil, desktopFailure(404, "", "Unknown setup operation")
+		}
+		a.cloudRun(desktopCloud{}, func(ctx context.Context, _ desktopCloud) error {
+			if err := a.migrateSystemd(ctx); err != nil {
+				return err
+			}
+			a.managed.mu.Lock()
+			a.managed.phase = "complete"
+			a.managed.mu.Unlock()
+			a.cloudStep("The managed Linux service now runs the native gateway")
+			return nil
 		})
 		return a.setupStatus(), nil
 	case "change/recover", "remove":

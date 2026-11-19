@@ -1,11 +1,7 @@
 import { cp, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
-const executable = 'codex-remote-web';
-
-// Assemble the Go payload from the verified portable assets without copying
-// the portable executable, worker scripts, JavaScript runtimes or Node addons.
-export async function stageNativeGateway(source: string, destination: string, root: string, version: string, os: 'darwin' | 'linux', arch: 'arm64' | 'amd64') {
+export async function buildNativeGateway(destination: string, root: string, version: string, os: string, arch: string, executable: string) {
   const module = join(root, 'native-gateway');
   const goVersion = /^go (\S+)$/m.exec(await readFile(join(module, 'go.mod'), 'utf8'))?.[1];
   if (!goVersion || !/^\d+\.\d+\.\d+$/.test(goVersion)) throw new Error('Native gateway requires a pinned Go toolchain');
@@ -19,9 +15,14 @@ export async function stageNativeGateway(source: string, destination: string, ro
   const binary = join(destination, executable);
   const build = Bun.spawn(['go', 'build', '-mod=readonly', '-buildvcs=false', '-trimpath', '-ldflags', `-s -w -X main.version=${version}`, '-o', binary, '.'], { cwd: module, env, stdout: 'inherit', stderr: 'inherit' });
   if (await build.exited !== 0) throw new Error('Native Go gateway build failed');
-  for (const file of ['public', 'third-party', 'docs', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'README-zh.md', 'CHANGELOG.md', 'SECURITY.md', 'package.json']) {
-    await cp(join(source, file), join(destination, file), { recursive: true });
-  }
+  const licenses = join(destination, 'native-licenses');
+  await cp(join(module, 'licenses'), licenses, { recursive: true });
+  await cp(join(goRoot, 'LICENSE'), join(licenses, 'GO-LICENSE'));
+  await cp(join(goRoot, 'PATENTS'), join(licenses, 'GO-PATENTS'));
+  return goVersion;
+}
+
+export async function stageBrowserVendor(source: string, destination: string) {
   for (const file of ['node_modules/katex/dist/katex.min.css', 'node_modules/@xterm/xterm/css/xterm.css']) {
     await mkdir(join(destination, file, '..'), { recursive: true });
     await cp(join(source, file), join(destination, file));
@@ -31,12 +32,35 @@ export async function stageNativeGateway(source: string, destination: string, ro
   for (const font of await readdir(join(source, fonts))) {
     if (font.endsWith('.woff2')) await cp(join(source, fonts, font), join(destination, fonts, font));
   }
-  const licenses = join(destination, 'native-licenses');
-  await cp(join(module, 'licenses'), licenses, { recursive: true });
-  await cp(join(goRoot, 'LICENSE'), join(licenses, 'GO-LICENSE'));
-  await cp(join(goRoot, 'PATENTS'), join(licenses, 'GO-PATENTS'));
-  const metadata = JSON.parse(await readFile(join(source, 'release.json'), 'utf8'));
-  if (metadata.source === 'public-snapshot') await cp(join(source, 'SOURCE_PROVENANCE.json'), join(destination, 'SOURCE_PROVENANCE.json'));
-  await writeFile(join(destination, 'release.json'), JSON.stringify({ ...metadata, desktopRuntime: 'native-go', runtimeIncluded: false, goVersion }, null, 2) + '\n');
-  return binary;
+}
+
+export async function stageDependencyNotices(source: string, destination: string) {
+  const pkg = await Bun.file(join(source, 'package.json')).json();
+  const seen = new Set<string>();
+  const inventory: { name: string; version: string; license: string; notices: string[] }[] = [];
+  async function dependency(name: string, parent = source) {
+    let directory = join(parent, 'node_modules', name);
+    if (!(await Bun.file(join(directory, 'package.json')).exists())) directory = join(source, 'node_modules', name);
+    const metadata = await Bun.file(join(directory, 'package.json')).json();
+    const id = `${metadata.name}@${metadata.version}`;
+    if (seen.has(id)) return;
+    seen.add(id);
+    const notices: string[] = [];
+    for (const file of await readdir(directory)) {
+      if (!/^(licen[cs]e|copying|notice)([._-]|$)/i.test(file)) continue;
+      const path = `third-party/licenses/${metadata.name}/${metadata.version}/${file}`;
+      await mkdir(dirname(join(destination, path)), { recursive: true });
+      await cp(join(directory, file), join(destination, path)); notices.push(path);
+    }
+    inventory.push({ name: metadata.name, version: metadata.version, license: metadata.license || 'See package notices', notices });
+    for (const child of Object.keys(metadata.dependencies || {})) await dependency(child, directory);
+    for (const child of Object.keys(metadata.optionalDependencies || {})) {
+      if (await Bun.file(join(directory, 'node_modules', child, 'package.json')).exists() || await Bun.file(join(source, 'node_modules', child, 'package.json')).exists()) await dependency(child, directory);
+    }
+  }
+  for (const name of Object.keys(pkg.dependencies)) await dependency(name);
+  inventory.sort((a, b) => a.name.localeCompare(b.name));
+  await mkdir(join(destination, 'third-party'), { recursive: true });
+  await writeFile(join(destination, 'third-party/dependencies.json'), JSON.stringify(inventory, null, 2) + '\n');
+  return inventory.length;
 }

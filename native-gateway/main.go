@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var version = "0.2.0-beta.1"
+var version = "0.2.0-beta.2"
 
 func socketPath() string {
 	if socket := os.Getenv("CODEX_WEBUI_APP_SERVER_SOCKET"); socket != "" {
@@ -38,6 +38,9 @@ func socketPath() string {
 
 func run() error {
 	if len(os.Args) > 1 {
+		if handled, err := runPlatformCommand(os.Args[1], os.Args[2:]); handled {
+			return err
+		}
 		switch os.Args[1] {
 		case "--version", "-v":
 			fmt.Println("Codex Remote Web", version)
@@ -176,6 +179,9 @@ func runGateway() error {
 		"home": w.home, "defaultCwd": w.cwd, "reviewRoot": reviewRoot, "projectless": projectless, "capabilities": map[string]bool{"terminal": terminal, "reviewWrite": reviewWrite},
 	}}
 	app.setup = &setupHTTP{root: root, desktop: os.Getenv("CODEX_WEBUI_DESKTOP_CHILD") == "1", quick: newQuickTunnel(app, filepath.Join(w.home, ".config", "codex-remote-web")), access: access}
+	if !app.setup.desktop {
+		app.setup.managed = newHeadlessSetup(w.home, appRoot)
+	}
 	defer func() { <-app.setup.quick.stop() }()
 	app.mux.HandleFunc("GET /api/remote-access/status", app.remoteStatus(w.home))
 	c := newConversation(b, w.privateRoot, app.events.publish)

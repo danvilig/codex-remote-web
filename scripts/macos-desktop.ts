@@ -1,26 +1,11 @@
-import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { command, portableTarget } from './distribution.ts';
+import { command } from './distribution.ts';
 import { macIcon } from './macos-dmg.ts';
 import { installationHelp } from './macos-guide.ts';
 import { macosMinimumVersion } from './macos-validation.ts';
 import { nativeTranslations } from '../desktop/localization.js';
 import { macAppSize } from './macos-size.ts';
-import { stageNativeGateway } from './native-gateway.ts';
-
-async function compactGateway(gateway: string, root: string) {
-  const target = portableTarget();
-  const result = await Bun.build({ entrypoints: [join(root, 'src/server/cli.ts')], outdir: join(gateway, 'dist'), naming: 'portable.js', target: 'bun', packages: 'bundle', define: { CODEX_REMOTE_WEB_COMPILED: 'true', CODEX_REMOTE_WEB_NATIVE_MAC: 'true' } });
-  if (!result.success) throw new Error(result.logs.join('\n'));
-  await rm(join(gateway, target.executable));
-  await command(['bun', 'build', '--compile', `--target=${target.bun}`, '--no-compile-autoload-bunfig', '--outfile', join(gateway, target.executable), join(gateway, 'dist/portable.js')], root, { timeoutMs: 120_000 });
-  for (const file of ['runtime/node', 'runtime/NODE-LICENSE', 'node_modules/node-pty']) await rm(join(gateway, file), { recursive: true });
-  const runtimes = join(gateway, 'runtime/RUNTIMES.json');
-  await writeFile(runtimes, JSON.stringify(JSON.parse(await readFile(runtimes, 'utf8')).filter((runtime: { name: string }) => runtime.name !== 'Node.js'), null, 2) + '\n');
-  await writeFile(join(gateway, 'runtime/REBUILD.md'), `# Rebuilding and relinking\n\nSee BUN-LICENSE.md and RUNTIMES.json for this Bun version's license and upstream sources.\n\nFrom the gateway directory, rebuild the self-contained runtime with a compatible Bun build:\n\n\`\`\`sh\nbun build --compile dist/portable.js --outfile codex-remote-web-rebuilt\n\`\`\`\n\nKeep the output next to public/, runtime/ and dist/. Quit the application and remove its background component before replacing the executable. Re-sign the modified macOS bundle before launching it.\n`);
-  const metadata = join(gateway, 'release.json');
-  await writeFile(metadata, JSON.stringify({ ...JSON.parse(await readFile(metadata, 'utf8')), desktopRuntime: 'macos-native' }, null, 2) + '\n');
-}
 
 export async function nativeMacDesktop(gateway: string, output: string, root: string, pkg: { version: string }) {
   const destination = join(output, 'Codex Remote Web-darwin-arm64');
@@ -29,12 +14,9 @@ export async function nativeMacDesktop(gateway: string, output: string, root: st
   await mkdir(join(contents, 'MacOS'), { recursive: true }); await mkdir(assets, { recursive: true });
   const payload = join(resources, 'gateway');
   const portableGateway = await macAppSize(gateway);
-  if (process.env.CODEX_WEBUI_BUILD_NATIVE_GATEWAY === '1') {
-    await stageNativeGateway(gateway, payload, root, pkg.version, 'darwin', 'arm64');
-  } else {
-    await cp(gateway, payload, { recursive: true });
-    await compactGateway(payload, root);
-  }
+  const manifest = JSON.parse(await readFile(join(gateway, 'release.json'), 'utf8'));
+  if (manifest.desktopRuntime !== 'native-go' || manifest.runtimeIncluded !== false || manifest.platform !== 'darwin' || manifest.arch !== 'arm64') throw new Error('The macOS installer requires the validated native arm64 gateway');
+  await cp(gateway, payload, { recursive: true });
   const result = await Bun.build({ entrypoints: [join(root, 'desktop/renderer.js')], outdir: assets, naming: 'renderer.js', target: 'browser', format: 'esm', packages: 'bundle' });
   if (!result.success) throw new Error(result.logs.join('\n'));
   for (const file of ['index.html', 'desktop.css']) await cp(join(root, 'desktop', file), join(assets, file));

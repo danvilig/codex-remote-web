@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 )
@@ -48,7 +49,7 @@ func desktopAgentRequest(ctx context.Context, directory, installation, action st
 	transport := &http.Transport{DialContext: (&net.Dialer{}).DialContext, DisableKeepAlives: true, MaxResponseHeaderBytes: 8 << 10}
 	client := &http.Client{Transport: transport, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	response, err := client.Do(request)
-	if errors.Is(err, syscall.ECONNREFUSED) {
+	if errors.Is(err, syscall.ECONNREFUSED) || runtime.GOOS == "windows" && errors.Is(err, syscall.Errno(10061)) { // WSAECONNREFUSED
 		return nil, desktopFailure(503, "AGENT_OFFLINE", "Background agent is offline")
 	}
 	if err != nil {
@@ -78,24 +79,24 @@ func desktopAgentUnavailable(err error, foreign bool) bool {
 
 func waitDesktopAgent(ctx context.Context, directory, installation string) (bool, error) {
 	result, err := desktopAgentRequest(ctx, directory, installation, "status", nil, 3*time.Second)
-	if desktopAgentUnavailable(err, false) {
-		return false, nil
-	}
-	if err != nil {
+	if err != nil && !desktopAgentUnavailable(err, false) {
 		return false, err
 	}
-	var status struct {
-		Runtime               string `json:"runtime"`
-		GatewayImplementation string `json:"gatewayImplementation"`
-	}
-	if err := json.Unmarshal(result, &status); err != nil {
-		return false, err
-	}
-	if status.Runtime == "macos-native" && status.GatewayImplementation == "go" {
-		return true, nil
-	}
-	if _, err := desktopAgentRequest(ctx, directory, installation, "shutdown", nil, 120*time.Second); err != nil {
-		return false, err
+	if err == nil {
+		var status struct {
+			Runtime               string `json:"runtime"`
+			GatewayImplementation string `json:"gatewayImplementation"`
+			GatewayVersion        string `json:"gatewayVersion"`
+		}
+		if err := json.Unmarshal(result, &status); err != nil {
+			return false, err
+		}
+		if status.Runtime == desktopRuntime() && status.GatewayImplementation == "go" && status.GatewayVersion == version {
+			return true, nil
+		}
+		if _, err := desktopAgentRequest(ctx, directory, installation, "shutdown", nil, 120*time.Second); err != nil && !desktopAgentUnavailable(err, false) {
+			return false, err
+		}
 	}
 	for attempt := 0; attempt < 150; attempt++ {
 		_, err := desktopAgentRequest(ctx, directory, installation, "status", nil, 3*time.Second)
@@ -171,10 +172,13 @@ func cleanDesktopState(home, directory string) error {
 	if err := assertDesktopCleanup(directory); err != nil {
 		return err
 	}
-	legacy := []string{
-		filepath.Join(home, "Library", "Application Support", "Codex Remote Web"),
-		filepath.Join(home, "Library", "Caches", "io.github.danvilig.codex-remote-web"),
-		filepath.Join(home, "Library", "Logs", "Codex Remote Web"),
+	var legacy []string
+	if runtime.GOOS == "darwin" {
+		legacy = []string{
+			filepath.Join(home, "Library", "Application Support", "Codex Remote Web"),
+			filepath.Join(home, "Library", "Caches", "io.github.danvilig.codex-remote-web"),
+			filepath.Join(home, "Library", "Logs", "Codex Remote Web"),
+		}
 	}
 	for _, path := range legacy {
 		info, err := os.Lstat(path)
@@ -185,7 +189,7 @@ func cleanDesktopState(home, directory string) error {
 		base, baseErr := filepath.EvalSymlinks(home)
 		actual, actualErr := filepath.EvalSymlinks(path)
 		relative, relErr := filepath.Rel(home, path)
-		if err != nil || !info.IsDir() || !desktopOwned(info) || baseErr != nil || actualErr != nil || relErr != nil || actual != filepath.Join(base, relative) {
+		if err != nil || !info.IsDir() || !desktopOwned(path, info) || baseErr != nil || actualErr != nil || relErr != nil || actual != filepath.Join(base, relative) {
 			return desktopFailure(409, "", "Application data path is unsafe; cleanup stopped.")
 		}
 	}

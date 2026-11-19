@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -13,8 +14,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -29,6 +30,9 @@ func TestDesktopConnectorWorkerFixture(t *testing.T) {
 }
 
 func TestDesktopConnectorWorkerStopsOnParentEOF(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix shell connector fixture; Windows process ownership is tested separately")
+	}
 	directory := desktopDirectory(t.TempDir())
 	if err := ensureDesktopDirectory(directory); err != nil {
 		t.Fatal(err)
@@ -51,8 +55,10 @@ func TestDesktopConnectorWorkerStopsOnParentEOF(t *testing.T) {
 	worker := exec.CommandContext(ctx, exe, "-test.run=^TestDesktopConnectorWorkerFixture$")
 	worker.Dir = directory
 	worker.Env = append(os.Environ(), "CRW_TEST_DESKTOP_CONNECTOR=1", "CRW_TEST_CONNECTOR_BINARY="+binary, "CRW_TEST_CONNECTOR_TOKEN="+token)
-	worker.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	worker.Cancel = func() error { return syscall.Kill(-worker.Process.Pid, syscall.SIGKILL) }
+	if err := configureOwnedCommand(worker); err != nil {
+		t.Fatal(err)
+	}
+	worker.Cancel = func() error { return stopOwnedCommand(worker, true) }
 	input, err := worker.StdinPipe()
 	if err != nil {
 		t.Fatal(err)
@@ -133,13 +139,16 @@ func TestDesktopAgentLifecycle(t *testing.T) {
 			Runtime string
 			Local   desktopProcessStatus
 		}
-		if json.Unmarshal(result, &status) != nil || status.Runtime != "macos-native" || status.Local.Phase != "running" || status.Local.PID == nil {
+		if json.Unmarshal(result, &status) != nil || status.Runtime != desktopRuntime() || status.Local.Phase != "running" || status.Local.PID == nil {
 			return 0
 		}
 		return *status.Local.PID
 	}
 	start()
 	waitDesktopTest(t, func() bool { previousPID = getPID(); return previousPID != 0 })
+	if ready, err := waitDesktopAgent(ctx, directory, installation); !ready || err != nil {
+		t.Fatalf("The matching agent should remain running: %v %v", ready, err)
+	}
 	_, foreign := desktopAgentRequest(ctx, directory, "/fixture/other-installation", "stop", nil, time.Second)
 	if desktopErrorCode(foreign) != "AGENT_FOREIGN" || getPID() != previousPID {
 		t.Fatalf("Foreign agent should be untouched: %v", foreign)
@@ -222,7 +231,7 @@ func TestDesktopControlAndOperationProtocol(t *testing.T) {
 	}
 }
 
-func TestDesktopUpgradeReplacesLegacyMacNativeAgent(t *testing.T) {
+func TestDesktopUpgradeReplacesOlderNativeAgent(t *testing.T) {
 	directory := desktopDirectory(t.TempDir())
 	if err := ensureDesktopDirectory(directory); err != nil {
 		t.Fatal(err)
@@ -245,7 +254,7 @@ func TestDesktopUpgradeReplacesLegacyMacNativeAgent(t *testing.T) {
 		if request.Action == "shutdown" {
 			close(stopped)
 		}
-		fmt.Fprint(w, `{"runtime":"macos-native"}`)
+		fmt.Fprintf(w, `{"runtime":%q,"gatewayImplementation":"go","gatewayVersion":"0.2.0-beta.1"}`, desktopRuntime())
 	}))
 	server.Start()
 	defer server.Close()
@@ -267,6 +276,47 @@ func TestDesktopUpgradeReplacesLegacyMacNativeAgent(t *testing.T) {
 		t.Fatalf("The old runtime was reused: %v %v", alreadyRunning, err)
 	}
 	<-done
+}
+
+func TestDesktopPrepareWaitsForOfflineAgentLock(t *testing.T) {
+	directory := desktopDirectory(t.TempDir())
+	if err := ensureDesktopDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
+	release, err := lockDesktop(directory, "agent-lock", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	ctx, cancel := context.WithTimeout(t.Context(), 175*time.Millisecond)
+	defer cancel()
+	installation := filepath.Join(t.TempDir(), "Codex Remote Web")
+	if ready, err := waitDesktopAgent(ctx, directory, installation); ready || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Replacement must wait for the lock even with no descriptor: %v %v", ready, err)
+	}
+	release()
+	if ready, err := waitDesktopAgent(t.Context(), directory, installation); ready || err != nil {
+		t.Fatalf("Replacement should be allowed after release: %v %v", ready, err)
+	}
+}
+
+func TestDesktopPrepareRejectsForeignInstallation(t *testing.T) {
+	directory := desktopDirectory(t.TempDir())
+	if err := ensureDesktopDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("A foreign agent must not receive an operation")
+	}))
+	defer server.Close()
+	installation := filepath.Join(t.TempDir(), "Codex Remote Web")
+	descriptor := desktopDescriptor{Version: 1, Port: server.Listener.Addr().(*net.TCPAddr).Port, Token: base64.RawURLEncoding.EncodeToString(make([]byte, 32)), Installation: installation + " old"}
+	if err := writeDesktopJSON(filepath.Join(directory, "agent.json"), descriptor); err != nil {
+		t.Fatal(err)
+	}
+	if ready, err := waitDesktopAgent(t.Context(), directory, installation); ready || desktopErrorCode(err) != "AGENT_FOREIGN" {
+		t.Fatalf("Foreign installation was not rejected: %v %v", ready, err)
+	}
 }
 
 func TestDesktopSessionGenerationAndFailedBootstrap(t *testing.T) {
@@ -346,12 +396,20 @@ func TestDesktopCleanupPreservesAccountAndUncertainState(t *testing.T) {
 	if err := cleanDesktopState(home, directory); err != nil {
 		t.Fatal(err)
 	}
-	for _, path := range []string{config, state, filepath.Join(home, "Library", "Logs", "Codex Remote Web")} {
+	removed := []string{config, state}
+	preserved := []string{filepath.Join(home, ".codex", "account.txt"), filepath.Join(directory, "unknown.json"), filepath.Join(directory, "agent-lock.sqlite"), filepath.Join(directory, "session-lock.sqlite")}
+	legacyLogs := filepath.Join(home, "Library", "Logs", "Codex Remote Web")
+	if runtime.GOOS == "darwin" {
+		removed = append(removed, legacyLogs)
+	} else {
+		preserved = append(preserved, legacyLogs)
+	}
+	for _, path := range removed {
 		if _, err := os.Lstat(path); !os.IsNotExist(err) {
 			t.Fatalf("Cleanup left %s: %v", path, err)
 		}
 	}
-	for _, path := range []string{filepath.Join(home, ".codex", "account.txt"), filepath.Join(directory, "unknown.json"), filepath.Join(directory, "agent-lock.sqlite"), filepath.Join(directory, "session-lock.sqlite")} {
+	for _, path := range preserved {
 		if _, err := os.Lstat(path); err != nil {
 			t.Fatal(err)
 		}
@@ -363,7 +421,10 @@ func TestDesktopLockInteroperatesWithSQLite(t *testing.T) {
 	if err != nil {
 		t.Skip("Bun is required only for the legacy lock interoperability fixture")
 	}
-	dir := t.TempDir()
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := ensureDesktopDirectory(dir); err != nil {
+		t.Fatal(err)
+	}
 	path := filepath.Join(dir, "agent-lock.sqlite")
 	setup := `import { Database } from 'bun:sqlite';const db=new Database(process.argv[1]);`
 	initialize := exec.Command(bun, "-e", setup+`db.close();`, path)

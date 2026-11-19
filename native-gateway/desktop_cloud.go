@@ -167,6 +167,13 @@ func (a *desktopAgent) connectorSummary(conns []map[string]any) map[string]any {
 	a.managed.mu.Lock()
 	localID := a.managed.connectorID
 	a.managed.mu.Unlock()
+	localIDs := map[string]bool{}
+	if a.systemd != nil && len(conns) > 0 {
+		localIDs = a.systemd.connectorIDs()
+	}
+	if localID != "" {
+		localIDs[strings.ToLower(localID)] = true
+	}
 	here, elsewhere := 0, 0
 	for _, conn := range conns {
 		connections := cloudArray(conn["conns"])
@@ -177,7 +184,7 @@ func (a *desktopAgent) connectorSummary(conns []map[string]any) map[string]any {
 		if id == "" {
 			id = cloudString(cloudObject(connections[0])["client_id"])
 		}
-		if localID != "" && strings.EqualFold(id, localID) {
+		if localIDs[strings.ToLower(id)] {
 			here++
 		} else {
 			elsewhere++

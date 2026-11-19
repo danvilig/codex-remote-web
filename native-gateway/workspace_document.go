@@ -12,7 +12,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"unicode/utf8"
 )
 
@@ -70,13 +69,13 @@ func workspaceReadDocument(parent *os.Root, path, name string) (workspaceDocumen
 	if !workspaceTextPath(name, workspaceTextExtensions) || before.Size() > workspaceTextLimit {
 		return result, workspaceDocumentUnsupported
 	}
-	file, err := parent.OpenFile(name, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
+	file, err := parent.OpenFile(name, os.O_RDONLY|noBlock|noFollow, 0)
 	if err != nil {
 		return result, workspaceUnavailable
 	}
 	defer file.Close()
 	info, err := file.Stat()
-	if err != nil || !os.SameFile(before, info) || !info.Mode().IsRegular() {
+	if err != nil || !os.SameFile(before, info) || !info.Mode().IsRegular() || !regularFileHandle(file, info) {
 		return result, workspaceUnavailable
 	}
 	if info.Size() > workspaceTextLimit {
@@ -86,10 +85,7 @@ func workspaceReadDocument(parent *os.Root, path, name string) (workspaceDocumen
 	if err != nil || len(data) > workspaceTextLimit || bytes.ContainsRune(data, 0) || !utf8.Valid(data) {
 		return result, workspaceDocumentUnsupported
 	}
-	stat, statOK := info.Sys().(*syscall.Stat_t)
-	const accessWrite = 2
-	writable := statOK && info.Mode().Perm()&0222 != 0 && stat.Nlink == 1 &&
-		syscall.Access(path, accessWrite) == nil && syscall.Access(filepath.Dir(path), accessWrite) == nil
+	writable := singleLink(file, info) && canWriteDocument(parent, name, path, info)
 	return workspaceDocument{Name: name, Text: string(data), Revision: workspaceRevision(data), Writable: writable, info: info}, nil
 }
 
@@ -112,7 +108,7 @@ func (s *workspace) saveDocument(cwd, path, revision string, data []byte) (strin
 		return "", workspaceDocumentConflict
 	}
 	tempName := ".codex-remote-edit-" + rand.Text()
-	temp, err := parent.OpenFile(tempName, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, 0600)
+	temp, err := parent.OpenFile(tempName, os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, 0600)
 	if err != nil {
 		return "", err
 	}

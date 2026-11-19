@@ -50,4 +50,4 @@ The desktop shell uses Electron (MIT), pinned in package.json and bun.lock; upst
 
 ## Native gateway preview
 
-The Go gateway uses [Gorilla WebSocket 1.5.3](https://github.com/gorilla/websocket/tree/v1.5.3) (BSD-2-Clause), [creack/pty 1.1.24](https://github.com/creack/pty/tree/v1.1.24) (MIT), and [golang.org/x/crypto 0.59.0](https://go.googlesource.com/crypto/+/refs/tags/v0.59.0) (BSD-3-Clause). The Go standard library is distributed under the [Go license](https://go.dev/LICENSE). See the license texts under `native-gateway/licenses/` and in `native-licenses/` in Go packages.
+The Go gateway uses [Gorilla WebSocket 1.5.3](https://github.com/gorilla/websocket/tree/v1.5.3) (BSD-2-Clause), [creack/pty 1.1.24](https://github.com/creack/pty/tree/v1.1.24) (MIT), [golang.org/x/crypto 0.59.0](https://go.googlesource.com/crypto/+/refs/tags/v0.59.0) (BSD-3-Clause), and [golang.org/x/sys 0.50.0](https://go.googlesource.com/sys/+/refs/tags/v0.50.0) (BSD-3-Clause). The Go standard library is distributed under the [Go license](https://go.dev/LICENSE). See the license texts under `native-gateway/licenses/` and in `native-licenses/` in Go packages.

@@ -135,8 +135,11 @@ final class DesktopApplication: NSObject, NSApplicationDelegate, NSWindowDelegat
         process.environment = environment
         process.standardInput = FileHandle.nullDevice; process.standardOutput = FileHandle.nullDevice; process.standardError = FileHandle.standardError
         try process.run()
+        let expectedVersion = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
         for _ in 0..<100 {
-            if let state = try? await operation("status"), (state["value"] as? [String: Any])?["runtime"] as? String == "macos-native" { return }
+            if let state = try? await operation("status"), let value = state["value"] as? [String: Any],
+               value["gatewayImplementation"] as? String == "go", let gatewayVersion = value["gatewayVersion"] as? String,
+               gatewayVersion == expectedVersion { return }
             try await Task.sleep(for: .milliseconds(100))
         }
         throw DesktopError(message: "Background agent could not start. Check installation and private directory permissions.")

@@ -344,8 +344,8 @@ func TestConversationLockInteroperatesWithBunSQLite(t *testing.T) {
 	if err != nil {
 		t.Skip("Bun runtime is absent; package does not require it")
 	}
-	dir := t.TempDir()
-	if err := os.Chmod(dir, 0700); err != nil {
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := ensureDesktopDirectory(dir); err != nil {
 		t.Fatal(err)
 	}
 	host, _ := os.Hostname()

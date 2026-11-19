@@ -36,8 +36,7 @@ try {
   const listing = (await run(['tar','-tf',archive])).replaceAll('\r\n','\n');
   for (const internal of ['docs/images/README.md', 'scripts/capture-docs.ts', 'tests/browser/readme-screenshot.mjs', 'tests/fixtures/showcase-codex.mjs']) assert.equal(listing.includes(`/${internal}`),false,`Internal documentation tooling leaked into archive: ${internal}`);
   assert.equal(/\/(?:src|tests|history|\.artifacts|\.git)\//.test(listing),false);
-  if (!portable) assert.equal(listing.includes('/node_modules/'), false);
-  else for (const line of listing.split('\n').filter(path=>path.includes('/node_modules/'))) assert.match(line,/\/node_modules\/(?:$|node-pty\/|katex\/|@xterm\/(?:$|xterm\/))/);
+  for (const line of listing.split('\n').filter(path=>path.includes('/node_modules/'))) assert.match(line,/\/node_modules\/(?:$|katex\/(?:$|dist\/(?:$|katex\.min\.css$|fonts\/(?:$|[^/]+\.woff2$)))|@xterm\/(?:$|xterm\/(?:$|css\/(?:$|xterm\.css$))))/);
   assert.equal(listing.split('\n').some(path=>path.endsWith('/.env')),false);
   assert.equal(/codex-app-icon|codex-motion|overview\.png/.test(listing),false);
   await run(['tar','-xf',archive,'-C',fixture]);
@@ -45,16 +44,14 @@ try {
   for (const readme of ['README.md', 'README-zh.md']) assert.equal(readFileSync(join(unpacked,readme),'utf8'),readFileSync(join(root,readme),'utf8'),`Bilingual README missing or changed: ${readme}`);
   for (const image of documentationImages) assert.deepEqual(readFileSync(join(unpacked,image)),readFileSync(join(root,image)),`README image missing or changed in archive: ${image}`);
   const manifest=JSON.parse(readFileSync(join(unpacked,'release.json'),'utf8'));assert.equal(manifest.version,pkg.version);
-  const nativeGo = portable && manifest.desktopRuntime === 'native-go';
-  const compactMac = portable && (nativeGo || manifest.desktopRuntime === 'macos-native');
-  assert.equal(existsSync(join(unpacked,'dist/isolated-worker.js')), !nativeGo, 'Only the JS gateway ships the isolated worker script');
+  assert.equal(manifest.desktopRuntime,'native-go','Archive must use the lightweight native gateway');
   if (existsSync(join(root,'SOURCE_PROVENANCE.json'))) {
     const provenance=JSON.parse(readFileSync(join(root,'SOURCE_PROVENANCE.json'),'utf8'));
     assert.equal(manifest.source,'public-snapshot');assert.equal(manifest.developmentCommit,provenance.developmentCommit);
     assert.equal(manifest.commit,(await run(['git','rev-parse','HEAD'])).trim());
     assert.deepEqual(JSON.parse(readFileSync(join(unpacked,'SOURCE_PROVENANCE.json'),'utf8')),provenance);
   }
-  function scan(directory) { for(const entry of readdirSync(directory,{withFileTypes:true})) { const path=join(directory,entry.name);if(entry.isDirectory())scan(path);else { const bytes=readFileSync(path);if(portable&&(bytes.subarray(0,4).equals(Buffer.from([0x7f,0x45,0x4c,0x46])) || ['cffaedfe','feedfacf','cafebabe'].includes(bytes.subarray(0,4).toString('hex')) || bytes.subarray(0,2).toString()==='MZ'))continue;const data=bytes.toString('utf8');assert.equal(/\/home\/ubuntu|M11\.9434 0\.430908|assets\/codex-motion|lottie-web/.test(data),false,`Private/extracted material in ${entry.name}`); } } }
+  function scan(directory) { for(const entry of readdirSync(directory,{withFileTypes:true})) { const path=join(directory,entry.name);if(entry.isDirectory())scan(path);else { const bytes=readFileSync(path);if(path===join(unpacked,target.executable))continue;const data=bytes.toString('utf8');assert.equal(/\/home\/ubuntu|M11\.9434 0\.430908|assets\/codex-motion|lottie-web/.test(data),false,`Private/extracted material in ${entry.name}`); } } }
   scan(unpacked);
   const inventory=JSON.parse(readFileSync(join(unpacked,'third-party/dependencies.json'),'utf8'));
   assert.ok(inventory.length>10);
@@ -62,31 +59,18 @@ try {
   assert.ok(purifier.notices.some(path=>/LICENSE$/i.test(path)));
   assert.match(readFileSync(join(unpacked,purifier.notices.find(path=>/LICENSE$/i.test(path))),'utf8'),/Apache License/);
   assert.equal(inventory.find(item=>item.name==='katex').version,'0.18.2');
-  // Keep clean-install verification independent of the developer's caches and
-  // writable HOME. This also exercises installation on sandboxed release hosts.
-  if (!portable) await run(['bun','install','--production','--frozen-lockfile'],unpacked,{BUN_INSTALL_CACHE_DIR:join(fixture,'bun-cache')});
-  // PTY is a native dependency: validate source rebuild with installed headers, without downloading Node.
-  const nodePath=portable&&!compactMac?join(unpacked,'runtime',target.node):realpathSync(Bun.which('node'));
-  if (!portable) await run(['npm','rebuild','node-pty'],unpacked,{npm_config_nodedir:dirname(dirname(nodePath)),npm_config_cache:join(fixture,'npm-cache')});
+  // Node runs the external fixture only; the archive cannot use it on PATH.
+  const nodePath=realpathSync(Bun.which('node'));
   const executable=join(unpacked,target.executable);
-  if (portable) {
-    assert.equal(manifest.platform,process.platform);assert.equal(manifest.distribution,'portable');assert.equal(manifest.arch,process.arch);assert.equal(manifest.runtimeIncluded,!nativeGo);
-    assert.match(await run([executable,'--version'],fixture),new RegExp(pkg.version.replaceAll('.','\\.')));
-    assert.match(await run([executable,'--help'],fixture),/Usage: codex-remote-web/);
-    if (compactMac) assert.equal(existsSync(join(unpacked,'runtime/NODE-LICENSE')),false);
-    else assert.ok(readFileSync(join(unpacked,'runtime/NODE-LICENSE'),'utf8').includes('Node'));
-    if (nativeGo) {
-      assert.equal(existsSync(join(unpacked,'runtime')),false,'Go app must omit JavaScript runtimes');
-      assert.equal(existsSync(join(unpacked,'dist')),false,'Go app must omit JavaScript server and workers');
-      assert.equal(existsSync(join(unpacked,'node_modules/node-pty')),false);
-      assert.match(manifest.goVersion,/^\d+\.\d+\.\d+$/);
-      assert.match(readFileSync(join(unpacked,'native-licenses/GO-LICENSE'),'utf8'),/The Go Authors/);
-      for (const name of ['creack-pty.txt','gorilla-websocket.txt','golang-x-crypto.txt']) assert.ok(existsSync(join(unpacked,'native-licenses',name)),name);
-    } else {
-      assert.ok(readFileSync(join(unpacked,'runtime/BUN-LICENSE.md'),'utf8').includes('JavaScriptCore'));
-      assert.ok(existsSync(join(unpacked,'dist/portable.js')),'Include relinkable application bundle');
-    }
-  }
+  assert.equal(manifest.platform,process.platform);assert.equal(manifest.distribution,portable?'portable':'deployment');assert.equal(manifest.arch,process.arch);assert.equal(manifest.runtimeIncluded,false);
+  assert.match(await run([executable,'--version'],fixture),new RegExp(pkg.version.replaceAll('.','\\.')));
+  assert.match(await run([executable,'--help'],fixture),/Usage: codex-remote-web/);
+  assert.equal(existsSync(join(unpacked,'runtime')),false,'Go app must omit JavaScript runtimes');
+  assert.equal(existsSync(join(unpacked,'dist')),false,'Go app must omit JavaScript server and workers');
+  assert.equal(existsSync(join(unpacked,'node_modules/node-pty')),false);
+  assert.match(manifest.goVersion,/^\d+\.\d+\.\d+$/);
+  assert.match(readFileSync(join(unpacked,'native-licenses/GO-LICENSE'),'utf8'),/The Go Authors/);
+  for (const name of ['creack-pty.txt','gorilla-websocket.txt','golang-x-crypto.txt','golang-x-sys.txt']) assert.ok(existsSync(join(unpacked,'native-licenses',name)),name);
   const port = await new Promise(resolve=>{const probe=createServer();probe.listen(0,'127.0.0.1',()=>{const value=probe.address().port;probe.close(()=>resolve(value));});});
   const quickBin=join(fixture,'quick-bin');mkdirSync(quickBin);
   copyFileSync(join(root,'tests/fixtures/quick-cloudflared.mjs'),join(quickBin,'quick-cloudflared.mjs'));
@@ -95,26 +79,25 @@ try {
   if (windows) await run(['bun','build',join(quickBin,'quick-cloudflared.mjs'),'--compile','--outfile',join(quickBin,'cloudflared.exe')]);
   else writeFileSync(join(quickBin,'cloudflared'),`#!/bin/sh\nexec '${nodePath.replaceAll("'","'\\''")}' '${join(quickBin,'quick-cloudflared.mjs').replaceAll("'","'\\''")}' "$@"\n`,{mode:0o700});
   const poisonLog=join(fixture,'unexpected-runtime');
-  if (portable && !windows) {
+  if (!windows) {
     copyFileSync(join(root,'tests/fixtures/codex'),join(quickBin,'codex-fixture.mjs'));
     writeFileSync(join(quickBin,'codex'),`#!/bin/sh\nexec '${nodePath.replaceAll("'","'\\''")}' '${join(quickBin,'codex-fixture.mjs').replaceAll("'","'\\''")}' "$@"\n`,{mode:0o700});
     for (const tool of ['bun','node','npm','npx','cc','gcc','g++','make','python3']) writeFileSync(join(quickBin,tool),`#!/bin/sh\nprintf '%s\\n' '${tool}' >> '${poisonLog}'\nexit 91\n`,{mode:0o700});
     symlinkSync(Bun.which('git'),join(quickBin,'git'));
   }
   if (windows) {
-    const cli = join(quickBin,'node_modules/@openai/codex/bin'); mkdirSync(cli,{recursive:true});
-    copyFileSync(join(root,'tests/fixtures/codex'),join(cli,'codex.js'));
-    writeFileSync(join(cli,'../package.json'),JSON.stringify({name:'@openai/codex',type:'module'}));
-    writeFileSync(join(quickBin,'codex.cmd'),'@echo off\r\nexit /b 91\r\n'); // Must resolve JS, never execute the shim.
+    const cli = join(quickBin,'codex-fixture.mjs');
+    copyFileSync(join(root,'tests/fixtures/codex'),cli);
+    await run(['bun','build',cli,'--compile','--outfile',join(quickBin,'codex.exe')]);
     for (const tool of ['node','bun','npm','npx','cl','python']) writeFileSync(join(quickBin,tool+'.cmd'),`@echo off\r\necho ${tool} >> "${poisonLog}"\r\nexit /b 91\r\n`);
   }
   const runtimePath = windows ? [quickBin,join(process.env.SystemRoot,'System32'),join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0'),dirname(Bun.which('git'))].join(delimiter) : quickBin;
-  const env={...process.env,HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_AUTH_MODE:'local',HOME:home,CODEX_HOME:join(home,'.codex'),CODEX_AUTH_PATH:join(home,'auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_REVIEW_ROOT:project,CODEX_WEBUI_ENABLE_TERMINAL:'true',CODEX_WEBUI_ENABLE_REVIEW_WRITE:'false',SHELL:windows?join(process.env.SystemRoot,'System32/cmd.exe'):'/bin/bash',USERPROFILE:home,CODEX_WEBUI_APP_SERVER_MODE:'isolated',PATH:portable?runtimePath:`${quickBin}${delimiter}${join(root,'tests/fixtures')}${delimiter}${process.env.PATH}`};
+  const env={...process.env,HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_AUTH_MODE:'local',HOME:home,CODEX_HOME:join(home,'.codex'),CODEX_AUTH_PATH:join(home,'auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_REVIEW_ROOT:project,CODEX_WEBUI_ENABLE_TERMINAL:'true',CODEX_WEBUI_ENABLE_REVIEW_WRITE:'false',SHELL:windows?join(process.env.SystemRoot,'System32/cmd.exe'):'/bin/bash',USERPROFILE:home,CODEX_WEBUI_APP_SERVER_MODE:'isolated',PATH:runtimePath};
   delete env.CODEX_WEBUI_NODE;
-  if (portable) {
+  {
     // The native helper exercises its private lock in a disposable home.
-    const directory = nativeGo ? join(home,'.config','codex-remote-web','desktop') : join(home,'session-fixture'), input = join(fixture, 'session-input.json');
-    writeFileSync(input, JSON.stringify({ enabled: false, options: { directory, executable: '/fixture/desktop' } }));
+    const directory = join(home,'.config','codex-remote-web','desktop'), input = join(fixture, 'session-input.json');
+    writeFileSync(input, JSON.stringify({ enabled: false, options: { directory, executable: join(fixture, 'desktop.exe') } }));
     const helper = Bun.spawn([executable, 'session-configure'], { cwd: fixture, env, stdin: Bun.file(input), stdout: 'pipe', stderr: 'pipe' });
     const [output, errors, exit] = await Promise.all([new Response(helper.stdout).text(), new Response(helper.stderr).text(), helper.exited]);
     assert.equal(exit, 0, errors);
@@ -123,15 +106,15 @@ try {
     assert.ok(existsSync(join(directory, 'session-lock.sqlite')), 'Shipped CLI must acquire its private registration lock');
   }
   // Start from a different cwd and without source: no frontend rebuild may be needed.
-  server=Bun.spawn(portable?[executable]:['bun',join(unpacked,'dist/server.js')],{cwd:fixture,env,stdout:'pipe',stderr:'pipe'});
+  server=Bun.spawn([executable],{cwd:fixture,env,stdout:'pipe',stderr:'pipe'});
   const serverError=serverLog=new Response(server.stderr).text();
   for(let attempt=0;;attempt++){try {const response=await fetch(`http://127.0.0.1:${port}/api/health`);if((await response.json()).codex)break;}catch{} if(attempt>=400)throw new Error('Packaged gateway failed to start');await Bun.sleep(50);}
   for (const path of ['/', '/app.bundle.js', '/auth-bootstrap.js', '/access-session.js', '/i18n.js', '/codex-brand.js', '/workspace.css', '/remote-access.css', '/setup', '/setup.bundle.js', '/setup-assets/style.css', '/vendor/katex/katex.min.css', '/vendor/xterm/xterm.css']) assert.equal((await fetch(`http://127.0.0.1:${port}${path}`)).status,200,path);
-  assert.equal(existsSync(join(unpacked,'public/app.js')),false);assert.equal(existsSync(join(unpacked,'dist/quick-worker.js')),!nativeGo);
-  if (nativeGo) assert.equal((await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()).runtime,'native-go');
+  assert.equal(existsSync(join(unpacked,'public/app.js')),false);
+  assert.equal((await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()).runtime,'native-go');
   // The standalone configuration page must also start without source or an App Server.
   const setupLog=join(fixture,'setup.log');
-  setup=Bun.spawn(portable?[executable,'setup']:['bun',join(unpacked,'dist/setup.js')],{cwd:fixture,env,stdout:Bun.file(setupLog),stderr:'pipe'});
+  setup=Bun.spawn([executable,'setup'],{cwd:fixture,env,stdout:Bun.file(setupLog),stderr:'pipe'});
   let setupUrl;
   for(let attempt=0;;attempt++){try { setupUrl=readFileSync(setupLog,'utf8').match(/http:\/\/127\.0\.0\.1:\d+\/setup#setup=[A-Za-z0-9_-]+/)?.[0];if(setupUrl)break; }catch{} if(attempt>400)throw new Error('Packaged setup failed to start');await Bun.sleep(50);}
   const setupOrigin=new URL(setupUrl).origin;
@@ -157,11 +140,11 @@ try {
   let terminal='';ws.on('message',data=>{terminal+=String(data);});
   await new Promise((resolve,reject)=>{ws.on('open',resolve);ws.on('error',reject);});
   const stty = process.platform === 'darwin' ? '/bin/stty' : '/usr/bin/stty';
-  if (compactMac) ws.send(JSON.stringify({type:'resize',cols:112,rows:37}));
-  ws.send(Buffer.from(windows ? "echo PACKAGED_PTY_OK\r\nexit\r\n" : compactMac ? `/bin/test -t 0 && ${stty} size\nprintf 'PACKAGED_PTY_OK\\n'\nexit\n` : "printf 'PACKAGED_PTY_OK\\n'\nexit\n"));
+  if (!windows) ws.send(JSON.stringify({type:'resize',cols:112,rows:37}));
+  ws.send(Buffer.from(windows ? "echo PACKAGED_PTY_OK\r\nexit\r\n" : `/bin/test -t 0 && ${stty} size\nprintf 'PACKAGED_PTY_OK\\n'\nexit\n`));
   await new Promise((resolve,reject)=>{const timer=setTimeout(()=>{ws.terminate();reject(new Error('Packaged terminal timed out'));},15000);ws.on('close',()=>{clearTimeout(timer);resolve();});});
   assert.match(terminal,windows ? /(?:\r|\n)PACKAGED_PTY_OK(?:\r?\n|\x1b\[)/ : /(?:\r|\n)PACKAGED_PTY_OK\r?\n/);
-  if (compactMac) assert.match(terminal, /(?:\r|\n)37 112\r?\n/, 'Real PTY receives the new window size');
+  if (!windows) assert.match(terminal, /(?:\r|\n)37 112\r?\n/, 'Real PTY receives the new window size');
   let csrf,setupCookie;const base=`http://127.0.0.1:${port}`;
   const setupRequest=async(path,body)=>{
     const response=await fetch(base+'/api/setup/'+path,{method:body===undefined?'GET':'POST',headers:{origin:base,'x-setup-request':'1','content-type':'application/json',...(csrf?{'x-setup-csrf':csrf}:{}),...(setupCookie?{cookie:setupCookie}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})});
@@ -174,7 +157,7 @@ try {
   if (windows) {
     assert.match(quickState.privateHost,/^[a-f0-9]{48}\.localhost$/);
     assert.equal(JSON.stringify((await setupRequest('quick/status')).data).includes(quickState.privateHost),false);
-    assert.equal((await fetch(`http://127.0.0.1:${quickState.port}/api/health`)).status,403);
+    assert.equal((await fetch(`http://127.0.0.1:${quickState.port}/api/health`)).status,404,'Wrong Host must not expose the private origin');
     assert.equal((await fetch(`http://127.0.0.1:${quickPort}/api/health`,{redirect:'manual'})).status,302);
     assert.equal((await fetch(`http://127.0.0.1:${quickPort}/api/health`,{headers:{cookie:'fixture_quick_login=owner',origin:'https://evil.example'}})).status,403);
     assert.equal((await fetch(`http://127.0.0.1:${quickPort}/api/health`,{headers:{cookie:'fixture_quick_login=owner',origin:'https://fixture-quick.trycloudflare.com'}})).status,200);
@@ -186,15 +169,15 @@ try {
   // tree, including with portable runtimes and the poisoned host PATH.
   // Desktop settings supply an explicit Codex executable. The first gateway
   // above separately verifies CLI discovery through the poisoned PATH.
-  const desktopEnv={...env,CODEX_WEBUI_DESKTOP_CHILD:'1',...(windows?{CODEX_WEBUI_CODEX:join(quickBin,'codex.cmd')}:{})};
-  for(const path of [project,nodePath,...(windows?[desktopEnv.CODEX_WEBUI_CODEX,join(quickBin,'node_modules/@openai/codex/bin/codex.js')]:[])])assert.ok(existsSync(path),`Missing desktop fixture: ${path}`);
-  server=Bun.spawn(portable?[executable]:['bun',join(unpacked,'dist/server.js')],{cwd:fixture,env:desktopEnv,stdout:'pipe',stderr:'pipe'});
+  const desktopEnv={...env,CODEX_WEBUI_DESKTOP_CHILD:'1',CODEX_WEBUI_CODEX:join(quickBin,windows?'codex.exe':'codex')};
+  for(const path of [project,desktopEnv.CODEX_WEBUI_CODEX])assert.ok(existsSync(path),`Missing desktop fixture: ${path}`);
+  server=Bun.spawn([executable],{cwd:fixture,env:desktopEnv,stdout:'pipe',stderr:'pipe'});
   const desktopOutput=new Response(server.stdout).text();
   serverLog=new Response(server.stderr).text();
   for(let attempt=0;;attempt++){try{if((await(await fetch(base+'/api/health')).json()).codex)break;}catch{}if(attempt>200)throw new Error('Packaged desktop isolated supervisor failed');await Bun.sleep(50);}
   assert.deepEqual(await(await fetch(base+'/api/remote-access/status')).json(),{configured:false,management:'desktop',canManage:false});
   assert.equal((await fetch(base+'/api/setup/launch',{method:'POST',headers:{origin:base,'x-setup-request':'1','content-type':'application/json'},body:'{}'})).status,409);
   server.kill('SIGTERM');await server.exited;await desktopOutput;assert.equal((await serverLog).includes('cannot start Codex'),false);server=null;
-  if (portable) assert.equal(existsSync(poisonLog),false,'Executable must not use a host runtime, installer or compiler');
-  console.log(portable ? 'PASS: native executable, bundled runtime/license/relink bundle, no host runtime/install/compiler use, outside-HOME and foreign-cwd gateway/setup, assets, restricted project APIs, real PTY and platform-appropriate remote-access checks' : 'PASS: allowlisted archive, checksum, dependency notices, frozen production install, outside-HOME production installation, restricted project APIs, foreign-cwd gateway/setup startup and packaged PTY/temporary-connector workers');
+  assert.equal(existsSync(poisonLog),false,'Executable must not use a host runtime, installer or compiler');
+  console.log('PASS: native gateway without JavaScript runtimes, workers or addons, checksum, outside-HOME and foreign-cwd gateway/setup, assets, restricted project APIs, real PTY and temporary connector');
 } finally { if(setup){setup.kill('SIGTERM');await setup.exited;}if(server){server.kill('SIGTERM');await server.exited;console.error(await serverLog);}rmSync(fixture,{recursive:true,force:true}); }

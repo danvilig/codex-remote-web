@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -27,7 +28,11 @@ func fixture(t *testing.T) (string, <-chan *websocket.Conn) {
 	t.Helper()
 	// macOS Unix sockets can have at most 103 path bytes. Avoid the relatively
 	// long macOS default temp path plus a subdirectory named after the test.
-	dir, err := os.MkdirTemp("/tmp", "crw-go-")
+	temp := "/tmp"
+	if runtime.GOOS == "windows" {
+		temp = os.TempDir()
+	}
+	dir, err := os.MkdirTemp(temp, "cg-")
 	if err != nil {
 		t.Fatal(err)
 	}

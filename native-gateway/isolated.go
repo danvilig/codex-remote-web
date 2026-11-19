@@ -1,5 +1,3 @@
-//go:build darwin || linux
-
 package main
 
 import (
@@ -49,11 +47,15 @@ func openIsolated(cwd string) (*stdioMessageConn, error) {
 	cmd := exec.Command(exe, "isolated-worker")
 	cmd.Dir = cwd
 	cmd.Stderr = os.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	in, err := cmd.StdinPipe()
+	if err := configureOwnedCommand(cmd); err != nil {
+		return nil, err
+	}
+	readEnd, in, err := isolatedInputPipe()
 	if err != nil {
 		return nil, err
 	}
+	defer readEnd.Close()
+	cmd.Stdin = readEnd
 	out, writeEnd, err := os.Pipe()
 	if err != nil {
 		_ = in.Close()
@@ -61,12 +63,6 @@ func openIsolated(cwd string) (*stdioMessageConn, error) {
 	}
 	defer writeEnd.Close()
 	cmd.Stdout = writeEnd
-	file, ok := in.(*os.File)
-	if !ok {
-		_ = in.Close()
-		_ = out.Close()
-		return nil, errors.New("App Server supervisor has no deadline-aware pipe")
-	}
 	if err := cmd.Start(); err != nil {
 		_ = in.Close()
 		_ = out.Close()
@@ -75,14 +71,14 @@ func openIsolated(cwd string) (*stdioMessageConn, error) {
 	scanner := bufio.NewScanner(out)
 	scanner.Buffer(make([]byte, 64<<10), maxNativeMessage)
 	// A separately owned pipe lets the reader drain final responses after Wait.
-	conn := &stdioMessageConn{stdin: file, stdout: out, scanner: scanner}
+	conn := &stdioMessageConn{stdin: in, stdout: out, scanner: scanner}
 	go func() { _ = cmd.Wait() }()
 	return conn, nil
 }
 
 func runIsolatedWorker() error {
-	if syscall.Getpgrp() != os.Getpid() {
-		return errors.New("App Server supervisor must own its process group")
+	if !workerOwnsProcess() {
+		return errors.New("App Server supervisor must own its process tree")
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT)
 	defer cancel()
@@ -90,7 +86,10 @@ func runIsolatedWorker() error {
 	if binary == "" {
 		binary = "codex"
 	}
-	cmd := exec.Command(binary, "app-server", "--stdio")
+	cmd, err := codexCommand(binary, "app-server", "--stdio")
+	if err != nil {
+		return err
+	}
 	cmd.Stdout, cmd.Stderr = os.Stdout, os.Stderr
 	in, err := cmd.StdinPipe()
 	if err != nil {
@@ -109,9 +108,7 @@ func runIsolatedWorker() error {
 	case <-ctx.Done():
 	case <-life:
 	}
-	// Terminate the owned group even after its lead Codex process exits.
-	_ = syscall.Kill(-os.Getpid(), syscall.SIGTERM)
-	time.AfterFunc(1500*time.Millisecond, func() { _ = syscall.Kill(-os.Getpid(), syscall.SIGKILL) })
-	<-time.After(1600 * time.Millisecond)
+	// Terminate the owned tree even after its lead Codex process exits.
+	finishOwnedWorker()
 	return result
 }

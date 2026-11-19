@@ -28,6 +28,7 @@ if (windows) {
 }
 await writePrivate(join(directory, 'config.json'), desktopConfig({ initialized: true, enabled: false, autostart: false, cwd: home, codex, port, language: 'en' }, home));
 const env = { ...process.env, PATH: process.env.PATH, HOME: home, USERPROFILE: home, CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), XDG_CONFIG_HOME: join(home, '.config'), XDG_CACHE_HOME: join(home, '.cache'), APPDATA: join(home, 'AppData/Roaming'), LOCALAPPDATA: join(home, 'AppData/Local'), CODEX_DESKTOP_BUN: process.env.CODEX_DESKTOP_BUN || 'bun', ELECTRON_ENABLE_LOGGING: '1', ELECTRON_LOG_FILE: join(home, 'electron.log') };
+if (windows) env.CODEX_WEBUI_NODE = process.execPath;
 for (const key of Object.keys(env)) if (key.toUpperCase() === 'ELECTRON_RUN_AS_NODE') delete env[key];
 // Windows known-folder lookup requires the substituted profile directories to
 // exist before Electron asks for userData. These belong only to this fixture.
@@ -181,5 +182,5 @@ try {
   console.error('Cleaning native desktop fixture');
   await closeApplication().catch(error=>console.error('Secondary cleanup failure:',error.message)); await agentRequest(directory, 'shutdown').catch(() => {});
   for (let i = 0; i < 100; i++) { try { await agentRequest(directory, 'status', undefined, { timeoutMs: 100 }); } catch { break; } await delay(50); }
-  await rm(home, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true, maxRetries: 12, retryDelay: 100 });
 }

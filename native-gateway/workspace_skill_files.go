@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
-	"syscall"
 )
 
 var workspaceSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
@@ -229,7 +228,7 @@ func workspaceSkillRead(root *os.Root, name string, limit int64) ([]byte, os.Fil
 	if err != nil || !info.Mode().IsRegular() || info.Size() > limit {
 		return nil, 0, workspaceUnavailable
 	}
-	file, err := root.OpenFile(name, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := root.OpenFile(name, os.O_RDONLY|noFollow|noBlock, 0)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -249,7 +248,7 @@ func workspaceSkillRead(root *os.Root, name string, limit int64) ([]byte, os.Fil
 }
 
 func workspaceSkillWrite(root *os.Root, name string, data []byte, mode os.FileMode) error {
-	file, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW, mode)
+	file, err := root.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL|noFollow, mode)
 	if err != nil {
 		return err
 	}

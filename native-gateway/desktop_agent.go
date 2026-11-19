@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -172,6 +173,7 @@ type desktopAgent struct {
 	local, protected        desktopProcess
 	connector               desktopProcess
 	managed                 desktopManaged
+	systemd                 *headlessSystemd
 	done                    chan struct{}
 }
 
@@ -205,9 +207,16 @@ func (a *desktopAgent) status() map[string]any {
 	config := a.config
 	events := append([]desktopEvent{}, a.events...)
 	a.mu.RUnlock()
-	return map[string]any{"runtime": "macos-native", "gatewayImplementation": "go", "url": fmt.Sprintf("http://127.0.0.1:%d", config.Port), "config": config,
+	return map[string]any{"runtime": desktopRuntime(), "gatewayImplementation": "go", "gatewayVersion": version, "url": fmt.Sprintf("http://127.0.0.1:%d", config.Port), "config": config,
 		"local": a.local.snapshot(), "protected": a.protected.snapshot(), "connector": map[string]bool{"running": a.connector.snapshot().Phase == "running"},
 		"events": events, "setup": a.setupStatus()}
+}
+
+func desktopRuntime() string {
+	if runtime.GOOS == "darwin" {
+		return "macos-native"
+	}
+	return "electron"
 }
 
 func (a *desktopAgent) validateConfig(ctx context.Context, body json.RawMessage) (desktopConfig, error) {
@@ -413,7 +422,7 @@ func (a *desktopAgent) handler(host, token string) http.HandlerFunc {
 	}
 }
 
-// runDesktopAgent is the entry point for the Swift background helper. The
+// runDesktopAgent is the entry point for the desktop background helper. The
 // gateway child is this same executable, started with PORT and the desktop
 // child environment, and reports its bound URL on stdout after Listen.
 func runDesktopAgent() error {

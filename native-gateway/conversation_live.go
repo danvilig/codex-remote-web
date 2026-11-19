@@ -13,7 +13,6 @@ import (
 	"regexp"
 	"strings"
 	"sync"
-	"syscall"
 )
 
 type conversationLiveStore struct {
@@ -291,13 +290,13 @@ func (s *conversationLiveStore) read(rootPath, path string) (json.RawMessage, er
 		return nil, err
 	}
 	defer parent.Close()
-	file, err := parent.OpenFile(filepath.Base(path), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	file, err := parent.OpenFile(filepath.Base(path), os.O_RDONLY|noFollow|noBlock, 0)
 	if err != nil {
 		return nil, err
 	}
 	defer file.Close()
 	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || !desktopOwned(info) {
+	if err != nil || !info.Mode().IsRegular() || !fileOwned(file, info, 0) {
 		return nil, conversationFailure("INVALID_REQUEST", "Unsafe thread rollout")
 	}
 	s.mu.Lock()

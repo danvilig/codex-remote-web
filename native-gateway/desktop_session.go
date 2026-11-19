@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -18,10 +19,12 @@ const desktopSessionLabel = "io.github.danvilig.codex-remote-web.desktop-agent"
 
 type desktopRegistration struct {
 	Executable string   `json:"executable,omitempty"`
-	Args       []string `json:"args"`
+	Args       []string `json:"args,omitempty"`
 	Platform   string   `json:"platform"`
-	Path       string   `json:"path"`
-	Content    string   `json:"content"`
+	Path       string   `json:"path,omitempty"`
+	Content    string   `json:"content,omitempty"`
+	Name       string   `json:"name,omitempty"`
+	Arguments  string   `json:"arguments,omitempty"`
 }
 
 func desktopSessionDefinition(home, installation string) desktopRegistration {
@@ -35,24 +38,51 @@ func desktopSessionDefinition(home, installation string) desktopRegistration {
 }
 
 func (r *desktopRegistration) ownedBy(expected desktopRegistration) bool {
-	return r != nil && r.Platform == expected.Platform && r.Path == expected.Path && r.Content == expected.Content &&
-		(r.Executable == "" || r.Executable == expected.Executable) && len(r.Args) == 0
+	if r == nil || r.Platform != expected.Platform || r.Path != expected.Path ||
+		(r.Executable != "" && r.Executable != expected.Executable) || len(r.Args) != 0 {
+		return false
+	}
+	switch expected.Platform {
+	case "linux":
+		return r.Name == "" && r.Arguments == "" && desktopLinuxSessionContentOwned(r.Content, expected.Content)
+	case "win32":
+		return r.Executable == expected.Executable && r.Name == expected.Name && r.Arguments == expected.Arguments && r.Content == ""
+	default:
+		return r.Name == "" && r.Arguments == "" && r.Content == expected.Content
+	}
 }
 
 type desktopSession struct {
 	home, directory, installation string
+	platform                      string
 	run                           func(...string) error
+	windows                       desktopWindowsSessionRunner
 }
 
 func newDesktopSession(home, directory, installation string) desktopSession {
-	return desktopSession{home: home, directory: directory, installation: installation, run: func(args ...string) error {
+	return desktopSession{home: home, directory: directory, installation: installation, platform: runtime.GOOS, windows: runDesktopWindowsSessionCommand, run: func(args ...string) error {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		if _, err := desktopExec(ctx, "/bin/launchctl", args, os.Environ(), "", 64<<10); err != nil {
-			return desktopFailure(400, "SESSION_MANAGER", "macOS could not update the login item. Check that the application is running in your login session.")
+		binary, message := "/bin/launchctl", "macOS could not update the login item. Check that the application is running in your login session."
+		if runtime.GOOS == "linux" {
+			binary, message = "systemctl", "Could not update the login item. Check the systemd user session."
+		}
+		if _, err := desktopExec(ctx, binary, args, os.Environ(), "", 64<<10); err != nil {
+			return desktopFailure(400, "SESSION_MANAGER", message)
 		}
 		return nil
 	}}
+}
+
+func (s desktopSession) definition() desktopRegistration {
+	switch s.platform {
+	case "linux":
+		return desktopLinuxSessionDefinition(s.home, s.installation, os.Getenv)
+	case "windows":
+		return desktopWindowsSessionDefinition(s.home, s.installation)
+	default:
+		return desktopSessionDefinition(s.home, s.installation)
+	}
 }
 
 type desktopSessionRevision struct {
@@ -89,7 +119,7 @@ func desktopRegistrationMatches(got, expected *desktopRegistration) bool {
 }
 
 func (s desktopSession) configure(enabled, ownedOnly bool) (func() error, error) {
-	definition := desktopSessionDefinition(s.home, s.installation)
+	definition := s.definition()
 	restore, _, err := s.configureRegistration(enabled, ownedOnly, definition, nil)
 	return restore, err
 }
@@ -110,11 +140,11 @@ func (s desktopSession) configureRegistration(enabled, ownedOnly bool, definitio
 	if found, err := readDesktopJSON(generationPath, &generation); err != nil || found && !desktopGenerationPattern.MatchString(generation) {
 		return nil, snapshot, desktopFailure(400, "SESSION_STATE_INVALID", "Background registration generation is invalid; preserve it")
 	}
-	if _, err := os.Lstat(filepath.Join(s.directory, "session-windows-pending.json")); !errors.Is(err, os.ErrNotExist) {
-		return nil, snapshot, desktopFailure(409, "SESSION_STATE_INVALID", "Finish startup recovery before changing the login item")
+	if err := s.recoverWindowsSession(recordPath); err != nil {
+		return nil, snapshot, err
 	}
 	var saved *desktopRegistration
-	if found, err := readDesktopJSON(recordPath, &saved); err != nil || found && (saved == nil || saved.Platform != "darwin" || saved.Path == "" || saved.Content == "") {
+	if found, err := readDesktopJSON(recordPath, &saved); err != nil || found && !saved.valid() {
 		return nil, snapshot, desktopFailure(400, "SESSION_STATE_INVALID", "Background registration state is invalid; preserve it")
 	}
 	if expected != nil && (expected.generation != generation || !desktopRegistrationMatches(saved, expected.record)) {
@@ -124,7 +154,7 @@ func (s desktopSession) configureRegistration(enabled, ownedOnly bool, definitio
 	if generation != "" {
 		snapshot.Generation = &generation
 	}
-	if saved != nil && !saved.ownedBy(desktopSessionDefinition(s.home, s.installation)) {
+	if saved != nil && !saved.ownedBy(s.definition()) {
 		if !enabled && ownedOnly {
 			snapshot.Skipped = true
 			return func() error { return nil }, snapshot, nil
@@ -204,7 +234,8 @@ func desktopSessionConfigureInput(input io.Reader) (desktopSessionSnapshot, erro
 	if !validDesktopPath(o.Executable) || o.Directory != desktopDirectory(home) || len(o.Args) != 0 || o.ExpectedInstallation != "" && o.ExpectedInstallation != o.Executable {
 		return snapshot, invalid
 	}
-	definition := desktopSessionDefinition(home, o.Executable)
+	session := newDesktopSession(home, o.Directory, o.Executable)
+	definition := session.definition()
 	if o.Definition != nil {
 		if !o.Definition.ownedBy(definition) {
 			return snapshot, invalid
@@ -218,12 +249,36 @@ func desktopSessionConfigureInput(input io.Reader) (desktopSessionSnapshot, erro
 			return snapshot, invalid
 		}
 	}
-	session := newDesktopSession(home, o.Directory, o.Executable)
 	_, snapshot, err = session.configureRegistration(*request.Enabled, o.ExpectedInstallation != "", definition, revision)
 	return snapshot, err
 }
 
 func (s desktopSession) mutate(enabled bool, spec desktopRegistration, saved *desktopRegistration, recordPath string) error {
+	switch spec.Platform {
+	case "linux":
+		return s.mutateLinuxSession(enabled, spec, saved, recordPath)
+	case "win32":
+		return s.mutateWindowsSession(enabled, spec, saved, recordPath)
+	default:
+		return s.mutateDarwinSession(enabled, spec, saved, recordPath)
+	}
+}
+
+func (r *desktopRegistration) valid() bool {
+	if r == nil {
+		return false
+	}
+	switch r.Platform {
+	case "darwin", "linux":
+		return r.Path != "" && r.Content != ""
+	case "win32":
+		return r.Name != "" && r.Executable != "" && r.Arguments != ""
+	default:
+		return false
+	}
+}
+
+func (s desktopSession) mutateDarwinSession(enabled bool, spec desktopRegistration, saved *desktopRegistration, recordPath string) error {
 	if !enabled && saved == nil {
 		return nil
 	}
@@ -233,7 +288,7 @@ func (s desktopSession) mutate(enabled bool, spec desktopRegistration, saved *de
 	}
 	parent := filepath.Dir(path)
 	if info, err := os.Lstat(parent); err == nil {
-		if !info.IsDir() || !desktopOwned(info) {
+		if !info.IsDir() || !desktopOwned(parent, info) {
 			return errors.New("Unsafe background registration directory")
 		}
 	} else if !errors.Is(err, os.ErrNotExist) {
@@ -265,7 +320,7 @@ func (s desktopSession) mutate(enabled bool, spec desktopRegistration, saved *de
 		if err := os.MkdirAll(parent, 0700); err != nil {
 			return err
 		}
-		if info, err := os.Lstat(parent); err != nil || !info.IsDir() || !desktopOwned(info) {
+		if info, err := os.Lstat(parent); err != nil || !info.IsDir() || !desktopOwned(parent, info) {
 			return errors.New("Unsafe background registration directory")
 		}
 		if err := writeDesktopFile(path, []byte(spec.Content)); err != nil {
