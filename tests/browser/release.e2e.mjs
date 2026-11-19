@@ -20,6 +20,7 @@ const target = portableTarget();
 const windows = process.platform === 'win32';
 const archive = join(fixture, 'releases', `${name}.${process.argv.includes('--portable') ? target.extension : 'tar.gz'}`);
 const portable = process.argv.includes('--portable');
+const fixtureRemoval = { recursive: true, force: true, maxRetries: 12, retryDelay: 100 };
 async function run(args, cwd = root, extraEnv = {}) { const child = Bun.spawn(args,{cwd,env:{...process.env,...extraEnv},stdout:'pipe',stderr:'pipe'});const [out,error,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);assert.equal(code,0,`${args[0]} failed: ${error.slice(-3000)}`);return out; }
 let server, setup, serverLog, setupError;
 function launchGateway(executable, env) {
@@ -119,9 +120,9 @@ try {
   delete env.CODEX_WEBUI_NODE;
   {
     // The native helper exercises its private lock in a disposable home.
-    const directory = join(home,'.config','codex-remote-web','desktop'), input = join(fixture, 'session-input.json');
-    writeFileSync(input, JSON.stringify({ enabled: false, options: { directory, executable: join(fixture, 'desktop.exe') } }));
-    const helper = Bun.spawn([executable, 'session-configure'], { cwd: fixture, env, stdin: Bun.file(input), stdout: 'pipe', stderr: 'pipe' });
+    const directory = join(home,'.config','codex-remote-web','desktop');
+    const input = Buffer.from(JSON.stringify({ enabled: false, options: { directory, executable: join(fixture, 'desktop.exe') } }));
+    const helper = Bun.spawn([executable, 'session-configure'], { cwd: fixture, env, stdin: input, stdout: 'pipe', stderr: 'pipe' });
     const [output, errors, exit] = await Promise.all([new Response(helper.stdout).text(), new Response(helper.stderr).text(), helper.exited]);
     assert.equal(exit, 0, errors);
     const { snapshot } = JSON.parse(output); assert.equal(snapshot.previous, null); assert.equal(snapshot.current, null);
@@ -213,5 +214,7 @@ try {
 } finally {
   if(setup){setup.kill('SIGTERM');await setup.exited;console.error(await setupError);}
   if(server){await stopGateway(server);console.error(await serverLog);}
-  await rm(fixture,{recursive:true,force:true,maxRetries:12,retryDelay:100});
+  // Use Node's Windows EPERM handling and backoff; cleanup failure still fails the test.
+  if (windows) await run(['node', '-e', 'require("node:fs/promises").rm(process.argv[1], JSON.parse(process.argv[2])).catch(error => { console.error(error); process.exitCode = 1; });', fixture, JSON.stringify(fixtureRemoval)]);
+  else await rm(fixture, fixtureRemoval);
 }

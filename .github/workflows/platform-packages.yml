@@ -119,10 +119,18 @@ jobs:
         run: rustup toolchain install 1.95.0 --profile minimal
       - name: Install Linux system WebView build and test dependencies
         if: runner.os == 'Linux'
-        timeout-minutes: 5
+        timeout-minutes: 12
         shell: bash
         run: |
-          apt_options=(-o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o DPkg::Lock::Timeout=60)
+          sources=/etc/apt/sources.list.d/ubuntu.sources
+          if [[ "$TARGET_ARCH" == x64 ]]; then
+            # The regional EC2 archive stalled or throttled x64 runner downloads.
+            # Keep suites, components and the Ubuntu archive keyring from the runner.
+            sources=$(mktemp "$RUNNER_TEMP/ubuntu-XXXXXX.sources")
+            sed -E 's#https?://[[:alnum:]-]+\.ec2\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list.d/ubuntu.sources > "$sources"
+            chmod 644 "$sources"
+          fi
+          apt_options=(-o "Dir::Etc::sourcelist=$sources" -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o DPkg::Lock::Timeout=60)
           sudo apt-get "${apt_options[@]}" -o APT::Update::Error-Mode=any update
           sudo apt-get "${apt_options[@]}" install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libxdo-dev librsvg2-dev xvfb dbus-x11 at-spi2-core python3-pyatspi
       - name: Verify NTFS privacy boundaries
