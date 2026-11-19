@@ -292,12 +292,12 @@ func (b *bridge) request(ctx context.Context, method string, params json.RawMess
 }
 
 func (b *bridge) run(ctx context.Context, socket, version string, delay time.Duration) {
-	b.runMode(ctx, "shared", socket, "", version, delay)
+	b.runMode(ctx, "shared", socket, "", version, delay, nil)
 }
 
-func (b *bridge) runMode(ctx context.Context, mode, socket, cwd, version string, delay time.Duration) {
+func (b *bridge) runMode(ctx context.Context, mode, socket, cwd, version string, delay time.Duration, daemon *desktopDaemon) {
 	for ctx.Err() == nil {
-		b.session(ctx, mode, socket, cwd, version)
+		b.session(ctx, mode, socket, cwd, version, daemon)
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -308,7 +308,7 @@ func (b *bridge) runMode(ctx context.Context, mode, socket, cwd, version string,
 	}
 }
 
-func (b *bridge) session(ctx context.Context, mode, socket, cwd, version string) {
+func (b *bridge) session(ctx context.Context, mode, socket, cwd, version string, daemon *desktopDaemon) {
 	startup, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	var transport nativeTransport
@@ -317,6 +317,12 @@ func (b *bridge) session(ctx context.Context, mode, socket, cwd, version string)
 		transport, err = openIsolated(cwd)
 	} else {
 		transport, err = nativeSocket(startup, socket)
+		if daemon != nil && daemon.maybeStart(ctx, socket, err) {
+			cancel()
+			startup, cancel = context.WithTimeout(ctx, 5*time.Second)
+			defer cancel()
+			transport, err = nativeSocket(startup, socket)
+		}
 	}
 	if err != nil {
 		return

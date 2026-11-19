@@ -308,6 +308,9 @@ body.sidebar-hidden { --sidebar-w: 0px; }
 .project-connection { font-size: 11px; color: var(--app-text-tertiary); flex-shrink: 1; max-width: 85px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-connection-dot { width: 7px; height: 7px; flex: 0 0 7px; border-radius: 50%; background: var(--app-text-tertiary); }
 .project-connection-dot.connected { background: #39c879; }
+.project-group-options { width: 24px; height: 24px; flex: 0 0 24px; display: grid; place-items: center; border-radius: 6px; color: var(--app-text-tertiary); }
+.project-group-options:hover, .project-group-options:focus-visible, .project-group-options[aria-expanded="true"] { color: var(--app-text); background: var(--app-hover); }
+.workspace-project > summary .project-group-options .icon-slot, .workspace-project > summary .project-group-options svg { width: 16px; height: 16px; }
 .project-new-chat { margin: 4px 0 8px 34px; color: var(--app-text-secondary); font-size: 13px; }
 .workspace-connection > p { padding: 8px; color: var(--app-text-secondary); font-size: 12px; }
 .workspace-popup { position: fixed; z-index: 200; padding: 6px; min-width: 216px; max-width: calc(100vw - 16px); max-height: calc(100dvh - 16px); overflow-y: auto; border: 1px solid var(--app-border-default); border-radius: 18px; background: var(--workspace-chrome); box-shadow: var(--app-elevation-shadow); }

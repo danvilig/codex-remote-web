@@ -90,6 +90,9 @@ try {
   assert.equal(await page.locator('[data-section=projects]').evaluate(node => node.open), projectsOpen);
   const demoProject = page.locator('.workspace-project').filter({ hasText: 'demo-project' });
   assert.equal(await demoProject.count(), 1);
+  assert.equal(await demoProject.locator('.project-connection').textContent(), 'Local server');
+  assert.equal(await page.locator('#composerEnvironmentButton [data-server-location]').textContent(), 'Local server');
+  assert.equal(await page.locator('#settingsDialog [data-server-location]').textContent(), 'Local server');
   await demoProject.getByRole('button', {name:'older-project-chat',exact:true}).waitFor();
   await demoProject.getByRole('button', {name:'Load more chats',exact:true}).click();
   await demoProject.getByRole('button', {name:'oldest-project-chat',exact:true}).click();
@@ -99,6 +102,17 @@ try {
   await page.reload({ waitUntil: 'networkidle' });
   await demoProject.getByRole('button', {name:'older-project-chat',exact:true}).waitFor();
   assert.match(await page.locator('#composerProjectLabel').textContent(), /demo-project/);
+  await demoProject.getByRole('button', {name:'Project options',exact:true}).click();
+  await page.getByRole('menuitem', {name:'Remove project',exact:true}).click();
+  await demoProject.waitFor({state:'detached'});
+  assert.equal(await page.locator('#composerProjectLabel').textContent(), 'Choose project');
+  await page.reload({waitUntil:'networkidle'});
+  assert.equal(await demoProject.count(), 0);
+  await page.locator('#projectButton').click();
+  await page.locator('#folderDialog[open] .folder-item').filter({hasText:'demo-project'}).click();
+  await page.locator('#folderDialog[open] .folder-item').filter({hasText:'nested-folder'}).waitFor();
+  await page.locator('#folderConfirm').click();
+  await demoProject.getByRole('button', {name:'older-project-chat',exact:true}).waitFor();
   // Nested organization/sort menus use actual thread data and save their selections.
   await page.locator('#projectsOptions').click();
   await page.getByRole('menuitem', { name: 'Organize sidebar', exact: true }).hover();
@@ -106,7 +120,7 @@ try {
   await page.screenshot({ path: artifact('workspace-projects-menu.png') });
   await page.getByRole('menuitemradio', { name: 'By connection', exact: true }).click();
   assert.equal(await page.locator('[data-section=projects]').getAttribute('data-grouping'), 'connection');
-  assert.equal(await page.locator('.workspace-connection > p').textContent(), 'Remote server');
+  assert.equal(await page.locator('.workspace-connection > p').textContent(), 'Local server');
   await page.locator('#projectsOptions').click();
   await page.getByRole('menuitem', { name: 'Organize sidebar', exact: true }).hover();
   await page.getByRole('menuitemradio', { name: 'In one list', exact: true }).click();

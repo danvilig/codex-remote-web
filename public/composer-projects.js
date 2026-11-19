@@ -1,3 +1,5 @@
+import { absoluteProjectPath } from './workspace-navigation.js';
+
 export function createComposerProjects({
   anchor,
   state,
@@ -5,6 +7,7 @@ export function createComposerProjects({
   icon,
   choose,
   add,
+  isRemoved,
 }) {
   let popup;
   function close() {
@@ -43,7 +46,7 @@ export function createComposerProjects({
           state.config.defaultCwd,
           ...saved,
           ...state.threads.map((thread) => thread.cwd),
-        ].filter((path) => typeof path === "string" && path.startsWith("/")),
+        ].filter((path) => absoluteProjectPath(path) && !isRemoved?.(path)),
       ),
     ];
     const selected = state.projectless ? null : state.workspaceContext?.cwd;
@@ -68,7 +71,7 @@ export function createComposerProjects({
         path.toLocaleLowerCase().includes(search.value.toLocaleLowerCase()),
       )) {
         const button = row(
-          path.split("/").filter(Boolean).at(-1) || path,
+          path.split(/[/\\]/).filter(Boolean).at(-1) || path,
           "folderOpen",
           () => choose(path),
           selected === path,

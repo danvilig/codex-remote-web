@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -54,6 +55,7 @@ type desktopLaunch struct {
 	timeout     time.Duration
 	ready       func(string) bool
 	noRetry     bool
+	watch       func(<-chan struct{})
 }
 
 func (p *desktopProcess) start(spec desktopLaunch) error {
@@ -112,6 +114,9 @@ func (p *desktopProcess) launchLocked(spec desktopLaunch, generation uint64) err
 	pid := child.Process.Pid
 	p.child, p.stdin, p.done, p.status.PID = child, stdin, done, &pid
 	p.mu.Unlock()
+	if spec.watch != nil {
+		go spec.watch(done)
+	}
 	go func() {
 		defer output.Close()
 		scanner := bufio.NewScanner(output)
@@ -278,6 +283,10 @@ func desktopExec(ctx context.Context, binary string, args, env []string, cwd str
 
 func desktopGatewayLaunch(binary, home string, config desktopConfig) desktopLaunch {
 	address := fmt.Sprintf("http://127.0.0.1:%d", config.Port)
-	return desktopLaunch{binary: binary, cwd: config.Cwd, env: desktopChildEnvironment(home, config),
+	launch := desktopLaunch{binary: binary, cwd: config.Cwd, env: desktopChildEnvironment(home, config),
 		timeout: 20 * time.Second, ready: func(line string) bool { return line == address }}
+	if runtime.GOOS == "windows" {
+		launch.watch = func(done <-chan struct{}) { watchWindowsDesktopDaemon(done, home, config.Codex, launch.env) }
+	}
+	return launch
 }

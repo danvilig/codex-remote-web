@@ -66,13 +66,13 @@ for await (const line of createInterface({ input: process.stdin })) {
   else if (message.method === 'thread/turns/list' && resources) result={data:[{id:'history-turn',items:[{type:'userMessage',content:[{type:'localImage',path:`${cwd}/sample.png`}]}]}]};
   else if (message.method === 'thread/loaded/list') result={data:[...histories.keys()]};
   else if (message.method === 'thread/list') {
-    const { archived, cwd: filter, cursor, modelProviders } = message.params || {};
+    const { archived, cwd: filter, cursor, modelProviders, sourceKinds } = message.params || {};
     let ids = archived ? [...archivedIds] : ['thread-A', 'thread-B', 'input-thread', ...restoredIds,...[...createdThreads.keys()].filter(id=>!createdThreads.get(id)?.ephemeral)];
-    if (projectHistoryCwd && filter === projectHistoryCwd && Array.isArray(modelProviders) && !modelProviders.length && !archived) {
+    if (projectHistoryCwd && filter === projectHistoryCwd && Array.isArray(modelProviders) && !modelProviders.length && sourceKinds?.includes('appServer') && !archived) {
       ids = [projectHistory[cursor === 'older-page' ? 1 : 0]];
       result.nextCursor = cursor ? null : 'older-page';
     }
-    result.data = ids.map(id => ({ ...thread(id), ...(id === 'archived-two' ? { source: { subAgent: { parentThreadId: 'thread-A' } }, cwd: cwd + '/demo-project' } : { source: 'cli' }) })).filter(item => !filter || item.cwd === filter);
+    result.data = ids.map(id => ({ ...thread(id), ...(id === 'archived-two' ? { source: { subAgent: { parentThreadId: 'thread-A' } }, cwd: cwd + '/demo-project' } : { source: projectHistory.includes(id) ? 'appServer' : 'cli' }) })).filter(item => !filter || item.cwd === filter);
   }
   else if (message.method === 'thread/unarchive') { archivedIds.delete(message.params.threadId); restoredIds.add(message.params.threadId); result = { thread: thread(message.params.threadId) }; }
   else if(progressFixture && message.method==='thread/read' && message.params.threadId==='progress-fail' && !progressReadFailed){progressReadFailed=true;setTimeout(()=>send({id:message.id,error:{code:-1,message:'Fixture read unavailable'}}),100);continue;}

@@ -117,6 +117,10 @@ func runGateway() error {
 	if mode != "isolated" && (!filepath.IsAbs(*socket) || strings.ContainsAny(*socket, "\x00\r\n")) {
 		return errors.New("App Server socket must be an absolute local path")
 	}
+	var daemon *desktopDaemon
+	if desktopDefaultDaemon(flags) {
+		daemon = &desktopDaemon{start: startDesktopDaemon}
+	}
 	appRoot := *assetPath
 	if appRoot == "" {
 		exe, err := os.Executable()
@@ -262,7 +266,10 @@ func runGateway() error {
 	bridgeDone := make(chan struct{})
 	conversationDone := make(chan struct{})
 	go func() { defer close(conversationDone); c.run(ctx) }()
-	go func() { defer close(bridgeDone); b.runMode(ctx, mode, *socket, w.cwd, version, time.Second) }()
+	go func() {
+		defer close(bridgeDone)
+		b.runMode(ctx, mode, *socket, w.cwd, version, time.Second, daemon)
+	}()
 	server := &http.Server{
 		Handler: app, ReadHeaderTimeout: 5 * time.Second,
 		ReadTimeout: 35 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 30 * time.Second,

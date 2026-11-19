@@ -175,7 +175,7 @@ Sites deployment, image generation, cloud Library, plugin account OAuth, and ful
 
 ### Shared Codex sessions and standalone deployments
 
-WebUI does not launch the shared daemon. Start a compatible daemon through Codex Desktop/CLI; WebUI reconnects when it becomes available without replaying execution requests. Stopping the gateway does not stop that daemon or its tasks. Docker and Compose explicitly select `isolated` mode. Before upgrading an existing isolated deployment, inspect tasks, approvals and queues, then restart its gateway to switch connection modes; refreshing the browser is insufficient.
+Desktop installations reuse the local Codex daemon and ask the configured Codex CLI to start it if it is missing. Standalone shared deployments and desktop installations with an explicit connection override wait for the configured daemon. WebUI reconnects without replaying execution requests, and stopping the gateway does not stop the shared daemon or its tasks. Docker and Compose explicitly select `isolated` mode. Before upgrading an existing isolated deployment, inspect tasks, approvals and queues, then restart its gateway to switch connection modes; refreshing the browser is insufficient.
 
 ## Documentation and development
 
