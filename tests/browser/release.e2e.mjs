@@ -90,7 +90,11 @@ try {
   copyFileSync(join(root,'tests/fixtures/quick-cloudflared.mjs'),join(quickBin,'quick-cloudflared.mjs'));
   const quickPort=await new Promise(resolve=>{const probe=createServer();probe.listen(0,'127.0.0.1',()=>{const value=probe.address().port;probe.close(()=>resolve(value));});});
   writeFileSync(join(quickBin,'quick-fixture.json'),JSON.stringify({port:quickPort,state:join(fixture,'quick-state.json')}));
-  if (windows) await run(['bun','build',join(quickBin,'quick-cloudflared.mjs'),'--compile','--outfile',join(quickBin,'cloudflared.exe')]);
+  const connectorFixture = join(quickBin, windows ? 'cloudflared.exe' : 'cloudflared');
+  if (windows) {
+    await run(['bun','build',join(quickBin,'quick-cloudflared.mjs'),'--compile','--outfile',connectorFixture]);
+    assert.match(await run([connectorFixture,'tunnel','--help'],fixture), /--allowed-mail/);
+  }
   else writeFileSync(join(quickBin,'cloudflared'),`#!/bin/sh\nexec '${nodePath.replaceAll("'","'\\''")}' '${join(quickBin,'quick-cloudflared.mjs').replaceAll("'","'\\''")}' "$@"\n`,{mode:0o700});
   const poisonLog=join(fixture,'unexpected-runtime');
   if (!windows) {
@@ -107,6 +111,11 @@ try {
   }
   const runtimePath = windows ? [quickBin,join(process.env.SystemRoot,'System32'),join(process.env.SystemRoot,'System32/WindowsPowerShell/v1.0'),dirname(Bun.which('git'))].join(delimiter) : quickBin;
   const env={...process.env,HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_AUTH_MODE:'local',HOME:home,CODEX_HOME:join(home,'.codex'),CODEX_AUTH_PATH:join(home,'auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_REVIEW_ROOT:project,CODEX_WEBUI_ENABLE_TERMINAL:'true',CODEX_WEBUI_ENABLE_REVIEW_WRITE:'false',SHELL:windows?join(process.env.SystemRoot,'System32/cmd.exe'):'/bin/bash',USERPROFILE:home,CODEX_WEBUI_APP_SERVER_MODE:'isolated',PATH:runtimePath};
+  if (windows) {
+    // Windows environment names are case insensitive; don't pass the runner's Path too.
+    for (const key of Object.keys(env)) if (key !== 'PATH' && key.toUpperCase() === 'PATH') delete env[key];
+    env.CODEX_WEBUI_CLOUDFLARED = connectorFixture;
+  }
   delete env.CODEX_WEBUI_NODE;
   {
     // The native helper exercises its private lock in a disposable home.
