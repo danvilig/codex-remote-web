@@ -40,6 +40,8 @@ if (unreachable) throw new Error('Snapshot has unreachable objects; investigate 
 
 const findings: { file: string, rule: string }[] = [];
 const forbiddenPath = /(?:^|\/)(?:node_modules|\.artifacts|\.codex|\.aws|history|coverage|dist|screenshots|remote-web-attachments|remote-web-setup)(?:\/|$)|(?:^|\/)(?:auth\.json|management-token\.json|\.env(?:\.[^/]+)?|[^/]+\.(?:png|jpe?g|webp|gif|log|pem|key))$/i;
+// Reviewed 128 px resize of the original desktop/assets/app-icon.png.
+const systemIcon = { path: 'desktop/system/icons/icon.png', blob: '4ecaa4e6d1dd4658e11183b38dce916050137525' };
 const rules = [
   ['private-key', /-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----/],
   ['provider-token', /\b(?:sk-(?:proj-|svcacct-)?[A-Za-z0-9_-]{24,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|AKIA[A-Z0-9]{16})\b/],
@@ -56,7 +58,8 @@ for (const entry of objects.split('\n').filter(Boolean)) {
   if (type !== 'blob' && type !== 'commit') continue;
   if (type === 'blob') {
     blobs++;
-    if (path !== '.env.example' && !documentationImages.has(path) && !installerImages.has(path) && forbiddenPath.test(path)) findings.push({ file: path, rule: 'forbidden-path' });
+    const reviewedIcon = path === systemIcon.path && oid === systemIcon.blob;
+    if (path !== '.env.example' && !documentationImages.has(path) && !installerImages.has(path) && !reviewedIcon && forbiddenPath.test(path)) findings.push({ file: path, rule: 'forbidden-path' });
     const size = Number(await git(['cat-file', '-s', oid]));
     if (size > 8 * 1024 * 1024) { findings.push({ file: path, rule: 'oversized-source-blob' }); continue; }
   }
