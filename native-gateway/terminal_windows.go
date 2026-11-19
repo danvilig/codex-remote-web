@@ -97,6 +97,9 @@ func startTerminal(cmd *exec.Cmd, cols, rows uint16) (_ *terminalSession, failur
 	}
 	startup := windows.StartupInfoEx{ProcThreadAttributeList: attrs.List()}
 	startup.Cb = uint32(unsafe.Sizeof(startup))
+	// Leave the three handles null so Windows uses the pseudoconsole even
+	// when the host's own standard streams are redirected.
+	startup.Flags = windows.STARTF_USESTDHANDLES
 	program, err := windows.UTF16PtrFromString(cmd.Path)
 	if err != nil {
 		return nil, err

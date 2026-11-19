@@ -298,7 +298,7 @@ func (a *desktopAgent) dispatch(ctx context.Context, request desktopRequest) (an
 		return desktopDependencies(ctx, a.home, config), nil
 	}
 	if !a.control.TryLock() {
-		return nil, desktopFailure(409, "", "Wait for the current desktop operation")
+		return nil, desktopFailure(409, "AGENT_OPERATION_BUSY", "Wait for the current desktop operation")
 	}
 	defer a.control.Unlock()
 	a.mu.RLock()

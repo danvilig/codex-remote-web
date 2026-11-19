@@ -141,6 +141,16 @@ func TestDesktopAgentLifecycle(t *testing.T) {
 	call := func(action string, body json.RawMessage) (json.RawMessage, error) {
 		return desktopAgentRequest(ctx, directory, installation, action, body, time.Second)
 	}
+	mutate := func(action string, body json.RawMessage) error {
+		var err error
+		// The PID can be visible while the auto-start transaction still holds
+		// the control lock. Retry only a known pre-dispatch rejection.
+		waitDesktopTest(t, func() bool {
+			_, err = call(action, body)
+			return desktopErrorCode(err) != "AGENT_OPERATION_BUSY"
+		})
+		return err
+	}
 	var previousPID int
 	getPID := func() int {
 		result, err := call("status", nil)
@@ -165,7 +175,7 @@ func TestDesktopAgentLifecycle(t *testing.T) {
 	if desktopErrorCode(foreign) != "AGENT_FOREIGN" || getPID() != previousPID {
 		t.Fatalf("Foreign agent should be untouched: %v", foreign)
 	}
-	if _, err := call("language", json.RawMessage(`{"language":"zh"}`)); err != nil || getPID() != previousPID {
+	if err := mutate("language", json.RawMessage(`{"language":"zh"}`)); err != nil || getPID() != previousPID {
 		t.Fatalf("Live language change: %v", err)
 	}
 	if err := serveDesktopAgent(ctx, home, binary, installation); desktopErrorCode(err) != "PRIVATE_LOCK_BUSY" {
@@ -182,7 +192,7 @@ func TestDesktopAgentLifecycle(t *testing.T) {
 	}
 	start()
 	waitDesktopTest(t, func() bool { return getPID() != 0 && getPID() != previousPID })
-	if _, err := call("stop", nil); err != nil || getPID() != 0 {
+	if err := mutate("stop", nil); err != nil || getPID() != 0 {
 		t.Fatalf("Stop did not reap the gateway: %v", err)
 	}
 	if _, err := readDesktopJSON(path, &config); err != nil || config.Enabled {
