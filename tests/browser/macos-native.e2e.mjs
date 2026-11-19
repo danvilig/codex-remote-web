@@ -75,6 +75,28 @@ async function click(selector) {
 }
 const select = (selector, value) => evaluate(`const node = document.querySelector(${JSON.stringify(selector)}); node.value = ${JSON.stringify(value)}; node.dispatchEvent(new Event('change', {bubbles:true})); return true`);
 const ready = () => evaluate("return !document.querySelector('#desktopLanguage').disabled && !document.querySelector('[aria-busy=true]')");
+async function visibleSidebar(suffix = '') {
+  const geometry = await application.request('geometry');
+  const onscreen = join(root, `.artifacts/macos-desktop-onscreen${suffix}.png`);
+  await command(['screencapture', '-x', onscreen], root);
+  return Number(await command(['swift', '-e', `import AppKit
+    let bitmap = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))!
+    let scale = Double(bitmap.pixelsWide) / Double(CommandLine.arguments[4])!
+    let left = Double(CommandLine.arguments[2])!, top = Double(CommandLine.arguments[3])!
+    let xs = Int((left + 20) * scale)..<Int((left + 200) * scale)
+    let ys = Int((top + 90) * scale)..<Int((top + 300) * scale)
+    guard xs.lowerBound >= 0, ys.lowerBound >= 0, xs.upperBound <= bitmap.pixelsWide, ys.upperBound <= bitmap.pixelsHigh else {
+      fatalError("Sidebar sampling window lies outside the captured screen")
+    }
+    var count = 0
+    for y in ys {
+      for x in xs {
+        if let color = bitmap.colorAt(x:x,y:y)?.usingColorSpace(.deviceRGB), max(color.redComponent,color.greenComponent,color.blueComponent) < 0.65 { count += 1 }
+      }
+    }
+    print(count)
+  `, onscreen, String(geometry.left), String(geometry.top), String(geometry.screenWidth)], root));
+}
 async function closeApplication() {
   if (!application) return;
   const current = application;
@@ -93,24 +115,12 @@ try {
   assert.equal((await evaluate("return await window.desktop.invoke('status', {padding:'a'.repeat(17000)}).then(()=>false,()=>true)")).valueOf(), true, 'Oversize messages are rejected before helper invocation');
   const secretRead = await evaluate("try { await import('crw-desktop://settings/../gateway/runtime/RUNTIMES.json'); return true } catch { return false }");
   assert.equal(secretRead, false, 'Custom scheme cannot expose the gateway tree');
+  // Capture WindowServer first, before asking WebKit to render separately.
+  // A correct WebKit snapshot does not prove its layers appeared onscreen.
+  await delay(500);
+  const pixels = await visibleSidebar();
   await application.request('snapshot', { path: join(root, '.artifacts/macos-desktop-overview.png') });
-  // A WebKit snapshot alone can succeed while its remote layer is missing
-  // from the visible native window. Also inspect the real screen composite.
-  const geometry = await application.request('geometry');
-  const onscreen = join(root, '.artifacts/macos-desktop-onscreen.png');
-  await delay(500); await command(['screencapture', '-x', onscreen], root);
-  const pixels = Number(await command(['swift', '-e', `import AppKit
-    let bitmap = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))!
-    let scale = Double(bitmap.pixelsWide) / Double(CommandLine.arguments[4])!
-    let left = Double(CommandLine.arguments[2])!, top = Double(CommandLine.arguments[3])!
-    var count = 0
-    for y in Int((top + 90) * scale)..<Int((top + 300) * scale) {
-      for x in Int((left + 20) * scale)..<Int((left + 200) * scale) {
-        if let color = bitmap.colorAt(x:x,y:y)?.usingColorSpace(.deviceRGB), max(color.redComponent,color.greenComponent,color.blueComponent) < 0.65 { count += 1 }
-      }
-    }
-    print(count)
-  `, onscreen, String(geometry.left), String(geometry.top), String(geometry.screenWidth)], root));
+  const reopenedPixels = {};
   for (const mode of ['close', 'minimize']) {
     await application.request('window', {mode});
     await waitFor(async () => {
@@ -122,6 +132,8 @@ try {
       const state = await application.request('window');
       return state.visible && !state.minimized;
     }, `restore ${mode} window`);
+    await delay(500);
+    reopenedPixels[mode] = await visibleSidebar(`-after-${mode}`);
   }
   const runningApps = await application.request('runningApps');
   assert.deepEqual(runningApps.foreground, [application.child.pid]);
@@ -189,7 +201,7 @@ try {
   await assert.rejects(access(legacy));
   await assert.rejects(access(executable), 'Disposable application moves to Trash');
   await writeFile(join(root, '.artifacts/macos-native-menus.json'), JSON.stringify(menus, null, 2) + '\n');
-  await writeFile(join(root, '.artifacts/macos-desktop-lifecycle.json'), JSON.stringify({ ...runningApps, closeAndMinimizeReopen: true, quitWithGatewayContinuity: true, relaunchAndCleanUninstall: true, sidebarInkPixels: pixels }, null, 2) + '\n');
+  await writeFile(join(root, '.artifacts/macos-desktop-lifecycle.json'), JSON.stringify({ ...runningApps, closeAndMinimizeReopen: true, quitWithGatewayContinuity: true, relaunchAndCleanUninstall: true, sidebarInkPixels: pixels, reopenedSidebarInkPixels: reopenedPixels }, null, 2) + '\n');
   assert.ok(pixels > 100, `Visible native window lost its WebKit composite: ${pixels} sidebar ink pixels`);
   console.log('PASS: actual native WKWebView UI, restricted asset/bridge access, native menus/dialogs, saved settings/language, gateway continuity and clean uninstall');
 } catch (error) {

@@ -107,8 +107,16 @@ try {
   await assert.rejects(access(join(contents,'Frameworks/Electron Framework.framework')),'Native macOS application must not bundle Chromium');
   await assert.rejects(access(join(contents,'Resources/gateway/runtime/node')),'macOS DMG must not bundle a second JS runtime');
   await assert.rejects(access(join(contents,'Resources/gateway/node_modules/node-pty')));
-  assert.ok(evidence.checks.installedSize.logicalBytes<122_000_000,'Compact native payload budget');
-  assert.ok(evidence.checks.installedSize.allocatedBytes<62_000_000,'Compact native disk budget');
+  const gatewayManifest=JSON.parse(await readFile(join(contents,'Resources/gateway/release.json'),'utf8'));
+  const goGateway=gatewayManifest.desktopRuntime==='native-go';
+  if (process.env.CODEX_WEBUI_EXPECT_NATIVE_GATEWAY==='1') assert.ok(goGateway,'Validation requires the Go candidate');
+  if (goGateway) {
+   await assert.rejects(access(join(contents,'Resources/gateway/runtime')),'Go candidate must omit all JS runtimes');
+   await assert.rejects(access(join(contents,'Resources/gateway/dist')),'Go candidate must omit the JS server');
+  }
+  assert.ok(evidence.checks.installedSize.logicalBytes<(goGateway?28_000_000:122_000_000),'Native payload budget');
+  assert.ok(evidence.checks.installedSize.allocatedBytes<(goGateway?18_000_000:62_000_000),'Native disk budget');
+  evidence.checks.gatewayRuntime=gatewayManifest.desktopRuntime;
   evidence.checks.desktopRuntime='system AppKit/WebKit';
   process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(contents,'MacOS/Codex Remote Web');
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=join(contents,'Resources/gateway');

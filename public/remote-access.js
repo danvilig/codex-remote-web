@@ -21,8 +21,8 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
     <div data-stage="locked" class="settings-group-card remote-card">
       <h2>${text('Choose remote access')}</h2>
       <div class="remote-access-choices"><div class="remote-access-choice"><h3>${text('Without a domain')}</h3><p>${text('Generate a temporary HTTPS address and sign in with an email verification code.')}</p><button type="button" class="primary" data-action="quick">${text('Temporary access without a domain')}</button></div>
-      <div class="remote-access-choice"><h3>${text('Use your own domain')}</h3><p>${text('Configure a permanent address with Cloudflare Tunnel and Access.')}</p><button type="button" data-action="unlock">${text('Start setup')}</button></div></div>
-      <p class="remote-hint">${text('If this page is open through a public hostname, run bun run setup:cloudflare on the server and open its local link.')}</p>
+      <div class="remote-access-choice"><h3>${text('Use your own domain')}</h3><p data-remote="fixedDomainHint">${text('Configure a permanent address with Cloudflare Tunnel and Access.')}</p><button type="button" data-action="unlock">${text('Start setup')}</button></div></div>
+      <p class="remote-hint" data-remote="localSetupHint">${text('If this page is open through a public hostname, run bun run setup:cloudflare on the server and open its local link.')}</p>
     </div>
     <section data-stage="quick" class="settings-group-card remote-card" hidden></section>
     <form data-stage="account" class="settings-group-card remote-card" hidden>
@@ -199,6 +199,12 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
   }
   async function status() {
     const state = await request('status'); deployment = state.deployment || null; accountState(state);
+    if (state.managedAvailable === false) {
+      $('[data-action="unlock"]').hidden = true;
+      $('[data-remote="fixedDomainHint"]').textContent = t('Manage remote access in the desktop app.');
+      $('[data-remote="localSetupHint"]').hidden = true;
+      show('locked'); return;
+    }
     if (deployment) restoreInput(deployment.input);
     if (state.phase === 'running') { show('running'); renderProgress(state); schedulePoll(); return; }
     if (!state.connected) { show('account'); setMessage(state.credentialError || '', !!state.credentialError); return; }

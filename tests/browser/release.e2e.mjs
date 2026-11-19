@@ -44,9 +44,10 @@ try {
   const unpacked = process.env.CODEX_WEBUI_INSTALLED_DIRECTORY || join(fixture,name);
   for (const readme of ['README.md', 'README-zh.md']) assert.equal(readFileSync(join(unpacked,readme),'utf8'),readFileSync(join(root,readme),'utf8'),`Bilingual README missing or changed: ${readme}`);
   for (const image of documentationImages) assert.deepEqual(readFileSync(join(unpacked,image)),readFileSync(join(root,image)),`README image missing or changed in archive: ${image}`);
-  assert.ok(existsSync(join(unpacked,'dist/isolated-worker.js')),'Packaged desktop isolated supervisor is required');
   const manifest=JSON.parse(readFileSync(join(unpacked,'release.json'),'utf8'));assert.equal(manifest.version,pkg.version);
-  const compactMac = portable && manifest.desktopRuntime === 'macos-native';
+  const nativeGo = portable && manifest.desktopRuntime === 'native-go';
+  const compactMac = portable && (nativeGo || manifest.desktopRuntime === 'macos-native');
+  assert.equal(existsSync(join(unpacked,'dist/isolated-worker.js')), !nativeGo, 'Only the JS gateway ships the isolated worker script');
   if (existsSync(join(root,'SOURCE_PROVENANCE.json'))) {
     const provenance=JSON.parse(readFileSync(join(root,'SOURCE_PROVENANCE.json'),'utf8'));
     assert.equal(manifest.source,'public-snapshot');assert.equal(manifest.developmentCommit,provenance.developmentCommit);
@@ -69,13 +70,22 @@ try {
   if (!portable) await run(['npm','rebuild','node-pty'],unpacked,{npm_config_nodedir:dirname(dirname(nodePath)),npm_config_cache:join(fixture,'npm-cache')});
   const executable=join(unpacked,target.executable);
   if (portable) {
-    assert.equal(manifest.platform,process.platform);assert.equal(manifest.distribution,'portable');assert.equal(manifest.arch,process.arch);assert.equal(manifest.runtimeIncluded,true);
+    assert.equal(manifest.platform,process.platform);assert.equal(manifest.distribution,'portable');assert.equal(manifest.arch,process.arch);assert.equal(manifest.runtimeIncluded,!nativeGo);
     assert.match(await run([executable,'--version'],fixture),new RegExp(pkg.version.replaceAll('.','\\.')));
     assert.match(await run([executable,'--help'],fixture),/Usage: codex-remote-web/);
     if (compactMac) assert.equal(existsSync(join(unpacked,'runtime/NODE-LICENSE')),false);
     else assert.ok(readFileSync(join(unpacked,'runtime/NODE-LICENSE'),'utf8').includes('Node'));
-    assert.ok(readFileSync(join(unpacked,'runtime/BUN-LICENSE.md'),'utf8').includes('JavaScriptCore'));
-    assert.ok(existsSync(join(unpacked,'dist/portable.js')),'Include relinkable application bundle');
+    if (nativeGo) {
+      assert.equal(existsSync(join(unpacked,'runtime')),false,'Go app must omit JavaScript runtimes');
+      assert.equal(existsSync(join(unpacked,'dist')),false,'Go app must omit JavaScript server and workers');
+      assert.equal(existsSync(join(unpacked,'node_modules/node-pty')),false);
+      assert.match(manifest.goVersion,/^\d+\.\d+\.\d+$/);
+      assert.match(readFileSync(join(unpacked,'native-licenses/GO-LICENSE'),'utf8'),/The Go Authors/);
+      for (const name of ['creack-pty.txt','gorilla-websocket.txt','golang-x-crypto.txt']) assert.ok(existsSync(join(unpacked,'native-licenses',name)),name);
+    } else {
+      assert.ok(readFileSync(join(unpacked,'runtime/BUN-LICENSE.md'),'utf8').includes('JavaScriptCore'));
+      assert.ok(existsSync(join(unpacked,'dist/portable.js')),'Include relinkable application bundle');
+    }
   }
   const port = await new Promise(resolve=>{const probe=createServer();probe.listen(0,'127.0.0.1',()=>{const value=probe.address().port;probe.close(()=>resolve(value));});});
   const quickBin=join(fixture,'quick-bin');mkdirSync(quickBin);
@@ -102,10 +112,8 @@ try {
   const env={...process.env,HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_AUTH_MODE:'local',HOME:home,CODEX_HOME:join(home,'.codex'),CODEX_AUTH_PATH:join(home,'auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_REVIEW_ROOT:project,CODEX_WEBUI_ENABLE_TERMINAL:'true',CODEX_WEBUI_ENABLE_REVIEW_WRITE:'false',SHELL:windows?join(process.env.SystemRoot,'System32/cmd.exe'):'/bin/bash',USERPROFILE:home,CODEX_WEBUI_APP_SERVER_MODE:'isolated',PATH:portable?runtimePath:`${quickBin}${delimiter}${join(root,'tests/fixtures')}${delimiter}${process.env.PATH}`};
   delete env.CODEX_WEBUI_NODE;
   if (portable) {
-    // The native settings app delegates complete registration transactions to
-    // this compiled CLI. No source, host Bun or OS registration is needed for
-    // an empty cleanup, but its real private SQLite lock must be available.
-    const directory = join(home, 'session-fixture'), input = join(fixture, 'session-input.json');
+    // The native helper exercises its private lock in a disposable home.
+    const directory = nativeGo ? join(home,'.config','codex-remote-web','desktop') : join(home,'session-fixture'), input = join(fixture, 'session-input.json');
     writeFileSync(input, JSON.stringify({ enabled: false, options: { directory, executable: '/fixture/desktop' } }));
     const helper = Bun.spawn([executable, 'session-configure'], { cwd: fixture, env, stdin: Bun.file(input), stdout: 'pipe', stderr: 'pipe' });
     const [output, errors, exit] = await Promise.all([new Response(helper.stdout).text(), new Response(helper.stderr).text(), helper.exited]);
@@ -119,7 +127,8 @@ try {
   const serverError=serverLog=new Response(server.stderr).text();
   for(let attempt=0;;attempt++){try {const response=await fetch(`http://127.0.0.1:${port}/api/health`);if((await response.json()).codex)break;}catch{} if(attempt>=400)throw new Error('Packaged gateway failed to start');await Bun.sleep(50);}
   for (const path of ['/', '/app.bundle.js', '/auth-bootstrap.js', '/access-session.js', '/i18n.js', '/codex-brand.js', '/workspace.css', '/remote-access.css', '/setup', '/setup.bundle.js', '/setup-assets/style.css', '/vendor/katex/katex.min.css', '/vendor/xterm/xterm.css']) assert.equal((await fetch(`http://127.0.0.1:${port}${path}`)).status,200,path);
-  assert.equal(existsSync(join(unpacked,'public/app.js')),false);assert.ok(existsSync(join(unpacked,'dist/quick-worker.js')));
+  assert.equal(existsSync(join(unpacked,'public/app.js')),false);assert.equal(existsSync(join(unpacked,'dist/quick-worker.js')),!nativeGo);
+  if (nativeGo) assert.equal((await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()).runtime,'native-go');
   // The standalone configuration page must also start without source or an App Server.
   const setupLog=join(fixture,'setup.log');
   setup=Bun.spawn(portable?[executable,'setup']:['bun',join(unpacked,'dist/setup.js')],{cwd:fixture,env,stdout:Bun.file(setupLog),stderr:'pipe'});

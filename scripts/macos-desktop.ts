@@ -6,6 +6,7 @@ import { installationHelp } from './macos-guide.ts';
 import { macosMinimumVersion } from './macos-validation.ts';
 import { nativeTranslations } from '../desktop/localization.js';
 import { macAppSize } from './macos-size.ts';
+import { stageNativeGateway } from './native-gateway.ts';
 
 async function compactGateway(gateway: string, root: string) {
   const target = portableTarget();
@@ -27,9 +28,13 @@ export async function nativeMacDesktop(gateway: string, output: string, root: st
   const resources = join(contents, 'Resources'), assets = join(resources, 'desktop');
   await mkdir(join(contents, 'MacOS'), { recursive: true }); await mkdir(assets, { recursive: true });
   const payload = join(resources, 'gateway');
-  await cp(gateway, payload, { recursive: true });
-  const portableGateway = await macAppSize(payload);
-  await compactGateway(payload, root);
+  const portableGateway = await macAppSize(gateway);
+  if (process.env.CODEX_WEBUI_BUILD_NATIVE_GATEWAY === '1') {
+    await stageNativeGateway(gateway, payload, root, pkg.version, 'darwin', 'arm64');
+  } else {
+    await cp(gateway, payload, { recursive: true });
+    await compactGateway(payload, root);
+  }
   const result = await Bun.build({ entrypoints: [join(root, 'desktop/renderer.js')], outdir: assets, naming: 'renderer.js', target: 'browser', format: 'esm', packages: 'bundle' });
   if (!result.success) throw new Error(result.logs.join('\n'));
   for (const file of ['index.html', 'desktop.css']) await cp(join(root, 'desktop', file), join(assets, file));
