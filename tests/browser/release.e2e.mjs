@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readdirSync, readFileSync, rmSync, existsSync, realpathSync, copyFileSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, existsSync, realpathSync, copyFileSync, mkdirSync, writeFileSync, symlinkSync, openSync, closeSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { join, delimiter, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:net';
@@ -20,7 +21,20 @@ const windows = process.platform === 'win32';
 const archive = join(fixture, 'releases', `${name}.${process.argv.includes('--portable') ? target.extension : 'tar.gz'}`);
 const portable = process.argv.includes('--portable');
 async function run(args, cwd = root, extraEnv = {}) { const child = Bun.spawn(args,{cwd,env:{...process.env,...extraEnv},stdout:'pipe',stderr:'pipe'});const [out,error,code]=await Promise.all([new Response(child.stdout).text(),new Response(child.stderr).text(),child.exited]);assert.equal(code,0,`${args[0]} failed: ${error.slice(-3000)}`);return out; }
-let server, setup, serverLog;
+let server, setup, serverLog, setupError;
+function launchGateway(executable, env) {
+  return Bun.spawn([executable], {
+    cwd: fixture, env: { ...env, CODEX_WEBUI_DESKTOP_PIPE_PARENT: '1' },
+    stdin: 'pipe', stdout: 'pipe', stderr: 'pipe',
+  });
+}
+async function stopGateway(child) {
+  const deadline = setTimeout(() => child.kill('SIGKILL'), 10_000);
+  try {
+    child.stdin.end();
+    return await child.exited;
+  } finally { clearTimeout(deadline); }
+}
 try {
   const supplied = portable ? process.env.CODEX_WEBUI_PORTABLE_ARCHIVE : process.env.CODEX_WEBUI_RELEASE_ARCHIVE;
   if (supplied) {
@@ -106,7 +120,8 @@ try {
     assert.ok(existsSync(join(directory, 'session-lock.sqlite')), 'Shipped CLI must acquire its private registration lock');
   }
   // Start from a different cwd and without source: no frontend rebuild may be needed.
-  server=Bun.spawn([executable],{cwd:fixture,env,stdout:'pipe',stderr:'pipe'});
+  server=launchGateway(executable,env);
+  const serverOutput=new Response(server.stdout).text();
   const serverError=serverLog=new Response(server.stderr).text();
   for(let attempt=0;;attempt++){try {const response=await fetch(`http://127.0.0.1:${port}/api/health`);if((await response.json()).codex)break;}catch{} if(attempt>=400)throw new Error('Packaged gateway failed to start');await Bun.sleep(50);}
   for (const path of ['/', '/app.bundle.js', '/auth-bootstrap.js', '/access-session.js', '/i18n.js', '/codex-brand.js', '/workspace.css', '/remote-access.css', '/setup', '/setup.bundle.js', '/setup-assets/style.css', '/vendor/katex/katex.min.css', '/vendor/xterm/xterm.css']) assert.equal((await fetch(`http://127.0.0.1:${port}${path}`)).status,200,path);
@@ -114,12 +129,15 @@ try {
   assert.equal((await (await fetch(`http://127.0.0.1:${port}/api/health`)).json()).runtime,'native-go');
   // The standalone configuration page must also start without source or an App Server.
   const setupLog=join(fixture,'setup.log');
-  setup=Bun.spawn([executable,'setup'],{cwd:fixture,env,stdout:Bun.file(setupLog),stderr:'pipe'});
+  const setupOutput=openSync(setupLog,'w');
+  try { setup=Bun.spawn([executable,'setup'],{cwd:fixture,env,stdout:setupOutput,stderr:'pipe'}); }
+  finally { closeSync(setupOutput); }
+  setupError=new Response(setup.stderr).text();
   let setupUrl;
   for(let attempt=0;;attempt++){try { setupUrl=readFileSync(setupLog,'utf8').match(/http:\/\/127\.0\.0\.1:\d+\/setup#setup=[A-Za-z0-9_-]+/)?.[0];if(setupUrl)break; }catch{} if(attempt>400)throw new Error('Packaged setup failed to start');await Bun.sleep(50);}
   const setupOrigin=new URL(setupUrl).origin;
   for(const path of ['/setup','/setup.bundle.js','/setup-assets/style.css','/setup-assets/workspace.css','/setup-assets/remote-access.css'])assert.equal((await fetch(setupOrigin+path)).status,200,path);
-  setup.kill('SIGTERM');await setup.exited;setup=null;
+  setup.kill('SIGTERM');await setup.exited;await setupError;setup=null;
 
   for(const endpoint of ['/api/customize','/api/schedules','/api/library','/api/workspace/context','/api/files/search?query=visible'])assert.equal((await fetch(`http://127.0.0.1:${port}${endpoint}`)).status,200,endpoint);
   assert.equal(await (await fetch(`http://127.0.0.1:${port}/api/files/download?path=${encodeURIComponent(join(project,'visible.txt'))}`)).text(),'PACKAGED_PROJECT_FILE');
@@ -164,20 +182,27 @@ try {
   }
   await setupRequest('quick/stop',{});
   for(let attempt=0;;attempt++){if((await setupRequest('quick/status')).data.phase==='stopped')break;if(attempt>400)throw new Error('Packaged temporary connector did not stop');await Bun.sleep(30);}
-  server.kill('SIGTERM');await server.exited;assert.equal((await serverError).includes('Frontend build failed'),false);server=null;
+  assert.equal(await stopGateway(server),0,await serverError);await serverOutput;assert.equal((await serverError).includes('Frontend build failed'),false);server=null;
   // The desktop path must resolve the shipped supervisor outside the source
   // tree, including with portable runtimes and the poisoned host PATH.
   // Desktop settings supply an explicit Codex executable. The first gateway
   // above separately verifies CLI discovery through the poisoned PATH.
   const desktopEnv={...env,CODEX_WEBUI_DESKTOP_CHILD:'1',CODEX_WEBUI_CODEX:join(quickBin,windows?'codex.exe':'codex')};
   for(const path of [project,desktopEnv.CODEX_WEBUI_CODEX])assert.ok(existsSync(path),`Missing desktop fixture: ${path}`);
-  server=Bun.spawn([executable],{cwd:fixture,env:desktopEnv,stdout:'pipe',stderr:'pipe'});
+  server=launchGateway(executable,desktopEnv);
   const desktopOutput=new Response(server.stdout).text();
   serverLog=new Response(server.stderr).text();
   for(let attempt=0;;attempt++){try{if((await(await fetch(base+'/api/health')).json()).codex)break;}catch{}if(attempt>200)throw new Error('Packaged desktop isolated supervisor failed');await Bun.sleep(50);}
   assert.deepEqual(await(await fetch(base+'/api/remote-access/status')).json(),{configured:false,management:'desktop',canManage:false});
   assert.equal((await fetch(base+'/api/setup/launch',{method:'POST',headers:{origin:base,'x-setup-request':'1','content-type':'application/json'},body:'{}'})).status,409);
-  server.kill('SIGTERM');await server.exited;await desktopOutput;assert.equal((await serverLog).includes('cannot start Codex'),false);server=null;
+  assert.equal(await stopGateway(server),0,await serverLog);await desktopOutput;assert.equal((await serverLog).includes('cannot start Codex'),false);server=null;
   assert.equal(existsSync(poisonLog),false,'Executable must not use a host runtime, installer or compiler');
   console.log('PASS: native gateway without JavaScript runtimes, workers or addons, checksum, outside-HOME and foreign-cwd gateway/setup, assets, restricted project APIs, real PTY and temporary connector');
-} finally { if(setup){setup.kill('SIGTERM');await setup.exited;}if(server){server.kill('SIGTERM');await server.exited;console.error(await serverLog);}rmSync(fixture,{recursive:true,force:true}); }
+} catch (error) {
+  console.error('Packaged gateway verification failed:', error);
+  throw error;
+} finally {
+  if(setup){setup.kill('SIGTERM');await setup.exited;console.error(await setupError);}
+  if(server){await stopGateway(server);console.error(await serverLog);}
+  await rm(fixture,{recursive:true,force:true,maxRetries:12,retryDelay:100});
+}
