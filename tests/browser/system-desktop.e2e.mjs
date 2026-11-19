@@ -29,9 +29,16 @@ let child, output = '';
 async function nativeControl(name, invoke = false) {
   assert.ok(child && child.exitCode === null && !child.signalCode, output);
   const driver = windows ? 'powershell.exe' : '/usr/bin/python3';
-  const args = windows ? ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', join(root, 'tests/helpers/system-desktop-uia.ps1'), '-ProcessId', String(child.pid), '-Name', name, ...(invoke ? ['-Invoke'] : [])] : [join(root, 'tests/helpers/system-desktop-atspi.py'), String(child.pid), name, invoke ? 'invoke' : 'find'];
-  try { await command(driver, args, { env, timeout: 5000 }); return true; }
-  catch (error) { if (error.code === 2) return false; throw error; }
+  const args = windows ? ['-NoProfile', '-NonInteractive', '-MTA', '-ExecutionPolicy', 'Bypass', '-File', join(root, 'tests/helpers/system-desktop-uia.ps1'), '-ProcessId', String(child.pid), '-Name', name, ...(invoke ? ['-Invoke'] : [])] : [join(root, 'tests/helpers/system-desktop-atspi.py'), String(child.pid), name, invoke ? 'invoke' : 'find'];
+  try { await command(driver, args, { env, timeout: windows ? 15_000 : 5000 }); return true; }
+  catch (error) {
+    if (error.code === 2) return false;
+    if (windows && error.killed) {
+      output = (output + `\nUI Automation timed out looking for ${name}`).slice(-4000);
+      return false;
+    }
+    throw error;
+  }
 }
 
 async function until(action, description, timeout = 45_000) {
