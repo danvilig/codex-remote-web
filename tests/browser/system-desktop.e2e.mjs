@@ -18,7 +18,7 @@ assert.ok(executable && ['linux', 'win32'].includes(process.platform));
 const windows = process.platform === 'win32';
 const home = await mkdtemp(join(tmpdir(), 'crw-system-desktop-'));
 const directory = desktopDirectory(home);
-const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: join(home, 'Roaming'), LOCALAPPDATA: join(home, 'Local'), XDG_CONFIG_HOME: join(home, '.config'), XDG_CACHE_HOME: join(home, '.cache'), XDG_DATA_HOME: join(home, '.data'), CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json') };
+const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: join(home, 'Roaming'), LOCALAPPDATA: join(home, 'Local'), XDG_CONFIG_HOME: join(home, '.config'), XDG_CACHE_HOME: join(home, '.cache'), XDG_DATA_HOME: join(home, '.data'), CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), CODEX_WEBUI_APP_SERVER_MODE: 'isolated' };
 if (!windows) {
   env.GTK_A11Y = '1';
   env.WEBKIT_FORCE_ACCESSIBILITY = '1';
