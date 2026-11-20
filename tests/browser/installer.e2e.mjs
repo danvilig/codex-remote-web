@@ -108,7 +108,7 @@ try {
   process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(contents,'MacOS/Codex Remote Web');
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=join(contents,'Resources/gateway');
  } else if(process.platform==='win32') {
-  await runMsi('/i',installer,join(temp,'install.log'),destination);installed=true;
+  await runMsi('/i',installer,join(temp,'install.log'),{destination});installed=true;
   await access(join(destination,'Codex Remote Web.exe'));
   await access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk'));
   const installerBytes=(await stat(installer)).size;
