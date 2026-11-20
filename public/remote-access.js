@@ -21,8 +21,8 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
     <div data-stage="locked" class="settings-group-card remote-card">
       <h2>${text('Choose remote access')}</h2>
       <div class="remote-access-choices"><div class="remote-access-choice"><h3>${text('Without a domain')}</h3><p>${text('Generate a temporary HTTPS address and sign in with an email verification code.')}</p><button type="button" class="primary" data-action="quick">${text('Temporary access without a domain')}</button></div>
-      <div class="remote-access-choice"><h3>${text('Use your own domain')}</h3><p>${text('Configure a permanent address with Cloudflare Tunnel and Access.')}</p><button type="button" data-action="unlock">${text('Start setup')}</button></div></div>
-      <p class="remote-hint">${text('If this page is open through a public hostname, run bun run setup:cloudflare on the server and open its local link.')}</p>
+      <div class="remote-access-choice"><h3>${text('Use your own domain')}</h3><p data-remote="fixedDomainHint">${text('Configure a permanent address with Cloudflare Tunnel and Access.')}</p><button type="button" data-action="unlock">${text('Start setup')}</button></div></div>
+      <p class="remote-hint" data-remote="localSetupHint">${text('If this page is open through a public hostname, run bun run setup:cloudflare on the server and open its local link.')}</p>
     </div>
     <section data-stage="quick" class="settings-group-card remote-card" hidden></section>
     <form data-stage="account" class="settings-group-card remote-card" hidden>
@@ -67,7 +67,7 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
     <section data-stage="ready" class="settings-group-card remote-card" hidden>
       <h2 data-remote="resultTitle">${text('Remote access')}</h2><p data-remote="result"></p>
       <dl class="remote-summary" data-remote="managedSummary"></dl><a class="remote-open primary" data-remote="publicLink" target="_blank" rel="noreferrer" hidden>${text('Open your workspace')}</a>
-      <div class="remote-actions"><button type="button" data-action="quickReady">${text('Temporary access without a domain')}</button><button type="button" data-action="editIdentity">${text('Change configuration')}</button><button type="button" data-action="replaceCredential">${text('Replace API token')}</button><button type="button" data-action="forgetCredential">${text('Delete saved token')}</button><button type="button" data-action="recoverIdentity" hidden>${text('Recover configuration')}</button><button type="button" data-action="doctor">${text('Run diagnostics')}</button><button type="button" data-action="remove">${text('Remove managed deployment')}</button><button type="button" data-action="retry">${text('Back to setup')}</button></div>
+      <div class="remote-actions"><button type="button" data-action="quickReady">${text('Temporary access without a domain')}</button><button type="button" data-action="editIdentity">${text('Change configuration')}</button><button type="button" data-action="replaceCredential">${text('Replace API token')}</button><button type="button" data-action="forgetCredential">${text('Delete saved token')}</button><button type="button" data-action="recoverIdentity" hidden>${text('Recover configuration')}</button><button type="button" data-action="migrate" hidden>${text('Switch to the native gateway')}</button><button type="button" data-action="doctor">${text('Run diagnostics')}</button><button type="button" data-action="remove">${text('Remove managed deployment')}</button><button type="button" data-action="retry">${text('Back to setup')}</button></div>
       <ul data-remote="diagnostics" class="remote-checks" aria-live="polite"></ul>
       <div data-remote="removeConfirm" class="remote-remove" hidden><p>${text('Remove the route, DNS, Access app and native service created by this wizard? Other resources will be preserved.')}</p><div class="remote-actions"><button type="button" data-action="cancelRemove">${text('Cancel')}</button><button class="danger" type="button" data-action="confirmRemove">${text('Remove remote access')}</button></div></div>
     </section>
@@ -199,8 +199,17 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
   }
   async function status() {
     const state = await request('status'); deployment = state.deployment || null; accountState(state);
+    if (state.managedAvailable === false) {
+      $('[data-action="unlock"]').hidden = true;
+      $('[data-remote="fixedDomainHint"]').textContent = t('Manage remote access in the desktop app.');
+      $('[data-remote="localSetupHint"]').hidden = true;
+      show('locked'); return;
+    }
     if (deployment) restoreInput(deployment.input);
     if (state.phase === 'running') { show('running'); renderProgress(state); schedulePoll(); return; }
+    if (state.migrationRequired || state.migrationPending || (state.standaloneMaintenance && state.phase === 'complete')) {
+      renderResult({ ...state, phase: state.phase === 'idle' && deployment?.phase === 'complete' ? 'complete' : state.phase }); return;
+    }
     if (!state.connected) { show('account'); setMessage(state.credentialError || '', !!state.credentialError); return; }
     if (['complete','failed','removed'].includes(state.phase)) { renderResult(state); return; }
     if (deployment && deployment.phase !== 'removed') {
@@ -219,13 +228,21 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
     summary('[data-remote=managedSummary]', input ? [['Public hostname',input.hostname],['Existing Tunnel',input.tunnelId],['Allowed email',input.email],['Local service port',String(input.port)]] : []);
     $('[data-remote=managedSummary]').hidden = state.phase === 'removed';
     $('[data-action=forgetCredential]').hidden = !savedCredential;
-    $('[data-action=editIdentity]').hidden = deployment?.phase !== 'complete' || !!(deployment?.identityRecovery || deployment?.configurationRecovery);
-    $('[data-action=recoverIdentity]').hidden = !(deployment?.identityRecovery || deployment?.configurationRecovery);
+    const migration = state.migrationRequired || state.migrationPending;
+    const configurationRecovery = !!(deployment?.identityRecovery || deployment?.configurationRecovery);
+    $('[data-action=editIdentity]').hidden = deployment?.phase !== 'complete' || configurationRecovery || !!state.migrationPending;
+    $('[data-action=recoverIdentity]').hidden = !configurationRecovery || !!state.migrationPending;
+    const migrate = $('[data-action=migrate]');
+    migrate.hidden = !state.standaloneMaintenance || !migration || configurationRecovery;
+    migrate.textContent = t(state.migrationPending ? 'Recover gateway migration' : 'Switch to the native gateway');
     const success = state.phase === 'complete', removed = state.phase === 'removed';
     $('[data-remote="resultTitle"]').textContent = t(success ? 'Your remote address is configured' : removed ? 'Remote access removed' : 'Setup needs attention');
     $('[data-remote="result"]').textContent = t(success ? state.verification === 'login-required' ? 'The public address requires Cloudflare login. Open it and sign in to verify your workspace.' : 'Configuration is saved. DNS or public login verification is pending; run diagnostics and sign in to complete verification.' : removed ? 'Managed resources were removed. Your existing workspace is unchanged.' : state.error || ((deployment?.identityRecovery || deployment?.configurationRecovery) ? 'A configuration change needs recovery. Recover it before making other changes.' : 'Reconnect your Cloudflare account, then run diagnostics or remove the managed deployment.'));
+    if (migration && !configurationRecovery && !state.error) {
+      $('[data-remote="result"]').textContent = t(state.standaloneMaintenance ? (state.migrationPending ? 'Finish the interrupted gateway migration before changing the deployment.' : 'Switching the service to the native gateway briefly disconnects remote sessions.') : 'Run codex-remote-web setup on the server to migrate the service.');
+    }
     const link = $('[data-remote="publicLink"]'); link.hidden = !success; if (success) link.href = `https://${state.hostname || input?.hostname}`;
-    $('[data-action="remove"]').hidden = removed || !!(deployment?.identityRecovery || deployment?.configurationRecovery);
+    $('[data-action="remove"]').hidden = removed || configurationRecovery || !!state.migrationPending;
     $('[data-action="retry"]').hidden = success || !!(deployment && deployment.phase !== 'removed');
   }
   function schedulePoll() {
@@ -333,6 +350,7 @@ export function mountRemoteAccess(root, { t = value => value, standalone = false
   });
   $('[data-action=cancelConfiguration]').onclick = () => perform(status);
   $('[data-action=recoverIdentity]').onclick = () => perform(async () => { show('running'); try { await request('change/recover', {}); } finally { schedulePoll(); } });
+  $('[data-action=migrate]').onclick = () => perform(async () => { show('running'); try { await request('migrate', {}); } finally { schedulePoll(); } });
   $('[data-action="doctor"]').onclick = () => perform(async () => {
     const result = await request('doctor', {});
     $('[data-remote="diagnostics"]').replaceChildren(...result.checks.map(check => { const li = document.createElement('li'); li.className = check.ok ? 'passed' : 'error'; li.textContent = `${check.ok ? '✓' : '○'} ${t(check.label)}`; return li; }));

@@ -12,6 +12,7 @@ await page.waitForSelector('#folderDialog[open]');
 await page.waitForSelector('.folder-item');
 const folders=await page.locator('.folder-item').count();
 await page.click('.folder-item');
+await page.waitForSelector('#folderConfirm:enabled');
 const confirmEnabled=await page.locator('#folderConfirm').isEnabled();
 await page.click('#folderConfirm');
 const selectedPath=await page.locator('#projectPath').textContent();

@@ -1,12 +1,22 @@
 # Desktop gateway / 桌面网关
 
-The macOS DMG, Windows per-user MSI and Linux desktop DEB open a shared Electron settings window. The standalone archives remain command-line distributions for headless use. Desktop packages include the existing Bun/Node gateway and native terminal; Codex CLI, Git and cloudflared are external prerequisites. Electron is pinned in the lockfile, and its MIT/Chromium notices accompany each desktop package.
+All three desktop installers use a system WebView for settings: AppKit/WKWebView on macOS, WebView2 on Windows, and GTK/WebKitGTK on Linux. Each includes the native Go gateway and native terminal. Standalone archives provide the command-line distribution without a desktop WebView. Install Codex CLI and Git separately; remote access also needs cloudflared.
 
 ## 初始化与日常使用
 
 双击应用后，在“网关设置”选择项目目录、端口及可选的 Codex/cloudflared 程序路径，检测依赖并保存，再启动网关。沿用当前用户的 Codex 账户和配置；桌面窗口不管理模型提供商/API 密钥。Codex 和 Git 必需，cloudflared 仅公网访问需要。网页终端默认关闭，开启后以当前用户权限运行。
 
-macOS 15+ 仅支持 Apple Silicon；Windows 11 仅支持 x64、NTFS 和 Windows PowerShell；Linux 桌面首轮基线为 Ubuntu 24.04 GNOME，提供 x64/arm64 DEB。Linux 原有服务器部署归档与便携 CLI 不变。桌面包尚未签名/公证；不要全局禁用 Gatekeeper、SmartScreen 或 Chromium 沙箱。Linux DEB 安装正确归属的 Chromium sandbox helper，无需修改主机 user namespace 策略。
+macOS 15+ 仅支持 Apple Silicon；Windows 11 仅支持 x64、NTFS 和 Windows PowerShell；Linux 桌面首轮基线为 Ubuntu 24.04 GNOME，提供 x64/arm64 DEB，使用系统 WebKitGTK。Linux 仍提供服务器部署归档与便携 CLI。桌面包尚无 Apple Developer ID 签名/公证或 Windows 发布者签名；不要全局禁用 Gatekeeper 或 SmartScreen。
+
+### macOS 安装与首次打开
+
+最低系统版本保持 macOS 15.0。原生流水线在 macOS 15 构建并测试 DMG，再在 macOS 27（GitHub `xcode-27` 预览 runner）下载、核对 SHA-256 并测试**同一份** DMG，不在新系统另造替代包。两端均记录真实 `sw_vers` 与系统 build，检查挂载、Finder 布局、安装后启动、浅色/深色设置界面、沙箱和后台生命周期；`macos-installation-check.json` 关联精确安装包 SHA-256。预览 runner 的镜像可能更新，实际测试系统以每次报告为准，不将 runner 名称本身当成覆盖证据。
+
+打开 DMG，将左侧应用拖入右侧 Applications；等待复制完成，推出磁盘，再从“应用程序”启动。Finder 安装窗口使用静态背景，随包的 `Install Guide.html` 提供带轻量动画的中英指南，支持键盘和系统“减少动态效果”。Codex CLI、Git 须另行安装配置。
+
+新的 Mac 测试包在最终资源和权限确定后，对原生界面、网关/Bun、Node、PTY 及完整 `.app` 由内向外进行 ad-hoc 完整性签名，并强制校验。这不是 Apple Developer ID 签名或公证，首次仍可能被 Gatekeeper 阻止。先尝试打开，再按 [Apple 指引](https://support.apple.com/102445)进入“系统设置 → 隐私与安全性 → 仍要打开”并确认；只允许来源可信的构建。
+
+若仍提示“已损坏”，请保留安装包和 SHA-256，反馈原始提示、macOS 版本及芯片型号。不要通过全局禁用 Gatekeeper 或清除 quarantine 属性绕过错误。旧版本包不因本次修复而获得有效签名。原生 CI 验证签名、篡改拒绝、DMG 挂载后的 Finder 布局、复制后的签名及真实桌面运行；Safari 下载隔离与人工信任流程需在真实 Mac 上另行验收。
 
 “概览”提供启动、停止、重启和打开浏览器工作区。关闭设置窗口后隐藏到托盘；退出托盘只退出界面，网关继续运行。Linux 桌面若不支持托盘，关闭按钮会最小化到任务栏，也可从应用菜单重新打开设置。设置在网关停止时仍可打开；变更运行参数前先停止网关。
 
@@ -43,6 +53,16 @@ Windows 独立 App Server 模式使用隐藏的 Windows PowerShell Job 辅助进
 
 ## 开发和验收
 
-`bun run desktop:dev` 构建并打开桌面界面；首次需要执行 `node node_modules/electron/install.js` 下载锁定的 Electron 运行时。`bun run test:desktop` 使用隔离项目、协议/Cloudflare fixture 验证设置交互和后台生命周期，不访问个人账户或模型。`tests/browser/desktop-native.e2e.mjs` 在各原生安装包上检查真实窗口沙箱、preload 隔离、退出界面后网关继续运行、重新连接和停止。
+`bun run desktop:dev` 仍可使用锁定的 Electron 开发外壳预览和调试设置界面；它不随安装包分发。Windows/Linux 发布构建使用 `desktop/system/Cargo.lock` 与 Rust 1.95.0，构建依赖见 [系统桌面外壳](../../desktop/system/README.md)。`tests/browser/system-desktop.e2e.mjs` 通过操作系统的无障碍接口操作已安装的设置窗口，检查网关启动、退出窗口进程后持续运行、重新打开与停止。Mac 用 `tests/browser/macos-native.e2e.mjs` 检查从实际 DMG 安装的 AppKit/WKWebView 界面，包括资源与桥接限制、菜单、确认框、主题、语言、后台控制和干净卸载。测试驱动不进入安装包。
 
-原生 CI 构建并测试 DMG/MSI/DEB；GUI 人工操作、系统信任提示、注销/登录真实桌面会话与真实公网邮箱验证需要单独报告，不能由 fixture 测试代替。保留源码、锁文件、第三方许可证与 Electron 的 Chromium 通知，签名、公证和正式发布单独进行。
+原生 CI 构建并测试 DMG/MSI/DEB；系统信任提示、真实注销/登录与真实公网邮箱验证须另行验收。Windows/Linux 安装包保留锁定的 Rust 依赖许可证；系统 WebView 由操作系统更新，下载和安装报告只计算应用本身。
+
+桌面语言可在网关运行时即时切换，原生菜单与窗口使用相同选择。诊断页的“清理并卸载”在确认后清除应用设置/缓存/管理令牌并退出，Mac 同时将应用移至废纸篓；项目和 Codex 账户保持不变。有远程部署时，请先在远程访问页移除部署后再清理。少量稳定锁/代际标记与未知文件保留；其他独立部署不受影响。Mac 测试包使用透明文件系统压缩，验收时请区分逻辑大小与实际磁盘占用。
+
+### macOS 体积与原生界面
+
+Mac 包使用系统自带的 AppKit/WebKit。应用代码和网关随包提供，最低部署版本保持 15.0。原生界面仅从固定自定义 scheme 读取明确列出的界面资源，禁止界面导航到外部页面，主帧桥接只允许设置动作；账户与控制令牌留在后台进程。WebKit 使用非持久化数据存储。
+
+网关退出界面后继续运行；原生后台 launcher 通过生命周期管道管理代理，launcher 结束时 EOF 触发代理关闭。登录自启继续使用相同 LaunchAgent 格式与安装归属校验。“清理并卸载”也清理上一版 Electron 留下的应用缓存，保留项目和 Codex 账户。
+
+原生验证在实际 Finder 复制后分别报告逻辑字节和占用块数；具体数字以每次 `macos-installation-check.json` 为准。Windows 11 须有 WebView2 Evergreen Runtime；Linux DEB 由软件包管理器安装 WebKitGTK、GTK 3 和 Ayatana AppIndicator 依赖。Windows 和 Linux 的验收要求安装包小于 16 MB，应用安装后的逻辑大小和磁盘分配均小于 32 MB。实际结果见各平台的 `*-desktop-installation.json`。

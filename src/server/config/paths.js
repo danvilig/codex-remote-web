@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 // Replaced only by the portable build. Source and JS-archive execution keep
 // their existing paths; compiled modules live in Bun's virtual filesystem.
 export const standalone = typeof CODEX_REMOTE_WEB_COMPILED !== 'undefined' && CODEX_REMOTE_WEB_COMPILED;
+export const nativeMacRuntime = typeof CODEX_REMOTE_WEB_NATIVE_MAC !== 'undefined' && CODEX_REMOTE_WEB_NATIVE_MAC;
 
 // Both source and release layouts locate assets relative to this module, never the shell cwd.
 export function applicationRoot(start = standalone ? dirname(process.execPath) : dirname(fileURLToPath(import.meta.url))) {
@@ -19,7 +20,11 @@ export function applicationRoot(start = standalone ? dirname(process.execPath) :
   }
 }
 export function nodeRuntime(env = process.env) {
+  if (nativeMacRuntime) return null;
   return env.CODEX_WEBUI_NODE || (standalone ? join(applicationRoot(), process.platform === 'win32' ? 'runtime/node.exe' : 'runtime/node') : Bun.which('node', { PATH: env.PATH }));
+}
+export function workerCommand(kind, path, env = process.env) {
+  return nativeMacRuntime ? [process.execPath, kind] : [nodeRuntime(env), path];
 }
 export function gatewayCommand(root = applicationRoot(), executable = process.execPath, compiled = standalone) {
   return compiled ? [executable] : [executable, 'run', join(root, 'dist/server.js')];

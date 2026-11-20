@@ -1,90 +1,81 @@
 name: Publish platform release
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
-        description: Tag to publish, for example v0.2.0-beta.1
+        description: Existing reviewed tag on main (for example v0.2.0-beta.2)
         required: true
-        default: v0.2.0-beta.1
+      candidate_run:
+        description: Completed Native platform packages run from main for this exact tag commit
+        required: true
+      macos27_manual_sha256:
+        description: DMG SHA-256 personally verified on a macOS 27 Mac, only for a visible composite failure
+        required: false
+      macos27_manual_version:
+        description: macOS 27 version and build from sw_vers, for example 27.0.1 (26A434)
+        required: false
 
 permissions:
-  contents: read
   actions: read
+  contents: read
 
-env:
-  RELEASE_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+concurrency:
+  group: publish-platform-release
+  cancel-in-progress: false
 
 jobs:
-  verify:
-    name: Require passing Verify for the tagged commit
-    runs-on: ubuntu-24.04
-    outputs:
-      revision: ${{ steps.gate.outputs.revision }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-          fetch-depth: 0
-      - id: gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          revision="$(git rev-parse HEAD)"
-          # Only publish history promoted through protected main, after that
-          # exact commit passed main's push Verify (not merely a feature run).
-          git merge-base --is-ancestor "$revision" refs/remotes/origin/main
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${revision}&event=push" \
-            --jq 'any(.workflow_runs[]; .path == ".github/workflows/ci.yml" and .head_branch == "main" and .conclusion == "success")' | grep -qx true
-          echo "revision=${revision}" >> "$GITHUB_OUTPUT"
-  build:
-    needs: verify
-    uses: ./.github/workflows/platform-packages.yml
-    with:
-      revision: ${{ needs.verify.outputs.revision }}
-      tag: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
-
   publish:
-    name: Publish GitHub Release
-    needs: [verify, build]
+    name: Verify and publish the existing candidate
+    if: github.ref == 'refs/heads/main' && github.actor == github.repository_owner && github.triggering_actor == github.repository_owner
     runs-on: ubuntu-24.04
     permissions:
+      actions: read
       contents: write
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ needs.verify.outputs.revision }}
-      - uses: actions/download-artifact@v4
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
         with:
-          pattern: release-*
-          path: .artifacts/release
-          merge-multiple: true
-      - name: Validate release inputs
-        run: |
-          version="$(node -p "require('./package.json').version")"
-          test "$RELEASE_TAG" = "v${version}"
-          test "$(find .artifacts/release -maxdepth 1 \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.dmg' -o -name '*.msi' -o -name '*.deb' \) | wc -l)" -eq 10
-          test "$(find .artifacts/release -maxdepth 1 -name '*.sha256' | wc -l)" -eq 10
-          cd .artifacts/release
-          cat *.sha256 > SHA256SUMS
-          sha256sum -c SHA256SUMS
-      - name: Publish release
+          node-version-file: .node-version
+      - name: Verify exact tag and candidate provenance
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
         run: |
-          version="$(node -p "require('./package.json').version")"
-          gh release create "$RELEASE_TAG" \
-            .artifacts/release/*.tar.gz \
-            .artifacts/release/*.zip \
-            .artifacts/release/*.dmg \
-            .artifacts/release/*.msi \
-            .artifacts/release/*.deb \
-            .artifacts/release/*.sha256 \
-            .artifacts/release/SHA256SUMS \
-            --repo "${GITHUB_REPOSITORY}" \
-            --title "Codex Remote Web ${version}" \
-            --notes-file "docs/releases/${version}.md" \
-            --prerelease
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+-beta\.[0-9]+$ ]]
+          [[ "$CANDIDATE_RUN" =~ ^[1-9][0-9]*$ ]]
+          revision="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+          test "$revision" = "$GITHUB_SHA"
+          test "$RELEASE_TAG" = "v$(node -p 'require("./package.json").version')"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${revision}&event=push" \
+            --jq 'any(.workflow_runs[]; .path == ".github/workflows/ci.yml" and .head_branch == "main" and .conclusion == "success")' | grep -qx true
+          mkdir -p "$RUNNER_TEMP/candidate"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN}" > "$RUNNER_TEMP/candidate/run.json"
+          jq -e --arg sha "$revision" --arg repo "$GITHUB_REPOSITORY" '.head_sha == $sha and .head_repository.full_name == $repo and .head_branch == "main" and .path == ".github/workflows/platform-packages.yml" and (.event == "push" or .event == "workflow_dispatch") and .status == "completed" and .run_attempt == 1 and (.conclusion == "success" or .conclusion == "failure")' "$RUNNER_TEMP/candidate/run.json"
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CANDIDATE_RUN}/attempts/1/jobs?per_page=100" > "$RUNNER_TEMP/candidate/jobs.json"
+          gh run download "$CANDIDATE_RUN" --repo "$GITHUB_REPOSITORY" --pattern 'release-*' --pattern 'validation-macos-27-arm64' --dir "$RUNNER_TEMP/candidate"
+      - name: Check exact package checksums and native acceptance
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+          MACOS27_MANUAL_SHA256: ${{ inputs.macos27_manual_sha256 }}
+          MACOS27_MANUAL_VERSION: ${{ inputs.macos27_manual_version }}
+        run: node scripts/verify-platform-candidate.mjs "$RUNNER_TEMP/candidate" "$RELEASE_TAG" "$GITHUB_SHA"
+      - name: Publish the verified artifacts without rebuilding
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          CANDIDATE_RUN: ${{ inputs.candidate_run }}
+        run: |
+          base="$RUNNER_TEMP/candidate"
+          mapfile -t assets < "$base/assets.txt"
+          test "${#assets[@]}" -eq 21
+          notes="$base/release-notes.md"
+          cp "docs/releases/${RELEASE_TAG#v}.md" "$notes"
+          printf '\nCandidate CI: %s/%s/actions/runs/%s\n\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$CANDIDATE_RUN" >> "$notes"
+          cat "$base/acceptance.md" >> "$notes"
+          gh release create "$RELEASE_TAG" "${assets[@]}" --verify-tag --repo "$GITHUB_REPOSITORY" \
+            --title "Codex Remote Web ${RELEASE_TAG#v}" --notes-file "$notes" --prerelease

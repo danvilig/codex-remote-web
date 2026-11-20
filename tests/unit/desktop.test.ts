@@ -50,6 +50,18 @@ test('actual background process stays available across clients, restarts and sto
   const first = await agentRequest(f.directory, 'status');
   expect(first.local.phase).toBe('running'); expect((await (await fetch(first.url)).json()).pid).toBe(first.local.pid);
   await expect(agentRequest(f.directory, 'config', f.config)).rejects.toThrow('Stop the gateway');
+  for (const language of ['zh', 'en', 'system']) {
+    await agentRequest(f.directory, 'language', { language });
+    const state = await agentRequest(f.directory, 'status');
+    expect(state.config.language).toBe(language);
+    expect(state.local.pid).toBe(first.local.pid);
+    expect(state.config.enabled).toBe(true);
+    expect((await readPrivate(join(f.directory, 'config.json'))).language).toBe(language);
+  }
+  for (const invalid of [{ language: 'fr' }, { language: 'zh', cwd: '/' }, {}, null, []]) {
+    await expect(agentRequest(f.directory, 'language', invalid)).rejects.toThrow();
+  }
+  expect((await agentRequest(f.directory, 'status')).config).toEqual({ ...first.config, language: 'system' });
   const anotherClient = await agentRequest(f.directory, 'status'); expect(anotherClient.local.pid).toBe(first.local.pid);
   await agentRequest(f.directory, 'start'); expect((await agentRequest(f.directory, 'status')).local.pid).toBe(first.local.pid);
   await agentRequest(f.directory, 'restart'); expect((await agentRequest(f.directory, 'status')).local.pid).not.toBe(first.local.pid);

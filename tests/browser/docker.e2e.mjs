@@ -21,15 +21,19 @@ try {
   await mkdir(project); await writeFile(join(project, 'visible.txt'), 'DOCKER_PROJECT_FILE');
   await symlink('/tmp/outside-project', join(project, 'escape'));
   assert.equal(Bun.spawnSync(['git', 'init', '-q', project]).exitCode, 0);
+  const codex = join(fixture, 'codex');
+  const compiled = Bun.spawnSync(['go', 'build', '-o', codex, join(root, 'tests/fixtures/docker-codex.go')], { env: { ...process.env, GOTOOLCHAIN: 'local', CGO_ENABLED: '0' } });
+  assert.equal(compiled.exitCode, 0, compiled.stderr.toString());
+  await docker(['run', '--rm', image, '/bin/sh', '-ec', 'for tool in bun node npm go; do if command -v "$tool" >/dev/null; then exit 1; fi; done; test ! -e /app/dist; test ! -e /app/node_modules/node-pty; /app/codex-remote-web --version']);
   await docker(['run', '-d', '--rm', '--name', name, '--user', `${process.getuid()}:${process.getgid()}`,
     '-p', '127.0.0.1::8899',
     '--mount', `type=bind,source=${project},target=/workspace`,
-    '--mount', `type=bind,source=${join(root, 'tests/fixtures/codex')},target=/usr/local/bin/codex,readonly`,
+    '--mount', `type=bind,source=${codex},target=/usr/local/bin/codex,readonly`,
     '-e', 'HOME=/tmp/crw-home', '-e', 'CODEX_HOME=/tmp/crw-home/.codex',
     '-e', 'CODEX_WEBUI_AUTH_MODE=local', '-e', `CODEX_WEBUI_ACCESS_TOKEN=${token}`,
     '-e', 'CODEX_WEBUI_CWD=/workspace', '-e', 'CODEX_WEBUI_REVIEW_ROOT=/workspace',
     '-e', 'CODEX_WEBUI_ENABLE_TERMINAL=true', '-e', 'SHELL=/bin/bash',
-    image, '/bin/sh', '-c', 'mkdir -p /tmp/crw-home/.codex /tmp/outside-project && exec bun run dist/server.js']);
+    image, '/bin/sh', '-c', 'umask 077; mkdir -p /tmp/crw-home/.codex /tmp/outside-project && exec /app/codex-remote-web']);
   started = true;
   const mapping = await docker(['port', name, '8899/tcp']);
   const base = `http://${mapping}`, headers = { authorization: `Bearer ${token}`, origin: base };
@@ -38,6 +42,7 @@ try {
     if (i > 120) throw new Error('Docker startup failed: ' + await docker(['logs', '--tail', '30', name]));
     await Bun.sleep(50);
   }
+  assert.equal((await (await fetch(base + '/api/health', { headers })).json()).runtime,'native-go');
   assert.equal((await fetch(base + '/api/customize')).status, 401);
   for (const path of ['/', '/app.bundle.js', '/workspace.css', '/vendor/katex/katex.min.css', '/api/customize', '/api/workspace/context', '/api/settings/worktrees']) {
     assert.equal((await fetch(base + path, { headers })).status, 200, path);

@@ -103,3 +103,21 @@ test('source scanner permits only reviewed documentation image paths and still s
     const result=await scan();expect(result.code).toBe(1);expect(result.stderr).toContain('provider-token');
   });
 });
+
+test('installer artwork allowlist stays exact and does not exempt content from scanning',async()=>{
+  await fixture(async({root,commit,scan})=>{
+    await mkdir(join(root,'desktop/assets'),{recursive:true});
+    for(const file of ['app-icon.png','dmg-background.png','dmg-background@2x.png','guide-icon.png']) await writeFile(join(root,'desktop/assets',file),'Original installer artwork fixture');
+    await commit();expect((await scan()).code).toBe(0);
+  });
+  await fixture(async({root,commit,scan})=>{
+    await mkdir(join(root,'desktop/assets'),{recursive:true});
+    await writeFile(join(root,'desktop/assets/personal.png'),'Unreviewed image');
+    await commit();const result=await scan();expect(result.code).toBe(1);expect(result.stderr).toContain('forbidden-path');
+  });
+  await fixture(async({root,commit,scan})=>{
+    await mkdir(join(root,'desktop/assets'),{recursive:true});
+    await writeFile(join(root,'desktop/assets/app-icon.png'),'sk-'+'X'.repeat(40));
+    await commit();const result=await scan();expect(result.code).toBe(1);expect(result.stderr).toContain('provider-token');
+  });
+});

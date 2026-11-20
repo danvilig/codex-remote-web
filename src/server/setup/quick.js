@@ -4,7 +4,7 @@ import { randomUUID, randomBytes } from 'node:crypto';
 import { mkdir, mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { nodeRuntime, quickWorkerPath } from '../config/paths.js';
+import { workerCommand, quickWorkerPath } from '../config/paths.js';
 import { SetupError } from './cloudflare.js';
 import { privateDirectory } from '../desktop/private-store.js';
 const exec = promisify(execFile);
@@ -52,14 +52,14 @@ export function quickFailure(code) {
     network:'Cloudflare temporary access could not be reached. Check DNS, proxy and network connectivity, then retry.',
     provisioning:'Cloudflare could not create the temporary address. Check connectivity and try again later.',
     protection:'cloudflared did not confirm email protection. Update cloudflared; access was not opened.',
-    launch:'The temporary access connector could not start. Check the Node.js and cloudflared installations.',
+    launch:'The temporary access connector could not start. Check the cloudflared installation.',
     timeout:'Temporary access did not become ready in time. Check connectivity to Cloudflare and retry.',
   }[code] || 'Temporary access could not connect securely. Check cloudflared and the network, then retry.');
 }
 export function createQuickConnector({ binary, args, directory, env, onMessage, onExit }) {
-  const node = nodeRuntime(env);
-  if (!node) throw new SetupError('Node.js is required to supervise temporary access.');
-  const worker = spawn(node, [quickWorkerPath()], { env: connectorEnvironment(env, directory), windowsHide: true, stdio: ['ignore','ignore','ignore','ipc'] });
+  const [runtime, ...workerArgs] = workerCommand('worker-quick', quickWorkerPath(), env);
+  if (!runtime) throw new SetupError('Node.js is required to supervise temporary access.');
+  const worker = spawn(runtime, workerArgs, { env: connectorEnvironment(env, directory), windowsHide: true, stdio: ['ignore','ignore','ignore','ipc'] });
   const closed = new Promise(resolve => { worker.once('exit', resolve); worker.once('error', resolve); });
   worker.on('message', onMessage); worker.once('exit', onExit);
   worker.once('error', () => onMessage({ type: 'error', code: 'launch' }));

@@ -4,7 +4,7 @@ import { deflateSync } from 'node:zlib';
 
 const root = resolve(import.meta.dir, '..');
 // Original monochrome tray mark; generated at build time, no external artwork.
-function trayPng() {
+export function trayPng() {
   const size = 24, raw = Buffer.alloc(size * (1 + size * 4));
   for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
     const radius = Math.hypot(x - 11.5, y - 11.5);

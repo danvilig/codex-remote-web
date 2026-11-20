@@ -1,4 +1,5 @@
 import { version } from '../../package.json';
+import { nativeMacRuntime } from './config/paths.js';
 
 const command = process.argv[2];
 if (command === '--version' || command === '-v') {
@@ -14,6 +15,15 @@ uninstall-desktop: stop and unregister this user's desktop background component.
 Configure your project with CODEX_WEBUI_CWD. Keep this installation directory
 intact: public assets, runtime and terminal workers accompany the executable.
 Codex CLI is required; cloudflared is needed for remote access.`);
+} else if (nativeMacRuntime && command === 'worker-isolated') {
+  await import('./bridge/isolated-worker.js');
+} else if (nativeMacRuntime && command === 'worker-connector') {
+  await import('./desktop/connector-worker.js');
+} else if (nativeMacRuntime && command === 'worker-quick') {
+  await import('./setup/quick-worker.js');
+} else if (command === 'native-operation' && process.platform === 'darwin') {
+  const { nativeOperationInput } = await import('../../desktop/macos/operations.js');
+  await nativeOperationInput(process.argv[3]);
 } else if (command === 'session-configure') {
   try {
     let input = '';
@@ -27,6 +37,11 @@ Codex CLI is required; cloudflared is needed for remote access.`);
     const restore = await configureSession(request.enabled, request.options);
     console.log(JSON.stringify({ snapshot: restore.snapshot }));
   } catch (error: any) { console.log(JSON.stringify({ error: error.message, code: error.code })); process.exitCode = 1; }
+} else if (command === 'cleanup-desktop') {
+  const { desktopDirectory } = await import('../shared/desktop-config.js');
+  const { cleanDesktopState } = await import('./desktop/cleanup.js');
+  try { console.log(JSON.stringify(await cleanDesktopState(desktopDirectory()))); }
+  catch (error: any) { console.error(error.message); process.exitCode = 1; }
 } else if (command === 'uninstall-desktop') {
   const { desktopDirectory } = await import('../shared/desktop-config.js');
   const { uninstallBackground } = await import('../../desktop/uninstall.js');
@@ -35,7 +50,16 @@ Codex CLI is required; cloudflared is needed for remote access.`);
   await uninstallBackground({ directory, executable: installation || process.execPath }, installation);
 } else if (command === 'agent') {
   const { startDesktopAgent } = await import('./desktop/agent.js');
-  try { await startDesktopAgent(); }
+  try {
+    const agent = await startDesktopAgent();
+    // The native session launcher owns this pipe. EOF also handles a crashed
+    // launcher; no PID reuse or orphaned session service after logout.
+    if (process.platform === 'darwin' && process.env.CODEX_WEBUI_DESKTOP_PIPE_PARENT === '1') {
+      process.stdin.resume();
+      process.stdin.once('end', () => void agent.close());
+      agent.server.once('close', () => { process.stdin.destroy(); });
+    }
+  }
   catch (error: any) {
     if (error.code === 'PRIVATE_LOCK_BUSY') process.exit(0);
     console.error('Desktop agent could not start. Check private state permissions and installation.'); process.exit(1);

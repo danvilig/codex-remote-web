@@ -1,0 +1,33 @@
+name: macOS Safari display diagnostic
+on:
+  pull_request:
+    paths:
+      - .github/workflows/macos-safari-diagnostics.yml
+      - .github/workflows/platform-packages.yml
+      - tests/helpers/macos-safari-capture.swift
+      - tests/helpers/macos-native-driver.m
+      - tests/browser/macos-native.e2e.mjs
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  safari-window:
+    runs-on: xcode-27
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Capture and check a real Safari window
+        run: |
+          set -o pipefail
+          mkdir -p .artifacts
+          sw_vers | tee .artifacts/safari-system.txt
+          xcrun swift tests/helpers/macos-safari-capture.swift "$PWD/.artifacts" 2>&1 | tee .artifacts/safari-capture.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: safari-window-diagnostic
+          include-hidden-files: true
+          path: .artifacts/safari-*
+          if-no-files-found: error

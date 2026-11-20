@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { nodeRuntime } from '../config/paths.js';
+import { workerCommand } from '../config/paths.js';
 import { readPrivate, privateDirectory } from './private-store.js';
 import { privateAccess } from '../config/private-access.js';
 import { stat } from 'node:fs/promises';
@@ -18,7 +18,8 @@ export class DesktopConnector {
     await privateDirectory(this.directory);
     await writeFile(runtimeToken, saved.token + '\n', { mode: 0o600, flag: 'wx' });
     if (!privateAccess(await stat(runtimeToken), runtimeToken)) { await rm(runtimeToken, { force: true }); throw new Error('Connector token permissions are unsafe'); }
-    const worker = spawn(nodeRuntime(this.env), [this.worker], { env: this.env, windowsHide: true, serialization: 'json', stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    const [runtime, ...workerArgs] = workerCommand('worker-connector', this.worker, this.env);
+    const worker = spawn(runtime, workerArgs, { env: this.env, windowsHide: true, serialization: 'json', stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
     this.workerProcess = worker; this.ids.clear();
     this.closed = new Promise(resolve => { worker.once('exit', resolve); worker.once('error', resolve); });
     this.closed = this.closed.then(async () => { if (this.workerProcess === worker) { this.workerProcess = null; this.ids.clear(); } await rm(runtimeToken, { force: true }); this.log('connector-stopped'); });

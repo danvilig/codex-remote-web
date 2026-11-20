@@ -6,7 +6,7 @@
 
 使用 **Cloudflare Tunnel + Access** 的自托管浏览器工作区：通过网页配置远程访问，在其他设备上继续会话、查看工具进度、处理审批和编辑项目文件。
 
-> **Beta.1 候选说明：** 当前分支准备 **0.2.0-beta.1**，包含桌面网关及新的会话默认行为。已发布的 **0.2.0-alpha.3** 安装包仍通过终端启动；下文新功能请使用 Beta.1 构建。详见 [Beta.1 发布说明](docs/releases/0.2.0-beta.1.md)。
+> **Beta.2 候选说明：** 当前分支准备 **0.2.0-beta.2**，提供轻量原生网关。详见 [Beta.2 发布说明](docs/releases/0.2.0-beta.2.md)。
 
 ## 项目亮点
 
@@ -63,7 +63,7 @@ macOS DMG、Windows MSI 和 Linux 桌面 DEB 提供统一的初始化与设置�
 
 ### 下载桌面安装包或可执行包（推荐）
 
-从 [Releases](https://github.com/danvilig/codex-remote-web/releases) 下载系统对应的归档和同名 `.sha256`。包内含可执行程序、Bun/Node、网页资源和原生终端模块，**无需安装运行时或现场编译**，请保留解压后的完整目录。仍需自行配置 Codex CLI、Git；公网访问需要 cloudflared。
+从 [Releases](https://github.com/danvilig/codex-remote-web/releases) 下载系统对应的归档和同名 `.sha256`。安装包使用轻量原生网关及内置终端，**无需另外安装网关运行时或编译**。请保留解压后的完整目录。仍需自行配置 Codex CLI、Git；公网访问需要 cloudflared。
 
 | 系统 | 包名后缀 | 要求 |
 | --- | --- | --- |
@@ -87,13 +87,13 @@ macOS 将 DMG 中的 **Codex Remote Web.app** 拖入 Applications 后打开。Wi
 
 ### CLI 便携包
 
-以下示例针对 **0.2.0-beta.1** 便携包，请按实际下载选择对应的包名与版本；正式发布前，候选包位于 CI Artifact。通过终端运行时，关闭终端或按 Ctrl+C 停止网关。
+以下示例针对 **0.2.0-beta.2** 便携包，请按实际下载选择对应的包名与版本；正式发布前，候选包位于 CI Artifact。通过终端运行时，关闭终端或按 Ctrl+C 停止网关。
 ```sh
-archive=codex-remote-web-0.2.0-beta.1-linux-x64.tar.gz
-# arm64 改为 codex-remote-web-0.2.0-beta.1-linux-arm64.tar.gz
+archive=codex-remote-web-0.2.0-beta.2-linux-x64.tar.gz
+# arm64 改为 codex-remote-web-0.2.0-beta.2-linux-arm64.tar.gz
 sha256sum -c "$archive.sha256"
 tar -xzf "$archive"
-cd codex-remote-web-0.2.0-beta.1
+cd codex-remote-web-0.2.0-beta.2
 CODEX_WEBUI_CWD=/path/to/your/project ./codex-remote-web
 ```
 
@@ -103,7 +103,7 @@ macOS 解压 `macos-arm64` 后使用同样的启动方式。Windows 解压 zip�
 
 ```powershell
 # 解压前将输出与同名 .sha256 内容核对。
-Get-FileHash .\codex-remote-web-0.2.0-beta.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\codex-remote-web-0.2.0-beta.2-windows-x64.zip -Algorithm SHA256
 $env:CODEX_WEBUI_CWD = 'C:\path\to\your\project'
 .\codex-remote-web.exe
 ```
@@ -133,7 +133,7 @@ WebUI 默认连接本机共享 App Server；socket 尚未就绪时等待，旧�
 | --- | --- | --- |
 | 地址 | 自己的域名或子域名 | 自动分配的临时 HTTPS 地址 |
 | 登录保护 | Cloudflare Access，指定唯一邮箱 | 邮件验证码，指定唯一邮箱 |
-| 前置条件 | Cloudflare 账户、已托管域名、API Token 和 cloudflared；由桌面应用或 Linux 用户级 systemd 管理 | 支持 `--allowed-mail` 的 cloudflared；可执行包已内置 Node.js |
+| 前置条件 | Cloudflare 账户、已托管域名、API Token 和 cloudflared；由桌面应用或 Linux 用户级 systemd 管理 | 支持 `--allowed-mail` 的 cloudflared |
 | 配置入口 | 开始配置 → 选择 Tunnel 与域名 → 预览 → 应用 | 无域名临时访问 → 填写邮箱 → 启动 |
 | 生命周期 | 桌面应用管理的后台网关/连接器，或 Linux 用户服务 | 随网关和连接器运行；停止后需重新生成地址 |
 
@@ -182,7 +182,7 @@ WebUI 不代为启动共享 daemon。请通过 Codex Desktop/CLI 启动兼容的
 - [配置参考](docs/CONFIGURATION.md) / [Cloudflare 部署](docs/deployment/CLOUDFLARE.md)
 - [开发与测试](DEVELOPMENT.md) / [贡献指南](CONTRIBUTING.md)
 - [架构](docs/ARCHITECTURE.md) / [路线图](docs/ROADMAP.md)
-- [发布流程](docs/RELEASING.md) / [候选验证记录](docs/releases/0.2.0-beta.1-acceptance.md) / [变更记录](CHANGELOG.md)
+- [发布流程](docs/RELEASING.md) / [候选验证记录](docs/releases/0.2.0-beta.2-acceptance.md) / [变更记录](CHANGELOG.md)
 - [贡献规范](CONTRIBUTING.md) / [Git 开发流程](docs/GIT_WORKFLOW.md) / [AI agent 规则](AGENTS.md)
 - [安全说明](SECURITY.md)
 

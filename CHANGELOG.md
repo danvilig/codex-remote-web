@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0-beta.2
+
+- Ship a lightweight native Go gateway on macOS, Windows and Linux, including Docker, without Bun, Node.js, or Node addons for the gateway itself.
+- Use the native macOS desktop and background helper, with local language selection, Finder installation, and a clean uninstall action.
+- Validate the same macOS DMG on macOS 15 and 27; record Finder, gateway, desktop lifecycle, and visible WebKit results separately.
+
 ## 0.2.0-beta.1
 
 - Add a background gateway with a coordinated Electron tray/settings app for macOS, Windows and Linux; initialize projects, manage gateway/remote access, inspect diagnostics and configure login startup without a terminal.
