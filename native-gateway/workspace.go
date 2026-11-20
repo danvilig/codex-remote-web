@@ -19,6 +19,8 @@ import (
 const workspaceFileLimit = 512 << 20
 const workspaceImageLimit = 25 << 20
 const workspaceTextLimit = 256 << 10
+const workspaceDownloadIdleTimeout = 35 * time.Second
+const workspaceDownloadTimeout = 30 * time.Minute
 
 var workspaceUnavailable = errors.New("File unavailable")
 var workspaceOutsideRoots = errors.New("outside allowed roots")
@@ -463,7 +465,36 @@ func (s *workspace) download(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Cross-Origin-Resource-Policy", "same-origin")
 	w.WriteHeader(200)
-	_, _ = io.CopyN(w, file, info.Size())
+	_, _ = io.CopyN(workspaceDownloadWriter{
+		writer: w, context: r.Context(), control: http.NewResponseController(w),
+		deadline: time.Now().Add(workspaceDownloadTimeout),
+	}, file, info.Size())
+}
+
+type workspaceDownloadWriter struct {
+	writer   io.Writer
+	context  context.Context
+	control  *http.ResponseController
+	deadline time.Time
+}
+
+func (w workspaceDownloadWriter) Write(data []byte) (int, error) {
+	if err := w.context.Err(); err != nil {
+		return 0, err
+	}
+	now := time.Now()
+	if !now.Before(w.deadline) {
+		return 0, context.DeadlineExceeded
+	}
+	deadline := now.Add(workspaceDownloadIdleTimeout)
+	if w.deadline.Before(deadline) {
+		deadline = w.deadline
+	}
+	// Each chunk gets an idle write budget within the overall download limit.
+	if err := w.control.SetWriteDeadline(deadline); err != nil && !errors.Is(err, http.ErrNotSupported) {
+		return 0, err
+	}
+	return w.writer.Write(data)
 }
 
 func workspaceEncodeFilename(name string) string {

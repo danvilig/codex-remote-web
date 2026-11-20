@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { desktopConfig, desktopDirectory } from '../../src/shared/desktop-config.js';
 import { writePrivate } from '../../src/server/desktop/private-store.js';
 import { agentRequest } from '../../desktop/client.js';
+import { macosSidebarSamples, macosVisibleSidebarThreshold } from '../../scripts/macos-validation.ts';
 // This harness runs under pinned Node; avoid Bun-only build helpers here.
 async function command(args, cwd, { timeoutMs = 60000 } = {}) {
   const { stdout } = await promisify(execFile)(args[0], args.slice(1), { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 });
@@ -76,7 +77,7 @@ async function click(selector) {
 const select = (selector, value) => evaluate(`const node = document.querySelector(${JSON.stringify(selector)}); node.value = ${JSON.stringify(value)}; node.dispatchEvent(new Event('change', {bubbles:true})); return true`);
 const ready = () => evaluate("return !document.querySelector('#desktopLanguage').disabled && !document.querySelector('[aria-busy=true]')");
 async function sidebarPixels(image, left, top, width) {
-  return Number(await command(['swift', '-e', `import AppKit
+  const output = await command(['swift', '-e', `import AppKit
     let bitmap = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))!
     let scale = Double(bitmap.pixelsWide) / Double(CommandLine.arguments[4])!
     let left = Double(CommandLine.arguments[2])!, top = Double(CommandLine.arguments[3])!
@@ -94,7 +95,9 @@ async function sidebarPixels(image, left, top, width) {
       }
     }
     print(light > xs.count * ys.count / 2 ? count : 0)
-  `, image, String(left), String(top), String(width)], root));
+  `, image, String(left), String(top), String(width)], root);
+  assert.match(output, /^\d+$/, 'Missing sidebar pixel measurement');
+  return Number(output);
 }
 async function visibleSidebar(suffix = '') {
   await waitFor(async () => (await application.request('geometry')).visible, 'WindowServer visibility');
@@ -105,7 +108,7 @@ async function visibleSidebar(suffix = '') {
     await command(['screencapture', '-x', onscreen], root);
     displayPixels = await sidebarPixels(onscreen, geometry.left, geometry.top, geometry.screenWidth);
   } catch (error) { displayError = error; }
-  if (displayPixels > 100) return displayPixels;
+  if (displayPixels > macosVisibleSidebarThreshold) return displayPixels;
 
   // WindowServer can capture the compositor's own window surface separately
   // from the display. Neither path asks WKWebView to redraw into a bitmap.
@@ -114,8 +117,7 @@ async function visibleSidebar(suffix = '') {
     await command(['screencapture', '-x', '-o', '-l', String(geometry.windowID), window], root);
     const windowPixels = await sidebarPixels(window, geometry.windowLeft, geometry.windowTop, geometry.windowWidth);
     console.log(`WindowServer${suffix}: display=${displayError ? displayError.message : displayPixels}, window=${windowPixels} sidebar ink pixels`);
-    if (windowPixels > 100) return windowPixels;
-    if (!displayError) return Math.max(displayPixels, windowPixels);
+    return Math.max(displayPixels, windowPixels);
   } catch (error) {
     console.error(`WindowServer${suffix}: display=${displayPixels}; window capture failed: ${error.message}`);
     if (!displayError) return displayPixels;
@@ -227,8 +229,12 @@ try {
   await assert.rejects(access(legacy));
   await assert.rejects(access(executable), 'Disposable application moves to Trash');
   await writeFile(join(root, '.artifacts/macos-native-menus.json'), JSON.stringify(menus, null, 2) + '\n');
-  await writeFile(join(root, '.artifacts/macos-desktop-lifecycle.json'), JSON.stringify({ ...runningApps, closeAndMinimizeReopen: true, quitWithGatewayContinuity: true, relaunchAndCleanUninstall: true, sidebarInkPixels: pixels, reopenedSidebarInkPixels: reopenedPixels }, null, 2) + '\n');
-  if (pixels <= 100) visibleCompositeFailure = `Visible native window lost its WebKit composite: ${pixels} sidebar ink pixels`;
+  const lifecycle = { ...runningApps, closeAndMinimizeReopen: true, quitWithGatewayContinuity: true, relaunchAndCleanUninstall: true, sidebarInkPixels: pixels, reopenedSidebarInkPixels: reopenedPixels };
+  const samples = macosSidebarSamples(lifecycle);
+  assert.ok(samples, 'Missing sidebar pixel evidence');
+  await writeFile(join(root, '.artifacts/macos-desktop-lifecycle.json'), JSON.stringify(lifecycle, null, 2) + '\n');
+  const blank = samples.filter(sample => sample.pixels <= macosVisibleSidebarThreshold);
+  if (blank.length) visibleCompositeFailure = `Visible native window lost its WebKit composite: ${blank.map(sample => `${sample.phase}: ${sample.pixels} sidebar ink pixels`).join('; ')}`;
   else console.log('PASS: actual native WKWebView UI, restricted asset/bridge access, native menus/dialogs, saved settings/language, gateway continuity and clean uninstall');
 } catch (error) {
   console.error('Native application diagnostics:', application?.logs());

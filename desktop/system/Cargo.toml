@@ -14,6 +14,9 @@ tauri = { version = "2.12", features = ["image-png", "tray-icon"] }
 tauri-plugin-dialog = { version = "2", default-features = false, features = ["gtk3"] }
 tauri-plugin-single-instance = "2"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Threading"] }
+
 [build-dependencies]
 tauri-build = "2"
 

@@ -133,7 +133,7 @@ For a desktop-managed gateway, open **Remote access** in the desktop app; its br
 | --- | --- | --- |
 | Address | Your own domain or subdomain | An automatically assigned temporary HTTPS address |
 | Login protection | Cloudflare Access, restricted to one email address | Email verification code, restricted to one email address |
-| Requirements | Cloudflare account, a domain hosted on Cloudflare, API Token and cloudflared; managed by the desktop app or Linux user-level systemd | cloudflared with `--allowed-mail` support; Node.js is included in executable packages |
+| Requirements | Cloudflare account, a domain hosted on Cloudflare, API Token and cloudflared; managed by the desktop app or Linux user-level systemd | cloudflared with `--allowed-mail` support |
 | Setup | Start setup → Choose Tunnel and domain → Preview → Apply | Temporary access → Enter email → Start |
 | Lifecycle | Desktop-managed background gateway/connector or a Linux user service | Runs with the gateway and connector; generate a new address after stopping |
 

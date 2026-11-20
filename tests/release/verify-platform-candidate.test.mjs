@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { verifyCandidate } from '../../scripts/verify-platform-candidate.mjs';
 
-async function candidate(t, failure = false) {
+async function candidate(t, failedPhase = '') {
   const dir = await mkdtemp(join(tmpdir(), 'crw-release-check-'));
   t.after(() => rm(dir, { recursive: true, force: true }));
   const tag = 'v0.2.0-beta.2', sha = 'a'.repeat(40), dmg = 'codex-remote-web-0.2.0-beta.2-macos-arm64.dmg';
@@ -35,11 +35,12 @@ async function candidate(t, failure = false) {
           format: 1, platform: os, arch, renderer: windows ? 'system-webview2' : 'system-webkitgtk', sourceCommit: sha,
           installer: name, sha256: hash, installerBytes: Buffer.byteLength('archive fixture'), installed: { allocatedBytes: 32768, logicalBytes: 21777 },
           nativeControls: true, gatewaySurvivedWindowExit: true, uninstall: true,
+          ...(windows ? { uninstallWhileTrayRunning: true } : {}),
         });
       }
     }
   }
-  const conclusion = failure ? 'failure' : 'success';
+  const conclusion = failedPhase ? 'failure' : 'success';
   await write('run.json', { head_sha: sha, run_attempt: 1, status: 'completed', conclusion });
   const steps = ['Verify actual macOS 27 runtime', 'Select and verify the exact macOS 15-built DMG', 'Run actions/upload-artifact@v4'].map(name => ({ name, conclusion: 'success' }));
   steps.push({ name: 'Mount, install, launch and inspect the same DMG on macOS 27', conclusion });
@@ -47,20 +48,21 @@ async function candidate(t, failure = false) {
   jobs.push({ name: 'validate-dmg-macos-27-arm64', status: 'completed', conclusion, steps });
   await write('jobs.json', { total_count: jobs.length, jobs });
   for (const [major, platform] of [[15, 'release-darwin-arm64'], [27, mac27]]) {
-    const failed = major === 27 && failure;
+    const failure = major === 27 ? failedPhase : '';
     await write(`${platform}/macos-installation-check.json`, {
-      format: 1, status: failed ? 'failed' : 'passed', failureCode: failed ? 'MACOS_VISIBLE_COMPOSITE' : undefined,
+      format: 1, status: failure ? 'failed' : 'passed', failureCode: failure ? 'MACOS_VISIBLE_COMPOSITE' : undefined,
       sourceCommit: sha, installer: dmg, sha256: hash,
       system: { arch: 'arm64', major, expectedMajor: major, version: `${major}.0.1`, build: '26A434' },
       checks: { dmgIntegrityAndMount: true, relocatedApplicationAndRuntimeSignatures: true, installedGatewayAndPty: true,
         minimumSystemVersion: '15.0', gatewayRuntime: 'native-go', desktopRuntime: 'system AppKit/WebKit',
         retinaBackground: { points: [680, 480], pixels: [[680, 480], [1360, 960]] }, guideCustomIcon: { finderFlag: true, resourceBytes: 1025 },
         finderLayoutAndBackground: { screenshot: 'macos-installer-native.png' }, installedSize: { allocatedBytes: 1, logicalBytes: 2 },
-        [failed ? 'installedDesktopLaunchAndLifecycle' : 'installedDesktopLaunchUiAndLifecycle']: true },
+        [failure ? 'installedDesktopLaunchAndLifecycle' : 'installedDesktopLaunchUiAndLifecycle']: true },
     });
     await write(`${platform}/macos-desktop-lifecycle.json`, { closeAndMinimizeReopen: true, quitWithGatewayContinuity: true,
-      relaunchAndCleanUninstall: true, sidebarInkPixels: failed ? 100 : 101, reopenedSidebarInkPixels: { close: 101, minimize: 101 } });
-    for (const name of ['macos-installer-native.png', 'macos-desktop-overview.png', 'macos-desktop-settings-light.png', 'macos-desktop-settings-dark.png', 'macos-desktop-onscreen.png', 'macos-native-menus.json']) {
+      relaunchAndCleanUninstall: true, sidebarInkPixels: failure === 'initial' ? 100 : 101,
+      reopenedSidebarInkPixels: { close: failure === 'close' ? 0 : 101, minimize: failure === 'minimize' ? 0 : 101 } });
+    for (const name of ['macos-installer-native.png', 'macos-desktop-overview.png', 'macos-desktop-settings-light.png', 'macos-desktop-settings-dark.png', 'macos-desktop-onscreen.png', 'macos-desktop-onscreen-after-close.png', 'macos-desktop-window-after-minimize.png', 'macos-native-menus.json']) {
       await write(`${platform}/${name}`, 'fixture');
     }
   }
@@ -78,12 +80,12 @@ test('verifies the exact candidate and emits only the 21 verified release assets
 });
 
 test('accepts a visible-only failure only with exact physical acceptance evidence', async t => {
-  const { dir, verify, hash, mac27, write } = await candidate(t, true);
+  const { dir, verify, hash, mac27, write } = await candidate(t, 'initial');
   const manual = { manualHash: hash, manualVersion: '27.0.1 (26A434)' };
   await assert.rejects(verify(), /exact DMG SHA-256/);
   await assert.rejects(verify({ ...manual, manualVersion: '15.8 (24H232)' }), /physical macOS 27 version/);
   await verify(manual);
-  assert.match(await readFile(join(dir, 'acceptance.md'), 'utf8'), /failed the WindowServer capture \(100 sidebar ink pixels/);
+  assert.match(await readFile(join(dir, 'acceptance.md'), 'utf8'), /failed the WindowServer capture \(initial launch: 100 sidebar ink pixels/);
   const report = `${mac27}/macos-installation-check.json`;
   const record = JSON.parse(await readFile(join(dir, report), 'utf8'));
   await write(report, { ...record, sha256: 'b'.repeat(64) });
@@ -95,4 +97,25 @@ test('accepts a visible-only failure only with exact physical acceptance evidenc
   meta.jobs.at(-1).steps.push({ name: 'Unrelated test', conclusion: 'failure' });
   await write('jobs.json', meta);
   await assert.rejects(verify(manual), /Unrelated macOS 27 step failures/);
+});
+
+test('rejects claimed macOS UI success if the window is blank after reopening', async t => {
+  const { dir, verify, mac27, write } = await candidate(t);
+  for (const [platform, phase] of [['release-darwin-arm64', 'close'], [mac27, 'minimize']]) {
+    const file = `${platform}/macos-desktop-lifecycle.json`;
+    const lifecycle = JSON.parse(await readFile(join(dir, file), 'utf8'));
+    await write(file, { ...lifecycle, reopenedSidebarInkPixels: { ...lifecycle.reopenedSidebarInkPixels, [phase]: 0 } });
+    await assert.rejects(verify(), new RegExp(`Visible macOS UI did not pass the pixel threshold on reopen after ${phase}`));
+    await write(file, lifecycle);
+  }
+});
+
+test('requires same-file macOS 27 acceptance and capture evidence for a reopened blank window', async t => {
+  const { dir, verify, hash, mac27 } = await candidate(t, 'minimize');
+  const manual = { manualHash: hash, manualVersion: '27.2.1 (26B131)' };
+  await assert.rejects(verify({ ...manual, manualHash: 'b'.repeat(64) }), /exact DMG SHA-256/);
+  await verify(manual);
+  assert.match(await readFile(join(dir, 'acceptance.md'), 'utf8'), /reopen after minimize: 0 sidebar ink pixels/);
+  await rm(join(dir, mac27, 'macos-desktop-window-after-minimize.png'));
+  await assert.rejects(verify(manual), /missing WindowServer capture for reopen after minimize/);
 });

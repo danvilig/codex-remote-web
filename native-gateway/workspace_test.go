@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -63,6 +64,42 @@ func workspaceRequest(h http.Handler, method, path string, q url.Values, body, o
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, r)
 	return w
+}
+
+type slowDownloadResponse struct {
+	http.ResponseWriter
+	delay time.Duration
+}
+
+func (w slowDownloadResponse) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+func (w slowDownloadResponse) Write(data []byte) (int, error) {
+	time.Sleep(w.delay)
+	return w.ResponseWriter.Write(data)
+}
+
+func TestWorkspaceDownloadOutlastsServerWriteTimeout(t *testing.T) {
+	s, project, _ := workspaceFixture(t)
+	const timeout = 500 * time.Millisecond
+	content := strings.Repeat("Slow download fixture\n", 5000)
+	workspaceFixtureWrite(t, project, "result.txt", content, 0600)
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.download(slowDownloadResponse{w, timeout + 100*time.Millisecond}, r)
+	}))
+	server.Config.WriteTimeout = timeout
+	server.Start()
+	defer server.Close()
+	client := server.Client()
+	client.Timeout = 10 * time.Second
+	response, err := client.Get(server.URL + "/api/files/download?path=result.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	data, err := io.ReadAll(response.Body)
+	if err != nil || response.StatusCode != http.StatusOK || string(data) != content {
+		t.Fatalf("download HTTP %d: read %d of %d bytes (%v)", response.StatusCode, len(data), len(content), err)
+	}
 }
 
 func TestWorkspaceRootsAndPrivateFiles(t *testing.T) {

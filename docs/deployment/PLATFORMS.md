@@ -6,7 +6,7 @@ All three desktop installers use a system WebView for settings: AppKit/WKWebView
 
 双击应用后，在“网关设置”选择项目目录、端口及可选的 Codex/cloudflared 程序路径，检测依赖并保存，再启动网关。沿用当前用户的 Codex 账户和配置；桌面窗口不管理模型提供商/API 密钥。Codex 和 Git 必需，cloudflared 仅公网访问需要。网页终端默认关闭，开启后以当前用户权限运行。
 
-macOS 15+ 仅支持 Apple Silicon；Windows 11 仅支持 x64、NTFS 和 Windows PowerShell；Linux 桌面首轮基线为 Ubuntu 24.04 GNOME，提供 x64/arm64 DEB。Linux 原有服务器部署归档与便携 CLI 不变。桌面包尚无 Apple Developer ID 签名/公证或 Windows 发布者签名；不要全局禁用 Gatekeeper、SmartScreen 或 Chromium 沙箱。Linux DEB 安装正确归属的 Chromium sandbox helper，无需修改主机 user namespace 策略。
+macOS 15+ 仅支持 Apple Silicon；Windows 11 仅支持 x64、NTFS 和 Windows PowerShell；Linux 桌面首轮基线为 Ubuntu 24.04 GNOME，提供 x64/arm64 DEB，使用系统 WebKitGTK。Linux 仍提供服务器部署归档与便携 CLI。桌面包尚无 Apple Developer ID 签名/公证或 Windows 发布者签名；不要全局禁用 Gatekeeper 或 SmartScreen。
 
 ### macOS 安装与首次打开
 

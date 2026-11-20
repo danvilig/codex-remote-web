@@ -1,6 +1,8 @@
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
 
 mod controller;
+#[cfg(windows)]
+mod windows_uninstall;
 
 use controller::{Controller, Reply};
 use serde_json::{Value, json};
@@ -355,6 +357,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("Invalid desktop executable")?
         .join("resources");
     let assets = resources.join("desktop");
+    #[cfg(windows)]
+    let tray_shutdown = windows_uninstall::TrayShutdown::new(&executable)?;
     let controller = Controller::new(executable, resources.join("gateway"));
     let args: Vec<_> = env::args_os().skip(1).collect();
     if args
@@ -364,6 +368,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         return controller.background().map_err(Into::into);
     }
     if args.iter().any(|arg| arg == "--uninstall-background") {
+        #[cfg(windows)]
+        tray_shutdown.close()?;
         let reply = controller.call("removeBackground", Value::Null);
         return if reply.ok {
             Ok(())
@@ -397,6 +403,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         })
         .invoke_handler(tauri::generate_handler![desktop_operation])
         .setup(move |app| {
+            #[cfg(windows)]
+            app.manage(tray_shutdown.listen(app.handle())?);
             configure_window(app.handle())?;
             let _ = configure_tray(app.handle());
             let handle = app.handle().clone();

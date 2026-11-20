@@ -20,6 +20,15 @@ import (
 
 type requestAuthKey struct{}
 
+func bridgeLeaseValid(w http.ResponseWriter, r *http.Request) bool {
+	auth, _ := r.Context().Value(requestAuthKey{}).(authResult)
+	if !auth.expires.IsZero() && !time.Now().Before(auth.expires) {
+		jsonReply(w, http.StatusUnauthorized, map[string]string{"error": "Authentication required", "code": "AUTH_EXPIRED"})
+		return false
+	}
+	return true
+}
+
 func workspaceMutationAllowed(r *http.Request) bool {
 	return typedMutationAllowed(r, "application/json")
 }
@@ -109,6 +118,14 @@ func (a *gatewayApp) registerCore() {
 			jsonReply(w, 400, map[string]string{"error": "Invalid RPC request"})
 			return
 		}
+		if !bridgeLeaseValid(w, r) {
+			return
+		}
+		// History reads over the HTTP fallback need the same native RPC budget
+		// as WebSocket reads, plus time to send the result to the browser.
+		if timeout := conversationRequestTimeout(message.Method); timeout > defaultConversationRequestTimeout {
+			_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout + writeTimeout))
+		}
 		message.Type = "rpc"
 		jsonReply(w, 200, a.dispatch(r.Context(), message))
 	})
@@ -116,6 +133,9 @@ func (a *gatewayApp) registerCore() {
 		var message browserRequest
 		if decodeOne(http.MaxBytesReader(w, r.Body, maxBrowserMessage), &message) != nil {
 			jsonReply(w, 400, map[string]string{"error": "Invalid Codex response"})
+			return
+		}
+		if !bridgeLeaseValid(w, r) {
 			return
 		}
 		message.Type = "codex/response"

@@ -133,7 +133,7 @@ WebUI 默认连接本机共享 App Server；socket 尚未就绪时等待，旧�
 | --- | --- | --- |
 | 地址 | 自己的域名或子域名 | 自动分配的临时 HTTPS 地址 |
 | 登录保护 | Cloudflare Access，指定唯一邮箱 | 邮件验证码，指定唯一邮箱 |
-| 前置条件 | Cloudflare 账户、已托管域名、API Token 和 cloudflared；由桌面应用或 Linux 用户级 systemd 管理 | 支持 `--allowed-mail` 的 cloudflared；可执行包已内置 Node.js |
+| 前置条件 | Cloudflare 账户、已托管域名、API Token 和 cloudflared；由桌面应用或 Linux 用户级 systemd 管理 | 支持 `--allowed-mail` 的 cloudflared |
 | 配置入口 | 开始配置 → 选择 Tunnel 与域名 → 预览 → 应用 | 无域名临时访问 → 填写邮箱 → 启动 |
 | 生命周期 | 桌面应用管理的后台网关/连接器，或 Linux 用户服务 | 随网关和连接器运行；停止后需重新生成地址 |
 

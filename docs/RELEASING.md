@@ -94,7 +94,7 @@ Beta.2 目标为 Linux x64/arm64、macOS Apple Silicon（macOS 15+）和 Windows
 
 `.github/workflows/platform-packages.yml` 使用原生 `ubuntu-24.04`、`ubuntu-24.04-arm`、`macos-15` 和 `windows-2025` runner 生成候选包。发布使用受保护 `main` 上同一提交的成功 push Verify、已有版本标签，以及同仓库同提交、`run_attempt=1` 的 **Native platform packages** 完成记录；失败需新启动一次工作流，不能使用重跑产物。仓库所有者在 `main` 手动运行 **Publish platform release**，输入 `tag` 与 `candidate_run`。推送标签不会自动发布；发布流程校验并原样上传该候选包。
 
-macOS 在 `macos-15` 构建，`LSMinimumSystemVersion` 必须保持 `15.0`。macOS 27 标准运行器核对 SHA-256 后复用原始 DMG，验证挂载、复制安装、签名、启动、界面与生命周期。两端通过 `sw_vers` 断言系统版本并输出安装报告与截图。`validation-macos-27-arm64` 只存验收证据。仅当 CI 的安装、网关、PTY 与桌面生命周期通过，唯一失败为可见 WebKit 合成时，可以由维护者在物理 macOS 27 实机安装、启动、检查可见 UI 后，输入相同 DMG 的 `macos27_manual_sha256` 和 `macos27_manual_version`（如 `27.0.1 (26A434)`）。发布说明明确区分自动化失败与人工结果。Safari 隔离与人工 Gatekeeper 允许仍需实机验收。
+macOS 在 `macos-15` 构建，`LSMinimumSystemVersion` 必须保持 `15.0`。macOS 27 标准运行器核对 SHA-256 后复用原始 DMG，验证挂载、复制安装、签名、启动、界面与生命周期。两端通过 `sw_vers` 断言系统版本，并对首次打开、关闭后重开及最小化后重开的窗口分别保留系统截图和像素检查结果。`validation-macos-27-arm64` 只存验收证据。仅当 CI 的安装、网关、PTY 与桌面生命周期通过，唯一失败为可见 WebKit 合成时，可以由维护者在物理 macOS 27 实机安装，确认上述三个阶段均显示界面，再输入相同 DMG 的 `macos27_manual_sha256` 和 `macos27_manual_version`（如 `27.0.1 (26A434)`）。发布说明明确区分自动化失败与人工结果。Safari 隔离与人工 Gatekeeper 允许仍需实机验收。
 
 `macOS Safari display diagnostic` 是独立的显示诊断。它截取 Safari 窗口并检查测试页面的色块，保留失败日志和实际截图。编译与安装包验收仍由 `Native platform packages` 独立判定。
 

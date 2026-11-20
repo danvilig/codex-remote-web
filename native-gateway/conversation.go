@@ -337,16 +337,22 @@ func requestConversationNative(ctx context.Context, conn *nativeConn, method str
 	return requestConversationWithLate(ctx, conn, method, params, nil)
 }
 
+const defaultConversationRequestTimeout = 30 * time.Second
+
+func conversationRequestTimeout(method string) time.Duration {
+	switch method {
+	case "thread/read", "thread/resume", "thread/turns/list":
+		return 90 * time.Second
+	default:
+		return defaultConversationRequestTimeout
+	}
+}
+
 func requestConversationWithLate(ctx context.Context, conn *nativeConn, method string, params json.RawMessage, late func(json.RawMessage, error)) (json.RawMessage, error) {
 	if conn == nil {
 		return nil, errDisconnected
 	}
-	duration := 30 * time.Second
-	switch method {
-	case "thread/read", "thread/resume", "thread/turns/list":
-		duration = 90 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(ctx, duration)
+	ctx, cancel := context.WithTimeout(ctx, conversationRequestTimeout(method))
 	defer cancel()
 	return conn.requestWithLate(ctx, method, params, late)
 }

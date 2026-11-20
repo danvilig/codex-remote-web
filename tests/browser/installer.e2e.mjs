@@ -6,28 +6,16 @@ import { tmpdir } from 'node:os';
 import { command } from '../../scripts/distribution.ts';
 import { macAppSize } from '../../scripts/macos-size.ts';
 import { detachMacVolume, dmgLayout } from '../../scripts/macos-dmg.ts';
-import { macOSValidationSystem, macosMinimumVersion } from '../../scripts/macos-validation.ts';
+import { macOSValidationSystem, macosMinimumVersion, macosSidebarSamples, macosVisibleSidebarThreshold } from '../../scripts/macos-validation.ts';
 import { installedSystemDesktopSize, systemDesktopBudget } from '../../scripts/system-desktop-size.ts';
+import { runMsi } from '../helpers/windows-msi.mjs';
 const root=resolve(import.meta.dir,'../..'),installer=process.env.CODEX_WEBUI_INSTALLER;
 assert.ok(installer,'Test the actual installer, not a replacement build');
 const temp=await mkdtemp(join(tmpdir(),'crw-installer-'));
 let mounted=false,installed=false;
 let evidence, windowsEvidence;
 const mount=join(temp,'mount'),destination=join(temp,'Installed application with spaces');
-async function msi(args) {
- console.error(`Verifying msiexec ${args[0]}`);
- const log=join(temp,args[0]==='/i'?'install.log':'uninstall.log');
- args=[...args,'/l*v',log];
- // msiexec parses PROPERTY="value with spaces", not the CRT-style quoted
- // whole argument "PROPERTY=value with spaces". Preserve its native grammar.
- const quote=value=>`"${value.replaceAll('"','""')}"`;
- const nativeArgs=args.map(arg=>arg.startsWith('INSTALLFOLDER=')?`INSTALLFOLDER=${quote(arg.slice('INSTALLFOLDER='.length))}`:arg.startsWith('/')?arg:quote(arg));
- const child=Bun.spawn(['msiexec.exe',...nativeArgs,'/qn','/norestart'],{windowsVerbatimArguments:true,stdout:'ignore',stderr:'ignore'});
- let timedOut=false;const timer=setTimeout(()=>{timedOut=true;child.kill('SIGKILL');},120_000);
- let code;try {code=await child.exited;}finally{clearTimeout(timer);}
- assert.equal(timedOut,false,`msiexec ${args[0]} timed out; installer log: ${await readFile(log,'utf8').catch(()=>'(unavailable)')}`);
- assert.ok([0,3010].includes(code),`msiexec failed ${code}; installer log: ${await readFile(log,'utf8').catch(()=>'(unavailable)')}`);
-}
+const uninstallLog=join(temp,'uninstall.log');
 try {
  if(process.platform==='darwin') {
   evidence={format:1,status:'running',system:await macOSValidationSystem(),installer:basename(installer),sha256:createHash('sha256').update(await readFile(installer)).digest('hex'),sourceCommit:await command(['git','rev-parse','HEAD'],root),checks:{},manualAcceptance:['Safari download quarantine','Gatekeeper manual approval','real login/logout session']};
@@ -120,7 +108,7 @@ try {
   process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(contents,'MacOS/Codex Remote Web');
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=join(contents,'Resources/gateway');
  } else if(process.platform==='win32') {
-  await msi(['/i',installer,`INSTALLFOLDER=${destination}`]);installed=true;
+  await runMsi('/i',installer,join(temp,'install.log'),destination);installed=true;
   await access(join(destination,'Codex Remote Web.exe'));
   await access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk'));
   const installerBytes=(await stat(installer)).size;
@@ -128,6 +116,7 @@ try {
   windowsEvidence={format:1,platform:'win32',arch:process.arch,renderer:'system-webview2',sourceCommit:await command(['git','rev-parse','HEAD'],root),installer:basename(installer),sha256:createHash('sha256').update(await readFile(installer)).digest('hex'),installerBytes,installed:await installedSystemDesktopSize(destination)};
   process.env.CODEX_WEBUI_INSTALLED_DIRECTORY=join(destination,'resources/gateway');
   process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE=join(destination,'Codex Remote Web.exe');
+  process.env.CODEX_WEBUI_MSI_UNINSTALL_LOG=uninstallLog;
  } else throw new Error('Native installer test requires macOS or Windows');
  await command(['bun','run','test:portable'],root,{stream:true,timeoutMs:240_000});
  if(evidence)evidence.checks.installedGatewayAndPty=true;
@@ -136,7 +125,8 @@ try {
  } catch(error) {
   if(evidence&&error.exitCode===42) {
    const lifecycle=await readFile(join(root,'.artifacts/macos-desktop-lifecycle.json'),'utf8').then(JSON.parse).catch(()=>null);
-   if(lifecycle?.closeAndMinimizeReopen===true&&lifecycle.quitWithGatewayContinuity===true&&lifecycle.relaunchAndCleanUninstall===true&&Number.isInteger(lifecycle.sidebarInkPixels)&&lifecycle.sidebarInkPixels>=0&&lifecycle.sidebarInkPixels<=100) {
+   const samples=macosSidebarSamples(lifecycle);
+   if(lifecycle?.closeAndMinimizeReopen===true&&lifecycle.quitWithGatewayContinuity===true&&lifecycle.relaunchAndCleanUninstall===true&&samples?.some(sample=>sample.pixels<=macosVisibleSidebarThreshold)) {
     evidence.checks.installedDesktopLaunchAndLifecycle=true;
     evidence.failureCode='MACOS_VISIBLE_COMPOSITE';
    }
@@ -149,16 +139,16 @@ try {
   evidence.status='passed';
  }
  if(installed) {
-  await msi(['/x',installer]);installed=false;
-  const uninstallLog=await readFile(join(temp,'uninstall.log'),'utf8');
-  await assert.rejects(access(join(destination,'Codex Remote Web.exe')),`Installed executable remained after uninstall: ${uninstallLog}`);
+  installed=false; // The desktop test uninstalled the MSI while the tray was running.
+  await assert.rejects(access(join(destination,'Codex Remote Web.exe')),`Installed executable remained after uninstall: ${await readFile(uninstallLog,'utf8')}`);
+  await assert.rejects(access(join(destination,'resources/gateway/codex-remote-web.exe')),'Installed gateway executable remained after uninstall');
   await assert.rejects(access(join(process.env.APPDATA,'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk')),'Start menu shortcut remained after uninstall');
-  await writeFile(join(root,'.artifacts/windows-desktop-installation.json'),JSON.stringify({...windowsEvidence,nativeControls:true,gatewaySurvivedWindowExit:true,uninstall:true},null,2)+'\n');
+  await writeFile(join(root,'.artifacts/windows-desktop-installation.json'),JSON.stringify({...windowsEvidence,nativeControls:true,gatewaySurvivedWindowExit:true,uninstallWhileTrayRunning:true,uninstall:true},null,2)+'\n');
  }
  console.log('PASS: exact native installer, installation into a path with spaces, installed gateway/files/submissions/PTY and MSI uninstall');
 } finally {
  if(mounted)await detachMacVolume(mount,root);
- if(installed)await msi(['/x',installer]);
+ if(installed&&await access(join(destination,'Codex Remote Web.exe')).then(()=>true,()=>false))await runMsi('/x',installer,join(temp,'cleanup-uninstall.log'));
  await rm(temp,{recursive:true,force:true});
  if(evidence) {
   if(evidence.status!=='passed')evidence.status='failed';

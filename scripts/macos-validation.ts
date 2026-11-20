@@ -2,6 +2,22 @@ import { release } from 'node:os';
 import { command } from './distribution.ts';
 
 export const macosMinimumVersion = '15.0';
+export const macosVisibleSidebarThreshold = 100;
+
+export function macosSidebarSamples(lifecycle: {
+  sidebarInkPixels?: unknown;
+  reopenedSidebarInkPixels?: { close?: unknown; minimize?: unknown };
+} | null) {
+  function sample(phase: string, suffix: string, pixels: unknown) {
+    return typeof pixels === 'number' && Number.isSafeInteger(pixels) && pixels >= 0
+      ? { phase, suffix, pixels }
+      : null;
+  }
+  const initial = sample('initial launch', '', lifecycle?.sidebarInkPixels);
+  const close = sample('reopen after close', '-after-close', lifecycle?.reopenedSidebarInkPixels?.close);
+  const minimize = sample('reopen after minimize', '-after-minimize', lifecycle?.reopenedSidebarInkPixels?.minimize);
+  return initial && close && minimize ? [initial, close, minimize] : null;
+}
 
 export function checkMacOSVersion(version: string, expectedMajor?: string) {
   if (!/^\d+\.\d+(?:\.\d+)?$/.test(version)) throw new Error(`Invalid macOS product version: ${version}`);

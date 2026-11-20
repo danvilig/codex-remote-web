@@ -4,7 +4,7 @@ import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, writeFile, copyFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { promisify } from 'node:util';
@@ -16,15 +16,20 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const executable = process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE;
 assert.ok(executable && ['linux', 'win32'].includes(process.platform));
 const windows = process.platform === 'win32';
+const msiLog = windows && process.env.CODEX_WEBUI_MSI_UNINSTALL_LOG;
+if (msiLog) assert.ok(process.env.GITHUB_ACTIONS === 'true' && process.env.USERPROFILE && process.env.CODEX_WEBUI_INSTALLER, 'Live MSI validation needs a disposable Windows runner profile');
 const home = await mkdtemp(join(tmpdir(), 'crw-system-desktop-'));
-const directory = desktopDirectory(home);
-const env = { ...process.env, HOME: home, USERPROFILE: home, APPDATA: join(home, 'Roaming'), LOCALAPPDATA: join(home, 'Local'), XDG_CONFIG_HOME: join(home, '.config'), XDG_CACHE_HOME: join(home, '.cache'), XDG_DATA_HOME: join(home, '.data'), CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), CODEX_WEBUI_APP_SERVER_MODE: 'isolated' };
+// The per-user MSI action runs with the actual runner profile. Keep Codex and
+// WebView fixtures isolated, and refuse to use pre-existing desktop state.
+const profile = msiLog ? process.env.USERPROFILE : home;
+const directory = desktopDirectory(profile);
+const env = { ...process.env, HOME: home, USERPROFILE: profile, APPDATA: join(home, 'Roaming'), LOCALAPPDATA: join(home, 'Local'), XDG_CONFIG_HOME: join(home, '.config'), XDG_CACHE_HOME: join(home, '.cache'), XDG_DATA_HOME: join(home, '.data'), CODEX_HOME: join(home, '.codex'), CODEX_AUTH_PATH: join(home, 'auth.json'), CODEX_WEBUI_APP_SERVER_MODE: 'isolated' };
 if (!windows) {
   env.GTK_A11Y = '1';
   env.WEBKIT_FORCE_ACCESSIBILITY = '1';
 }
 const command = promisify(execFile);
-let child, output = '';
+let child, output = '', ownsProfileState = false;
 
 async function nativeControl(name, invoke = false) {
   assert.ok(child && child.exitCode === null && !child.signalCode, output);
@@ -67,6 +72,11 @@ async function close() {
 }
 
 try {
+  if (msiLog) {
+    await mkdir(dirname(directory), { recursive: true });
+    await mkdir(directory);
+    ownsProfileState = true;
+  }
   for (const folder of [env.APPDATA, env.LOCALAPPDATA, env.XDG_CONFIG_HOME, env.XDG_CACHE_HOME, env.XDG_DATA_HOME]) await mkdir(folder, { recursive: true, mode: 0o700 });
   const fixture = join(home, 'codex-fixture.mjs');
   const codex = join(home, windows ? 'codex.exe' : 'codex');
@@ -92,12 +102,31 @@ try {
   launch();
   await until(() => nativeControl('Stop gateway', true), 'Stopping the gateway from the reopened WebView');
   await until(async () => (await agentRequest(directory, 'status')).local.pid === null, 'Gateway stopped');
-  await close();
-  await command(executable, ['--uninstall-background'], { env, timeout: 30_000 });
+  if (msiLog) {
+    await until(() => nativeControl('Start gateway', true), 'Restarting the gateway before uninstall');
+    await until(() => connected().catch(() => false), 'Gateway connected before uninstall');
+    const trayProcess = child;
+    await command('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p = Get-Process -Id ${trayProcess.pid}; if (-not $p.CloseMainWindow()) { exit 2 }`], { env, timeout: 15_000 });
+    await until(async () => !(await nativeControl('Stop gateway')), 'Settings window hidden to tray');
+    assert.equal(trayProcess.exitCode, null);
+    assert.equal(await connected(), true);
+    const before = JSON.parse(await readFile(join(directory, 'config.json'), 'utf8'));
+    assert.equal(before.enabled, true);
+    await command('bun', [join(root, 'tests/helpers/windows-msi.mjs'), process.env.CODEX_WEBUI_INSTALLER, msiLog], { timeout: 130_000, maxBuffer: 4 << 20 });
+    await until(() => trayProcess.exitCode !== null, 'Tray process exited on MSI uninstall', 10_000);
+    assert.equal(trayProcess.exitCode, 0, 'The tray should exit gracefully');
+    await until(async () => !(await connected().catch(() => false)), 'Gateway stopped on MSI uninstall', 10_000);
+    assert.deepEqual(JSON.parse(await readFile(join(directory, 'config.json'), 'utf8')), { ...before, enabled: false }, 'MSI uninstall must preserve desktop settings and disable the gateway');
+    console.log('PASS: MSI uninstall stopped the running tray and gateway without a reboot or deleting settings');
+  } else {
+    await close();
+    await command(executable, ['--uninstall-background'], { env, timeout: 30_000 });
+  }
   assert.ok((await readFile(join(directory, 'config.json'), 'utf8')).includes('initialized'));
   console.log('PASS: installed system WebView controls, gateway survival after window process exit, reopened controls, and background uninstall');
 } finally {
   await close().catch(() => {});
-  await agentRequest(directory, 'shutdown', undefined, { timeoutMs: 1500 }).catch(() => {});
+  if (!msiLog || ownsProfileState) await agentRequest(directory, 'shutdown', undefined, { timeoutMs: 1500 }).catch(() => {});
+  if (ownsProfileState) await rm(directory, { recursive: true, force: true, maxRetries: 12, retryDelay: 150 });
   await rm(home, { recursive: true, force: true, maxRetries: 12, retryDelay: 150 });
 }

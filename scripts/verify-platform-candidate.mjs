@@ -5,6 +5,7 @@ import { lstat, readFile, readdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { systemDesktopBudget } from './system-desktop-size.ts';
+import { macosSidebarSamples, macosVisibleSidebarThreshold } from './macos-validation.ts';
 
 const mac27Job = 'validate-dmg-macos-27-arm64';
 const mac27Step = 'Mount, install, launch and inspect the same DMG on macOS 27';
@@ -63,13 +64,16 @@ async function macReport(dir, major, installer, sha, commit) {
   for (const check of ['closeAndMinimizeReopen', 'quitWithGatewayContinuity', 'relaunchAndCleanUninstall']) {
     assert.equal(lifecycle[check], true, `macOS ${major}: ${check}`);
   }
-  for (const pixels of [lifecycle.sidebarInkPixels, lifecycle.reopenedSidebarInkPixels.close, lifecycle.reopenedSidebarInkPixels.minimize]) {
-    assert.ok(Number.isSafeInteger(pixels) && pixels >= 0, `macOS ${major}: missing pixel evidence`);
+  const samples = macosSidebarSamples(lifecycle);
+  assert.ok(samples, `macOS ${major}: missing pixel evidence`);
+  for (const { phase, suffix } of samples) {
+    const captures = await Promise.allSettled(['onscreen', 'window'].map(source => nonemptyFile(join(dir, `macos-desktop-${source}${suffix}.png`))));
+    assert.ok(captures.some(result => result.status === 'fulfilled'), `macOS ${major}: missing WindowServer capture for ${phase}`);
   }
   for (const file of ['macos-installer-native.png', 'macos-desktop-overview.png', 'macos-desktop-settings-light.png', 'macos-desktop-settings-dark.png', 'macos-native-menus.json']) {
     await nonemptyFile(join(dir, file));
   }
-  return { report, pixels: lifecycle.sidebarInkPixels };
+  return { report, samples };
 }
 
 export async function verifyCandidate(directory, tag, commit, { manualHash = '', manualVersion = '' } = {}) {
@@ -125,7 +129,8 @@ export async function verifyCandidate(directory, tag, commit, { manualHash = '',
         assert.ok(bytes < systemDesktopBudget.installerBytes);
         for (const measure of ['allocatedBytes', 'logicalBytes']) assert.ok(Number.isSafeInteger(report.installed[measure]) && report.installed[measure] > 0 && report.installed[measure] < systemDesktopBudget.installedBytes, `${platform} installed ${measure}`);
         for (const check of ['nativeControls', 'gatewaySurvivedWindowExit', 'uninstall']) assert.equal(report[check], true, `${platform} ${check}`);
-        desktopResults.push(`- ${platform} system WebView installer passed installed controls, gateway continuity and uninstall. Download: ${bytes} bytes; installed: ${report.installed.allocatedBytes} allocated bytes (${report.installed.logicalBytes} logical bytes).`);
+        if (windows) assert.equal(report.uninstallWhileTrayRunning, true, 'Windows MSI uninstall was not checked with the tray running');
+        desktopResults.push(`- ${platform} system WebView installer passed installed controls, gateway continuity and ${windows ? 'uninstall with the tray running' : 'uninstall'}. Download: ${bytes} bytes; installed: ${report.installed.allocatedBytes} allocated bytes (${report.installed.logicalBytes} logical bytes).`);
       }
     }
   }
@@ -133,11 +138,13 @@ export async function verifyCandidate(directory, tag, commit, { manualHash = '',
   const sha = sums.get(dmg).slice(0, 64);
   const mac15 = await macReport(join(directory, 'release-darwin-arm64'), 15, dmg, sha, commit);
   const newer = await macReport(join(directory, 'validation-macos-27-arm64'), 27, dmg, sha, commit);
-  function requireUiPass({ report, pixels }) {
+  function requireUiPass({ report, samples }) {
     assert.equal(report.status, 'passed');
     assert.equal(report.failureCode, undefined);
     assert.equal(report.checks.installedDesktopLaunchUiAndLifecycle, true);
-    assert.ok(pixels > 100, 'Visible macOS UI did not pass the pixel threshold');
+    for (const { phase, pixels } of samples) {
+      assert.ok(pixels > macosVisibleSidebarThreshold, `Visible macOS UI did not pass the pixel threshold on ${phase}`);
+    }
   }
   requireUiPass(mac15);
   const systemLabel = ({ report: { system } }) => `${system.version} (${system.build})`;
@@ -159,12 +166,12 @@ export async function verifyCandidate(directory, tag, commit, { manualHash = '',
     assert.equal(newer.report.failureCode, 'MACOS_VISIBLE_COMPOSITE', 'Only the Mac visible composite check is eligible for manual acceptance');
     assert.equal(newer.report.checks.installedDesktopLaunchAndLifecycle, true);
     assert.equal(newer.report.checks.installedDesktopLaunchUiAndLifecycle, undefined);
-    assert.ok(newer.pixels <= 100);
-    await nonemptyFile(join(directory, 'validation-macos-27-arm64', 'macos-desktop-onscreen.png'));
+    const blank = newer.samples.filter(sample => sample.pixels <= macosVisibleSidebarThreshold);
+    assert.ok(blank.length > 0, 'The reported visible composite failure needs a failed pixel measurement');
     assert.equal(manualHash, sha, 'Physical macOS 27 acceptance requires the exact DMG SHA-256');
     const match = /^(27\.\d+(?:\.\d+)?) \(([^)]+)\)$/.exec(manualVersion);
     assert.ok(match && build.test(match[2]), 'Enter the physical macOS 27 version and build from sw_vers');
-    mac27Note = `macOS ${systemLabel(newer)} CI passed mounting, installation, gateway, PTY and lifecycle but failed the WindowServer capture (${newer.pixels} sidebar ink pixels; requires more than 100). The maintainer accepted mounting, installing, launching and visible UI on a physical Mac running macOS ${manualVersion} with the identical DMG SHA-256.`;
+    mac27Note = `macOS ${systemLabel(newer)} CI passed mounting, installation, gateway, PTY and lifecycle but failed the WindowServer capture (${blank.map(({ phase, pixels }) => `${phase}: ${pixels} sidebar ink pixels`).join('; ')}; requires more than ${macosVisibleSidebarThreshold}). The maintainer accepted mounting, installing and visible UI at launch and after reopening from close and minimize on a physical Mac running macOS ${manualVersion} with the identical DMG SHA-256.`;
   }
 
   const checksumPath = join(directory, 'SHA256SUMS');
