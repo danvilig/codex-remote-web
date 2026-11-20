@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { basename, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { command, portableTarget } from './distribution.ts';
 import { linuxDesktopPackage } from './desktop-package.ts';
+import { installedSystemDesktopSize } from './system-desktop-size.ts';
 
 const root = resolve(import.meta.dir, '..'), target = portableTarget();
 const pkg = await Bun.file(join(root, 'package.json')).json();
@@ -25,7 +26,7 @@ await command(['bun', 'run', 'test:portable'], root, observed);
 console.log(`PASS: native ${target.label}-${target.arch} archives`);
 
 if (process.platform !== 'linux') {
-  const installer = JSON.parse((await command(['bun','scripts/installer.ts'],root,observed)).split('\n').at(-1)!);
+  const installer = JSON.parse((await command(['bun','scripts/installer.ts'],root,{...observed,timeoutMs:18*60_000})).split('\n').at(-1)!);
   process.env.CODEX_WEBUI_INSTALLER = installer.installer;
   await command(['bun','tests/browser/installer.e2e.mjs'],root,observed);
 } else {
@@ -34,12 +35,16 @@ if (process.platform !== 'linux') {
     await command(['tar', '-xf', built.archive, '-C', temp], root);
     const desktop = await linuxDesktopPackage(join(temp, `${pkg.name}-${pkg.version}`), output);
     await command(['dpkg-deb', '--info', desktop.installer], root);
-    // Native CI uses a disposable runner. Installing this exact deb also gives
-    // Chromium its root-owned sandbox helper on Ubuntu's restricted userns.
+    // Exercise the exact DEB with the system WebKitGTK on the disposable runner.
     await command(['sudo', 'dpkg', '-i', desktop.installer], root, observed);
+    const installed = '/opt/codex-remote-web-desktop';
+    let size;
     try {
-      process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE = '/opt/codex-remote-web-desktop/codex-remote-web-desktop';
-      await command(['xvfb-run', '-a', 'node', 'tests/browser/desktop-native.e2e.mjs'], root, observed);
+      size = await installedSystemDesktopSize(installed);
+      process.env.CODEX_WEBUI_DESKTOP_EXECUTABLE = join(installed, 'codex-remote-web-desktop');
+      await command(['xvfb-run', '-a', 'dbus-run-session', '--', 'node', 'tests/browser/system-desktop.e2e.mjs'], root, observed);
     } finally { await command(['sudo', 'dpkg', '-r', 'codex-remote-web-desktop'], root, observed); }
+    if (await access(join(installed, 'codex-remote-web-desktop')).then(() => true, () => false)) throw new Error('Linux installed executable remained after uninstall');
+    await writeFile(join(root, '.artifacts/linux-desktop-installation.json'), JSON.stringify({ format: 1, platform: 'linux', arch: process.arch, renderer: 'system-webkitgtk', sourceCommit: await command(['git', 'rev-parse', 'HEAD'], root), installer: basename(desktop.installer), sha256: desktop.sha256, installerBytes: (await stat(desktop.installer)).size, installed: size, nativeControls: true, gatewaySurvivedWindowExit: true, uninstall: true }, null, 2) + '\n');
   } finally { await rm(temp, { recursive: true, force: true }); }
 }

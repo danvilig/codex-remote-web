@@ -2,7 +2,7 @@ import { chmodSync, realpathSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve, sep } from 'node:path';
-import { applicationRoot, nodeRuntime, standalone, terminalWorkerPath } from '../config/paths.js';
+import { applicationRoot, nativeMacRuntime, nodeRuntime, standalone, terminalWorkerPath } from '../config/paths.js';
 
 const require = createRequire(join(applicationRoot(), 'package.json'));
 const inside = (path, root) => path === root || path.startsWith(root.endsWith(sep) ? root : root + sep);
@@ -37,8 +37,6 @@ function ensureNodePtySpawnHelper() {
 }
 
 export function createTerminalSession({ cwd, cols = 100, rows = 24, onData, onExit }) {
-  ensureNodePtySpawnHelper();
-  const worker = terminalWorkerPath();
   let session;
   let finished = false;
   const finish = (exitCode, signal = null, error = null) => {
@@ -48,7 +46,24 @@ export function createTerminalSession({ cwd, cols = 100, rows = 24, onData, onEx
     onExit({ exitCode, signal, error });
   };
   try {
-    session = spawn(nodeRuntime() || 'node', [worker, cwd, String(cols), String(rows)], {
+    if (nativeMacRuntime) {
+      const decoder = new TextDecoder();
+      session = Bun.spawn([process.env.SHELL || '/bin/zsh', '-l'], {
+        cwd, env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' },
+        terminal: { cols, rows, data(_terminal, bytes) { const output = decoder.decode(bytes, { stream: true }); if (output) onData(output); },
+          exit() { const output = decoder.decode(); if (output) onData(output); } },
+      });
+      const terminal = session.terminal;
+      session.exited.then(code => finish(code, session.signalCode), error => finish(1, null, error));
+      return {
+        pid: session.pid,
+        write: data => !terminal.closed && terminal.write(data) > 0,
+        resize: (nextCols, nextRows) => { if (terminal.closed) return false; terminal.resize(nextCols, nextRows); return true; },
+        kill: () => { if (!terminal.closed) terminal.close(); if (session.exitCode === null) session.kill(); },
+      };
+    }
+    ensureNodePtySpawnHelper();
+    session = spawn(nodeRuntime() || 'node', [terminalWorkerPath(), cwd, String(cols), String(rows)], {
       cwd,
       windowsHide: true,
       env: process.env,

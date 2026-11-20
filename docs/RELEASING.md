@@ -1,6 +1,6 @@
 # 预发布候选与发布流程
 
-目标版本为 `0.2.0-beta.1`（标签 `v0.2.0-beta.1`，仍为预发布）。本地脚本只准备候选或 CI Artifact，不自动推送、打标签、上传 GitHub Release 或重启服务。公开仓库为 `danvilig/codex-remote-web`，首次公开从独立快照开始，后续遵循 [Git 开发流程](GIT_WORKFLOW.md)：日常 PR 进入 `develop`，准备发版才创建 `release/<version>`，稳定后通过 PR 合入 `main`。标签指向已通过 Verify 的 `main` 提交，由维护者单独授权发布。
+目标版本为 `0.2.0-beta.2`（计划标签 `v0.2.0-beta.2`，仍为预发布）。本地脚本只准备候选或 CI Artifact，不自动推送、打标签、上传 GitHub Release 或重启服务。公开仓库为 `danvilig/codex-remote-web`，首次公开从独立快照开始，后续遵循 [Git 开发流程](GIT_WORKFLOW.md)：日常 PR 进入 `develop`，准备发版才创建 `release/<version>`，稳定后通过 PR 合入 `main`。标签指向已通过 Verify 的 `main` 提交，由维护者单独授权发布。
 
 ## 公开源码快照
 
@@ -42,7 +42,7 @@ bun run source:scan
 
 ## 验证与打包
 
-从快照建立 HOME 外的全新检出，使用 `.bun-version` 和 `.node-version`：
+从快照建立 HOME 外的全新检出，使用 `.bun-version`、`.node-version` 和 `native-gateway/go.mod` 指定的工具链：
 
 ```sh
 bun install --frozen-lockfile
@@ -69,9 +69,9 @@ bun run candidate:prepare
 
 已有候选目录和源码导出均拒绝覆盖；失败时保留证据，检查后从新的干净提交重试。请不要在同一提交先运行 `source:prepare` 再运行候选命令。旧 Alpha 归档保持原样，不冒充本次代码。`release:prepare --output-dir <new-directory>` 仍可用于单独打包，但来自开发检出的产物不能当作最终公开候选。
 
-生产 tar.gz 及 SHA-256 文件来自独立快照。白名单仅包括运行所需 bundle、静态资源、安装/安全文档、部署模板、冻结锁文件与生产依赖许可证清单 `third-party/dependencies.json` 和许可证/NOTICE 文本（包含 DOMPurify Apache-2.0）。README 展示图仅限 `scripts/documentation-assets.ts` 列出的六张模拟数据截图，并包含在源码和生产归档中以保持图片链接有效；图片目录说明、截图生成脚本、演示 fixture 和旧截图测试属于开发内部文件，不进入公开快照或生产归档。个人截图及其他图片仍被排除。扫描不能识别图片中的文字，展示图必须目视审阅。Docker 构建仍不包含文档图片。不包含 node_modules，原生依赖须在目标平台安装。`release.json.commit` 指向快照提交，`developmentCommit` 和 `SOURCE_PROVENANCE.json` 追溯本地开发来源。包不是独立可执行程序。
+生产 tar.gz 及 SHA-256 文件来自独立快照。Linux 原生部署包包含网络服务、PTY、网页 bundle、静态资源、文档、部署模板、许可证清单 `third-party/dependencies.json` 和相应许可证。`node_modules` 目录仅保留浏览器需要的 KaTeX 字体和样式及 xterm 样式；不包含 Bun、Node、原生 Node 插件或运行时安装步骤。README 展示图仅限 `scripts/documentation-assets.ts` 列出的模拟数据截图，源码和生产归档都保留这些截图；图片目录说明、截图生成脚本和展示 fixture 属于开发内部文件。Docker 构建不含文档图片。`release.json.commit` 指向快照提交，`developmentCommit` 和 `SOURCE_PROVENANCE.json` 追溯开发来源。
 
-`test:release` 使用单独临时输出目录和 `--allow-dirty` 验证开发构建，禁止把这种测试产物当作候选；最终候选必须 `dirty: false`、`source: public-snapshot`。在独立 HOME 外目录校验 SHA-256 并解压，执行 `bun install --production --frozen-lockfile`，从其他 cwd 启动 `dist/server.js`，检查文件、PTY、静态资源和临时连接器 worker。安装、升级与回退见 [Beta.1 发布说明](releases/0.2.0-beta.1.md)。
+`test:release` 使用独立临时输出目录和 `--allow-dirty` 验证开发构建；最终候选必须 `dirty: false`、`source: public-snapshot`。测试校验 SHA-256，在独立 HOME 外解压，从不同 cwd 启动包内 `codex-remote-web`，检查文件、真实 PTY、静态资源和临时连接器，并确认网关不调用宿主机运行时、安装器或编译器。原生包需要 `native-gateway/go.mod` 指定的 Go 版本、`.bun-version` 指定的 Bun，以及目标架构的构建环境。服务模板直接启动包内可执行文件。
 
 ## 正式升级前的互斥协议切换
 
@@ -90,16 +90,30 @@ bun run candidate:prepare
 
 ## 跨平台 GitHub Release
 
-Beta.1 目标为 Linux x64/arm64、macOS Apple Silicon（macOS 15+）和 Windows x64（Windows 11）。不构建 Intel Mac、Windows ARM64 或 musl 包；现有 Alpha 标签和附件保持不变。版本变更、发布说明与候选验证先通过稳定化 PR；发布准备不等于授权打标签或公开上传。
+Beta.2 目标为 Linux x64/arm64、macOS Apple Silicon（macOS 15+）和 Windows x64（Windows 11）。不构建 Intel Mac、Windows ARM64 或 musl 包；既有发布标签和附件保持不变。版本变更、发布说明与候选验证先通过稳定化 PR；发布准备不等于授权打标签或公开上传。
 
-`.github/workflows/platform-packages.yml` 在 PR 中生成可审阅 Artifact。发布工作流复用同一矩阵，使用原生 `ubuntu-24.04`、`ubuntu-24.04-arm`、`macos-15` 和 `windows-2025` runner。只有固定版本标签、受保护 main 历史和该提交成功的 main-push Verify 才能发布；不能使用未合并的 PR Artifact 冒充正式 Release。
+`.github/workflows/platform-packages.yml` 使用原生 `ubuntu-24.04`、`ubuntu-24.04-arm`、`macos-15` 和 `windows-2025` runner 生成候选包。发布使用受保护 `main` 上同一提交的成功 push Verify、已有版本标签，以及同仓库同提交、`run_attempt=1` 的 **Native platform packages** 完成记录；失败需新启动一次工作流，不能使用重跑产物。仓库所有者在 `main` 手动运行 **Publish platform release**，输入 `tag` 与 `candidate_run`。推送标签不会自动发布；发布流程校验并原样上传该候选包。
+
+macOS 在 `macos-15` 构建，`LSMinimumSystemVersion` 必须保持 `15.0`。macOS 27 标准运行器核对 SHA-256 后复用原始 DMG，验证挂载、复制安装、签名、启动、界面与生命周期。两端通过 `sw_vers` 断言系统版本，并对首次打开、关闭后重开及最小化后重开的窗口分别保留系统截图和像素检查结果。`validation-macos-27-arm64` 只存验收证据。仅当 CI 的安装、网关、PTY 与桌面生命周期通过，唯一失败为可见 WebKit 合成时，可以由维护者在物理 macOS 27 实机安装，确认上述三个阶段均显示界面，再输入相同 DMG 的 `macos27_manual_sha256` 和 `macos27_manual_version`（如 `27.0.1 (26A434)`）。发布说明明确区分自动化失败与人工结果。Safari 隔离与人工 Gatekeeper 允许仍需实机验收。
+
+`macOS Safari display diagnostic` 是独立的显示诊断。它截取 Safari 窗口并检查测试页面的色块，保留失败日志和实际截图。编译与安装包验收仍由 `Native platform packages` 独立判定。
 
 每个平台校验冻结安装、构建、目标架构和实际便携归档。回归覆盖异目录启动、完整页面及静态资源、受限文件读取/编辑、私有回执及 UUID 去重、持久队列访问、真实终端。Linux/macOS 验证受保护的临时连接器；Windows 的 CLI/便携包和桌面入口均使用独立 loopback 端口及每次运行的随机 Host 凭据，并校验 HTTP/WebSocket 边界，不降级为可公开访问的无认证源站。Linux 完整 Verify、依赖审计、浏览器和 Docker 验证继续运行。
 
-桌面安装包使用已通过测试的便携网关资源和锁定 Electron 构建。macOS runner 挂载 DMG、复制 `.app` 到含空格路径并运行真实桌面窗口/后台生命周期回归。Windows 使用固定 WiX 5.0.2 构建 per-user MSI，实际静默安装、检查开始菜单、运行回归、卸载并确认自有程序和快捷方式清理；另验证 NTFS 宽泛 ACL 和 junction 拒绝。Linux 两种架构安装实际 DEB，在 Xvfb 中验证沙箱窗口、退出托盘后网关继续运行、重新连接及停止，再移除 DEB。GUI 人工操作、TCC/Gatekeeper/SmartScreen 提示、真实注销/登录与公网邮箱验证仍需单独验收，自动化不冒充人工验收。
+桌面安装包使用已通过测试的便携网关。Windows/Linux 使用 Rust 1.95.0 与锁定 Cargo 依赖，分别链接系统 WebView2 和 WebKitGTK；macOS 仍使用 AppKit/WKWebView。Windows 以 WiX 5.0.2 构建 per-user MSI，实际安装、验证快捷方式和卸载；Linux 两种架构安装实际 DEB 并在 Xvfb 测试。两端使用系统无障碍接口操作安装后的窗口，报告安装包大小、逻辑字节和磁盘分配。发布验证安装报告的源提交和 SHA-256。TCC/Gatekeeper/SmartScreen 提示、真实注销/登录与公网邮箱验证仍需另行验收。
 
-Beta.1 共十个安装/归档文件：macOS DMG、Windows MSI、两种 Linux 架构的桌面 DEB、四个系统/架构的 CLI 便携包，以及两种 Linux 架构的 JS 部署包。Windows 便携包为 zip，其他归档为 tar.gz；每个文件附带同名 `.sha256`，汇总 `SHA256SUMS` 共十项。下载一个包时只核对它的校验文件，下载全部包时可用 `sha256sum -c SHA256SUMS`。GitHub 自动提供源码下载，无需重复上传源码包。
+Beta.2 共十个安装/归档文件：macOS DMG、Windows MSI、两种 Linux 架构的桌面 DEB、四个系统/架构的 CLI 便携包，以及两种 Linux 架构的原生部署包。Windows 便携包为 zip，其他归档为 tar.gz；每个文件附带同名 `.sha256`，汇总 `SHA256SUMS` 共十项。下载一个包时只核对它的校验文件，下载全部包时可用 `sha256sum -c SHA256SUMS`。GitHub 自动提供源码下载，无需重复上传源码包。
 
-本机便携构建使用 `bun run release:portable -- --output-dir <new-directory>`，必须与目标系统及架构一致；`CODEX_WEBUI_PORTABLE_ARCHIVE` 指定待验收的实际归档，`bun run test:portable` 验证不依赖宿主机 Bun/Node、安装器或编译器。包保留运行时许可证、依赖声明、`dist/portable.js` 和重链接说明。不包含 Codex、cloudflared 或凭据。
+本机便携构建使用 `bun run release:portable -- --output-dir <new-directory>`，必须与目标系统及架构一致。`CODEX_WEBUI_PORTABLE_ARCHIVE` 指定待验收的实际归档，`bun run test:portable` 验证网关不依赖宿主机 Bun/Node、安装器或编译器。归档包含原生网关及 Go 许可证，不包含 Codex、cloudflared 或凭据。
 
-桌面包暂未代码签名或公证。桌面应用在 macOS/Windows/Linux 管理固定域名网关与受保护临时访问；无桌面的自动部署仍使用 Linux 用户级 systemd。登录自启默认勾选，在首次保存时注册，注销后停止；应用不自动接管已有 headless/systemd 部署。升级前停止冲突网关并保留数据；macOS 删除应用前显式移除后台组件，Windows/Linux 卸载清理自有后台组件。安装、权限边界及限制见 [跨平台配置](deployment/PLATFORMS.md)。
+Mac 测试包在最终应用组装和权限归一化后，对全部 Mach-O、嵌套 bundle 与外层应用由内向外进行 ad-hoc 签名，再验证最终 DMG 内及复制后的签名；它仍无 Apple Developer ID 签名或公证，Windows 包也尚无发布者签名。不可将 ad-hoc 校验通过描述成 Gatekeeper 信任通过。安装窗口采用原生 Finder 固定布局，详细说明在带动效的 `Install Guide.html` 中。原生 CI 读取压缩成品的背景与图标位置并保留截图；Safari 下载与手动允许须在真实 Mac 验收。原始图标和背景由 `bun scripts/macos-artwork.ts` 使用锁定 Playwright Chromium 生成，构建仅取四个指定 PNG，不引入第三方品牌素材。桌面应用在 macOS/Windows/Linux 管理固定域名网关与受保护临时访问；无桌面的自动部署仍使用 Linux 用户级 systemd。登录自启默认勾选，在首次保存时注册，注销后停止；应用不自动接管已有 headless/systemd 部署。升级前停止冲突网关并保留数据；macOS 删除应用前显式移除后台组件，Windows/Linux 卸载清理自有后台组件。安装、权限边界及限制见 [跨平台配置](deployment/PLATFORMS.md)。
+
+### macOS 清晰度、语言与磁盘占用
+
+安装背景使用 `tiffutil -cathidpicheck` 合并 680×480 和 1360×960 两个表示，维持 680×480 点的 Finder 布局。指南图标通过 AppKit 写入挂载卷的资源叉，压缩后重新挂载验证 Finder 标志和图标数据。静态安装背景保留一行英文拖拽指引；独立指南按系统语言显示，并提供中英文切换。桌面语言选择即时持久化，同步界面、状态栏菜单、应用菜单及确认框，无需停止网关。
+
+macOS DMG 使用系统 AppKit/WKWebView，并以 Go 可执行文件提供网关、原生 PTY 和隔离工作进程。签名完成后用 `ditto --hfsCompression` 将应用复制进 HFS+ DMG。`macos-package-size.json` 记录打包前后的逻辑大小与卷内分配；`macos-installation-check.json` 记录 Finder 复制安装后的实际大小。不支持透明压缩的目标文件系统可能恢复逻辑大小。
+
+macOS 的后台助手拥有独立的 Launch Services 身份，不显示在 Dock。退出应用会关闭主界面和菜单栏图标，网关继续运行；通过 Dock、Finder 或状态菜单可重新打开主窗口。重新安装时，仍在运行的同路径旧版后台代理会在首次打开时正常停止，并由新版本按原有设置恢复。
+
+诊断页保留“停止并移除后台组件”，另提供“清理并卸载”。确认后停止自有进程、移除登录项、清除应用设置、缓存和已保存的管理令牌；Mac 应用移入废纸篓。项目、`~/.codex` 与独立 headless 部署不在删除列表内。存在远程部署或未完成的恢复时拒绝清理，用户须先在远程访问页处理，防止删除云端资源的恢复记录。后台目录仅保留无个人信息的稳定锁与代际标记，以维护并发/旧回滚令牌边界；未知文件保留。

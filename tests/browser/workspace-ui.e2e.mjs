@@ -10,7 +10,7 @@ const fixture = mkdtempSync('/tmp/codex-workspace-ui-');
 const codexHome=join(fixture,'.codex');mkdirSync(codexHome);
 const port = await new Promise((resolvePort, reject) => { const probe = createServer(); probe.once('error', reject); probe.listen(0, '127.0.0.1', () => { const port = probe.address().port; probe.close(() => resolvePort(port)); }); });
 const base = `http://127.0.0.1:${port}`;
-const server = Bun.spawn(['bun', 'run', 'src/server/index.ts'], { cwd: root, env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), HOME:fixture, CODEX_HOME: codexHome, CODEX_WEBUI_CWD: fixture, CODEX_WEBUI_REVIEW_ROOT: fixture, CODEX_WEBUI_ENABLE_TERMINAL: 'false', CODEX_WEBUI_ENABLE_REVIEW_WRITE: 'false', PATH: `${join(root, 'tests/fixtures')}${delimiter}${process.env.PATH}` }, stdout: 'ignore', stderr: 'ignore' });
+const server = Bun.spawn(['bun', 'run', 'src/server/index.ts'], { cwd: root, env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), HOME:fixture, CODEX_HOME: codexHome, CODEX_WEBUI_CWD: fixture, CODEX_WEBUI_REVIEW_ROOT: fixture, CODEX_WEBUI_FIXTURE_PROJECT_HISTORY: join(fixture, 'demo-project'), CODEX_WEBUI_ENABLE_TERMINAL: 'false', CODEX_WEBUI_ENABLE_REVIEW_WRITE: 'false', PATH: `${join(root, 'tests/fixtures')}${delimiter}${process.env.PATH}` }, stdout: 'ignore', stderr: 'ignore' });
 let browser;
 const errors = [];
 async function settingsFromAvatar(page) { await page.locator('#accountButton').click(); await page.locator('#accountSettings').click(); await page.locator('#accountMenu').waitFor({ state: 'hidden' }); }
@@ -19,7 +19,7 @@ async function fits(page, selectors) {
   assert.deepEqual(overflow, [], 'Controls must fit within the viewport');
 }
 try {
-  mkdirSync(join(fixture, 'demo-project'));
+  mkdirSync(join(fixture, 'demo-project', 'nested-folder'), { recursive: true });
   writeFileSync(join(fixture, 'demo-project', 'README.md'), '# Fixture project');
   writeFileSync(join(fixture, 'README.md'), '# Fixture root');
   writeFileSync(join(fixture,'demo-project/sample.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6wZAAAAAASUVORK5CYII=','base64'));
@@ -80,13 +80,47 @@ try {
   // Project addition lives in the section heading and persists without creating a chat.
   const projectsOpen = await page.locator('[data-section=projects]').evaluate(node => node.open);
   await page.locator('#projectButton').click();
+  await page.locator('#folderDialog[open] .folder-item').filter({ hasText: 'demo-project' }).waitFor();
+  await page.screenshot({ path: artifact('workspace-folder-picker-root.png') });
   await page.locator('#folderDialog[open] .folder-item').filter({ hasText: 'demo-project' }).click();
+  await page.locator('#folderDialog[open] .folder-item').filter({ hasText: 'nested-folder' }).waitFor();
+  assert.equal(await page.locator('#folderPathInput').inputValue(), join(fixture, 'demo-project'));
+  await page.screenshot({ path: artifact('workspace-folder-picker-entered.png') });
   await page.locator('#folderConfirm').click();
   assert.equal(await page.locator('[data-section=projects]').evaluate(node => node.open), projectsOpen);
-  assert.equal(await page.locator('.workspace-project').filter({ hasText: 'demo-project' }).count(), 1);
+  const demoProject = page.locator('.workspace-project').filter({ hasText: 'demo-project' });
+  assert.equal(await demoProject.count(), 1);
+  assert.equal(await demoProject.locator('.project-connection').textContent(), 'Local server');
+  assert.equal(await page.locator('#composerEnvironmentButton [data-server-location]').textContent(), 'Local server');
+  assert.equal(await page.locator('#settingsDialog [data-server-location]').textContent(), 'Local server');
+  await demoProject.getByRole('button', {name:'older-project-chat',exact:true}).waitFor();
+  await demoProject.getByRole('button', {name:'Load more chats',exact:true}).click();
+  await demoProject.getByRole('button', {name:'oldest-project-chat',exact:true}).click();
+  await page.locator('#conversation').getByText('Saved history for oldest-project-chat', {exact:true}).waitFor();
+  await page.screenshot({ path: artifact('workspace-project-reopened-chat.png') });
+  await page.locator('#newTask').click();
   await page.reload({ waitUntil: 'networkidle' });
-  await page.locator('.workspace-project').filter({ hasText: 'demo-project' }).waitFor();
+  await demoProject.getByRole('button', {name:'older-project-chat',exact:true}).waitFor();
   assert.match(await page.locator('#composerProjectLabel').textContent(), /demo-project/);
+  await demoProject.getByRole('button', {name:'older-project-chat',exact:true}).click();
+  const savedProjectChat = page.locator('#conversation').getByText('Saved history for older-project-chat', {exact:true});
+  await savedProjectChat.waitFor();
+  await demoProject.getByRole('button', {name:'Project options',exact:true}).click();
+  await page.getByRole('menuitem', {name:'Remove project',exact:true}).click();
+  await demoProject.waitFor({state:'detached'});
+  await savedProjectChat.waitFor();
+  assert.equal(await page.evaluate(() => localStorage.getItem('codex-webui-project')), '~');
+  await page.reload({waitUntil:'networkidle'});
+  await savedProjectChat.waitFor();
+  assert.equal(await demoProject.count(), 0);
+  assert.equal(await page.evaluate(() => localStorage.getItem('codex-webui-project')), '~');
+  await page.locator('#newTask').click();
+  assert.equal(await page.locator('#composerProjectLabel').textContent(), 'Choose project');
+  await page.locator('#projectButton').click();
+  await page.locator('#folderDialog[open] .folder-item').filter({hasText:'demo-project'}).click();
+  await page.locator('#folderDialog[open] .folder-item').filter({hasText:'nested-folder'}).waitFor();
+  await page.locator('#folderConfirm').click();
+  await demoProject.getByRole('button', {name:'older-project-chat',exact:true}).waitFor();
   // Nested organization/sort menus use actual thread data and save their selections.
   await page.locator('#projectsOptions').click();
   await page.getByRole('menuitem', { name: 'Organize sidebar', exact: true }).hover();
@@ -94,11 +128,11 @@ try {
   await page.screenshot({ path: artifact('workspace-projects-menu.png') });
   await page.getByRole('menuitemradio', { name: 'By connection', exact: true }).click();
   assert.equal(await page.locator('[data-section=projects]').getAttribute('data-grouping'), 'connection');
-  assert.equal(await page.locator('.workspace-connection > p').textContent(), 'Remote server');
+  assert.equal(await page.locator('.workspace-connection > p').textContent(), 'Local server');
   await page.locator('#projectsOptions').click();
   await page.getByRole('menuitem', { name: 'Organize sidebar', exact: true }).hover();
   await page.getByRole('menuitemradio', { name: 'In one list', exact: true }).click();
-  assert.equal(await page.locator('[data-section=projects] > .thread-item').count(), 3);
+  assert.deepEqual((await page.locator('[data-section=projects] > .thread-item').evaluateAll(rows => rows.map(row => row.dataset.id))).sort(), ['input-thread', 'older-project-chat', 'thread-A', 'thread-B']);
   await page.locator('#projectsOptions').click();
   await page.getByRole('menuitem', { name: 'Sort chats by', exact: true }).hover();
   await page.getByRole('menuitemradio', { name: 'Date created', exact: true }).click();

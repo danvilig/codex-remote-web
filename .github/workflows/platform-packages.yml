@@ -4,20 +4,25 @@ on:
     branches: [develop, main, 'release/**']
   pull_request:
   workflow_dispatch:
-  workflow_call:
-    inputs:
-      revision:
-        type: string
-        required: true
-      tag:
-        type: string
-        required: true
 concurrency:
   group: native-packages-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 permissions:
   contents: read
 jobs:
+  macos-shell-compile:
+    name: compile-native-shell-macos-27
+    runs-on: xcode-27
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Compile the system WebKit shell and external test driver for macOS 15
+        run: |
+          xcrun swiftc -O -whole-module-optimization -target arm64-apple-macosx15.0 -framework AppKit -framework WebKit desktop/macos/App.swift -o "$RUNNER_TEMP/crw-native-shell"
+          xcrun clang -dynamiclib -fobjc-arc -framework AppKit -framework WebKit -mmacosx-version-min=15.0 tests/helpers/macos-native-driver.m -o "$RUNNER_TEMP/crw-test-driver.dylib"
+
   packages:
     name: package-${{ matrix.os }}-${{ matrix.arch }}
     strategy:
@@ -33,19 +38,20 @@ jobs:
           - os: darwin
             arch: arm64
             runner: macos-15
+            macos-major: '15'
           - os: win32
             arch: x64
             runner: windows-2025
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 40
+    timeout-minutes: 45
     env:
       TARGET_OS: ${{ matrix.os }}
       TARGET_ARCH: ${{ matrix.arch }}
-      RELEASE_TAG: ${{ inputs.tag || '' }}
+      CODEX_WEBUI_EXPECT_MACOS_MAJOR: ${{ matrix.macos-major || '' }}
+      CODEX_WEBUI_EXPECT_NATIVE_GATEWAY: '1'
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.revision || '' }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -53,7 +59,21 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native-gateway/go.mod
+          cache-dependency-path: native-gateway/go.sum
+      - name: Verify native gateway
+        working-directory: native-gateway
+        run: go test -mod=readonly ./...
+      - name: Check Unix gateway for races
+        if: runner.os != 'Windows'
+        working-directory: native-gateway
+        run: go test -mod=readonly -race ./...
       - run: bun install --frozen-lockfile
+      - name: Verify actual macOS 15 baseline
+        if: runner.os == 'macOS'
+        run: bun -e 'import { macOSValidationSystem } from "./scripts/macos-validation.ts"; console.log(await macOSValidationSystem());'
       - name: Rebuild Unix terminal against pinned Node headers
         if: runner.os != 'Windows'
         shell: bash
@@ -63,10 +83,29 @@ jobs:
         run: npm rebuild node-pty
       - run: bun run check
       - run: bun test tests/unit/distribution.test.ts
+      - name: Verify macOS signature repair and tamper detection
+        if: runner.os == 'macOS'
+        run: bun test tests/live/macos-signing.test.ts
       - run: bun test tests/unit/desktop.test.ts tests/unit/desktop-session-recovery.test.ts tests/unit/desktop-uninstall.test.ts tests/unit/desktop-isolated.test.ts
-      - name: Install Linux desktop runtime dependencies
+      - name: Install pinned Rust for the system WebView shell
+        if: runner.os != 'macOS'
+        run: rustup toolchain install 1.95.0 --profile minimal
+      - name: Install Linux system WebView build and test dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libgtk-3-0t64 libnss3 libxss1 libasound2t64 libgbm1 xvfb
+        timeout-minutes: 12
+        shell: bash
+        run: |
+          sources=/etc/apt/sources.list.d/ubuntu.sources
+          if [[ "$TARGET_ARCH" == x64 ]]; then
+            # The regional EC2 archive stalled or throttled x64 runner downloads.
+            # Keep suites, components and the Ubuntu archive keyring from the runner.
+            sources=$(mktemp "$RUNNER_TEMP/ubuntu-XXXXXX.sources")
+            sed -E 's#https?://[[:alnum:]-]+\.ec2\.archive\.ubuntu\.com/ubuntu#https://archive.ubuntu.com/ubuntu#g' /etc/apt/sources.list.d/ubuntu.sources > "$sources"
+            chmod 644 "$sources"
+          fi
+          apt_options=(-o "Dir::Etc::sourcelist=$sources" -o Dir::Etc::sourceparts=- -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 -o DPkg::Lock::Timeout=60)
+          sudo apt-get "${apt_options[@]}" -o APT::Update::Error-Mode=any update
+          sudo apt-get "${apt_options[@]}" install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev libxdo-dev librsvg2-dev xvfb dbus-x11 at-spi2-core python3-pyatspi
       - name: Verify NTFS privacy boundaries
         if: runner.os == 'Windows'
         run: bun test tests/live/windows-acl.test.ts
@@ -76,12 +115,83 @@ jobs:
       - name: Build and verify actual native archives
         run: bun scripts/package-platform.ts
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: release-${{ matrix.os }}-${{ matrix.arch }}
+          overwrite: true
+          # Only the explicit archive/evidence paths below are selected.
+          # Their .artifacts parent is hidden; do not drop all matches.
+          include-hidden-files: true
           path: |
             .artifacts/release/*.tar.gz*
             .artifacts/release/*.zip*
             .artifacts/release/*.dmg*
             .artifacts/release/*.msi*
             .artifacts/release/*.deb*
+            .artifacts/macos-installer-native.png
+            .artifacts/macos-desktop-*.png
+            .artifacts/macos-installation-check.json
+            .artifacts/macos-package-size.json
+            .artifacts/macos-native-menus.json
+            .artifacts/macos-desktop-lifecycle.json
+            .artifacts/linux-desktop-installation.json
+            .artifacts/windows-desktop-installation.json
+          if-no-files-found: error
+
+  macos-27:
+    name: validate-dmg-macos-27-arm64
+    needs: packages
+    # A broken Windows/Linux package must not hide the DMG result. If the
+    # macOS 15 artifact is itself missing, download and validation still fail.
+    if: ${{ !cancelled() }}
+    # The standard xcode-27 image runs macOS 27; verify sw_vers below
+    # so a changing runner label can never masquerade as this OS coverage.
+    runs-on: xcode-27
+    timeout-minutes: 25
+    env:
+      CODEX_WEBUI_EXPECT_MACOS_MAJOR: '27'
+      CODEX_WEBUI_EXPECT_NATIVE_GATEWAY: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+      - run: bun install --frozen-lockfile
+      - name: Verify actual macOS 27 runtime
+        run: bun -e 'import { macOSValidationSystem } from "./scripts/macos-validation.ts"; console.log(await macOSValidationSystem());'
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-darwin-arm64
+          path: .artifacts/macos15-input
+      - name: Select and verify the exact macOS 15-built DMG
+        shell: bash
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          installer="codex-remote-web-${version}-macos-arm64.dmg"
+          portable="codex-remote-web-${version}-macos-arm64.tar.gz"
+          cd .artifacts/macos15-input/release
+          shasum -a 256 -c "${installer}.sha256"
+          shasum -a 256 -c "${portable}.sha256"
+          echo "CODEX_WEBUI_INSTALLER=${GITHUB_WORKSPACE}/.artifacts/macos15-input/release/${installer}" >> "$GITHUB_ENV"
+          echo "CODEX_WEBUI_PORTABLE_ARCHIVE=${GITHUB_WORKSPACE}/.artifacts/macos15-input/release/${portable}" >> "$GITHUB_ENV"
+      - name: Mount, install, launch and inspect the same DMG on macOS 27
+        run: bun tests/browser/installer.e2e.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: validation-macos-27-arm64
+          overwrite: true
+          include-hidden-files: true
+          path: |
+            .artifacts/macos-installer-native.png
+            .artifacts/macos-desktop-*.png
+            .artifacts/macos-installation-check.json
+            .artifacts/macos-package-size.json
+            .artifacts/macos-native-menus.json
+            .artifacts/macos-desktop-lifecycle.json
           if-no-files-found: error

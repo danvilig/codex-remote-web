@@ -1,13 +1,13 @@
 # 配置参考
 
-Bun 从当前工作目录读取 `.env`；生产服务用 systemd 的 `EnvironmentFile` 显式传入环境，不依赖开发目录的 `.env`。路径建议使用绝对路径。当前 `.env` 和 Codex 的配置、凭据不属于版本发布文件。
+用 Bun 运行开发源码时，从当前工作目录读取 `.env`。原生网关使用进程环境，生产服务用 systemd 的 `EnvironmentFile` 显式传入环境；在终端运行时，请在启动网关前导出所需变量。路径建议使用绝对路径。用户的 `.env` 和 Codex 配置、凭据不属于发布文件。
 
 | 配置 | 默认值 / 含义 |
 | --- | --- |
 | `HOST` / `PORT` | `127.0.0.1` / `8899` |
 | `CODEX_WEBUI_CWD` | 初始项目，默认应用安装目录 |
 | `CODEX_HOME` / `CODEX_AUTH_PATH` | 沿用用户的 Codex 状态/认证来源 |
-| `CODEX_WEBUI_APP_SERVER_MODE` | 默认 `shared`：等待并连接本机 daemon；旧值 `auto` 同样等待共享服务，不再按 socket 是否存在回退。`isolated` 显式启用独立 stdio |
+| `CODEX_WEBUI_APP_SERVER_MODE` | 默认 `shared`：连接本机 daemon。桌面应用在没有显式连接覆盖时会让已配置的 Codex CLI 启动缺失的共享 daemon；独立部署和显式 `shared` / `auto` 会等待现有服务。`isolated` 显式启用独立 stdio |
 | `CODEX_WEBUI_APP_SERVER_SOCKET` | 可选的本机 Unix socket 绝对路径；默认 `$CODEX_HOME/app-server-control/app-server-control.sock` |
 | `CODEX_WEBUI_PROJECTLESS` | 默认关闭；开启时须明确 Review 根目录 |
 | `CODEX_WEBUI_REVIEW_ROOT` | 允许 Review 操作的准确 Git 根目录 |

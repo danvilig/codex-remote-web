@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-desktop-operation"
+description = "Enables the desktop_operation command without any pre-configured scope."
+commands.allow = ["desktop_operation"]
+
+[[permission]]
+identifier = "deny-desktop-operation"
+description = "Denies the desktop_operation command without any pre-configured scope."
+commands.deny = ["desktop_operation"]

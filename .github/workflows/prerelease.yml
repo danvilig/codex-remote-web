@@ -17,6 +17,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: .bun-version
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: native-gateway/go.mod
+          cache-dependency-path: native-gateway/go.sum
       - run: bun install --frozen-lockfile
       - run: npm_config_nodedir="$(dirname "$(dirname "$(readlink -f "$(command -v node)")")")" npm rebuild node-pty
       - run: bunx playwright install --with-deps chromium webkit

@@ -20,7 +20,7 @@ export async function command(args: string[], cwd: string, options: { stream?: b
   try { [out, error, code] = await Promise.all([collect(child.stdout), collect(child.stderr), child.exited]); }
   finally { clearTimeout(timer); }
   if (timedOut) throw new Error(`${args[0]} timed out after ${options.timeoutMs}ms: ${error.slice(-4000)}\n${out.slice(-4000)}`);
-  if (code) throw new Error(`${args[0]} failed (${code}): ${error.slice(-4000)}\n${out.slice(-4000)}`);
+  if (code) throw Object.assign(new Error(`${args[0]} failed (${code}): ${error.slice(-4000)}\n${out.slice(-4000)}`), { exitCode: code });
   return out.trim();
 }
 export async function pack(stage: string, archive: string) {

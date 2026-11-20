@@ -1,9 +1,17 @@
 // Browser-owned projects, pins and sidebar organization. Native thread data stays authoritative.
-export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, onOpen, onDelete, onAddProject, onSelectProject, menu }) {
+export const absoluteProjectPath = path => typeof path === 'string' && /^(?:\/|[a-z]:[\\/]|\\\\)/i.test(path);
+
+export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, onOpen, onDelete, onAddProject, onSelectProject, onExpandProject, onMoreProjectChats, onRemoveProject, menu }) {
   const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
   const pinsKey = 'codex-remote-web-pins', sectionsKey = 'codex-remote-web-sections', projectsKey = 'codex-remote-web-projects', preferencesKey = 'codex-remote-web-sidebar';
   const saved = read(pinsKey, []), pins = new Set(Array.isArray(saved) ? saved.filter(id => typeof id === 'string') : []);
-  const registered = read(projectsKey, []), projects = new Set(Array.isArray(registered) ? registered.filter(path => typeof path === 'string' && path.startsWith('/')) : []);
+  const registered = read(projectsKey, []), projects = new Set(Array.isArray(registered) ? registered.filter(absoluteProjectPath) : []);
+  const removedKey = 'codex-remote-web-removed-projects', savedRemoved = read(removedKey, []);
+  const removed = new Set(Array.isArray(savedRemoved) ? savedRemoved.filter(absoluteProjectPath) : []);
+  const saveProjects = () => {
+    localStorage.setItem(projectsKey, JSON.stringify([...projects]));
+    localStorage.setItem(removedKey, JSON.stringify([...removed]));
+  };
   const savedSections = read(sectionsKey, {}), sections = savedSections && typeof savedSections === 'object' && !Array.isArray(savedSections) ? savedSections : {};
   const preferences = read(preferencesKey, {});
   let grouping = ['project', 'connection', 'list'].includes(preferences?.grouping) ? preferences.grouping : 'project';
@@ -47,16 +55,23 @@ export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, on
     project.open = Boolean(snapshot.query.trim()) || (sections[projectKey] ?? items.some(thread => thread.id === snapshot.activeId));
     project.addEventListener('toggle', () => { if (!project.isConnected || snapshot.query.trim()) return; sections[projectKey] = project.open; localStorage.setItem(sectionsKey, JSON.stringify(sections)); });
     const summary = document.createElement('summary'), name = document.createElement('span');
-    summary.innerHTML = `<span class="project-folder-icon">${codexIcon('folder')}${codexIcon('globe', 'project-remote-badge')}</span>`;
-    name.className = 'project-label'; name.textContent = cwd === snapshot.home ? t('Home') : cwd.split('/').filter(Boolean).at(-1) || cwd;
+    summary.innerHTML = `<span class="project-folder-icon">${codexIcon('folder')}${snapshot.localServer ? '' : codexIcon('globe', 'project-remote-badge')}</span>`;
+    name.className = 'project-label'; name.textContent = cwd === snapshot.home ? t('Home') : cwd.split(/[/\\]/).filter(Boolean).at(-1) || cwd;
     summary.title = cwd; summary.append(name);
-    const connection = document.createElement('span'); connection.className = 'project-connection'; connection.textContent = t('Remote server');
+    summary.addEventListener('click', () => { if (!project.open) onExpandProject(cwd); });
+    const connection = document.createElement('span'); connection.className = 'project-connection'; connection.textContent = t(snapshot.localServer ? 'Local server' : 'Remote server');
     const status = document.createElement('span'); status.className = `project-connection-dot${snapshot.connected ? ' connected' : ''}`; status.setAttribute('aria-label', t(snapshot.connected ? 'Codex connected' : 'Connecting'));
-    summary.append(connection, status); project.append(summary);
+    const options = document.createElement('button'); options.type = 'button'; options.className = 'project-group-options'; options.title = t('Project options'); options.setAttribute('aria-label', t('Project options')); options.setAttribute('aria-haspopup', 'menu'); options.setAttribute('aria-expanded', 'false'); options.innerHTML = codexIcon('ellipsis');
+    options.onclick = event => { event.preventDefault(); event.stopPropagation(); menu.open(options, [{ label: 'Remove project', icon: 'x', action: () => onRemoveProject(cwd) }]); };
+    summary.append(connection, status, options); project.append(summary);
     if (!items.length) {
       const start = document.createElement('button'); start.type = 'button'; start.className = 'project-new-chat'; start.textContent = t('New chat'); start.onclick = () => onSelectProject(cwd); project.append(start);
     }
     for (const item of items) project.append(threadRow(item));
+    if (!snapshot.query.trim() && snapshot.projectThreadPages?.get(cwd)?.nextCursor) {
+      const more = document.createElement('button'); more.type = 'button'; more.className = 'project-new-chat'; more.textContent = t('Load more chats');
+      more.onclick = () => onMoreProjectChats(cwd); project.append(more);
+    }
     return project;
   }
   function render(next) {
@@ -80,22 +95,27 @@ export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, on
     }
     projectSection.firstElementChild.append(actions);
     const groups = new Map();
-    for (const cwd of projects) if (!query || cwd.toLocaleLowerCase().includes(query)) groups.set(cwd, []);
-    for (const thread of threads) { const key = thread.projectless || !thread.cwd ? '' : thread.cwd; if (!key) continue; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(thread); }
+    for (const cwd of projects) if (!removed.has(cwd) && (!query || cwd.toLocaleLowerCase().includes(query))) groups.set(cwd, []);
+    for (const thread of threads) { const key = thread.projectless || !thread.cwd ? '' : thread.cwd; if (!key || removed.has(key)) continue; if (!groups.has(key)) groups.set(key, []); groups.get(key).push(thread); }
     let container = projectSection;
-    if (grouping === 'connection' && groups.size) { const connection = document.createElement('div'); connection.className = 'workspace-connection'; const label = document.createElement('p'); label.textContent = t('Remote server'); connection.append(label); projectSection.append(connection); container = connection; }
+    if (grouping === 'connection' && groups.size) { const connection = document.createElement('div'); connection.className = 'workspace-connection'; const label = document.createElement('p'); label.textContent = t(next.localServer ? 'Local server' : 'Remote server'); connection.append(label); projectSection.append(connection); container = connection; }
     if (grouping === 'list') for (const thread of threads) projectSection.append(threadRow(thread));
     else for (const [cwd, items] of groups) container.append(projectGroup(cwd, items));
     if (!groups.size && grouping !== 'list') { const empty = document.createElement('p'); empty.className = 'workspace-list-hint'; empty.textContent = t('Add a project to get started.'); projectSection.append(empty); }
     const recent = disclosure('Recents', 'recents');
-    for (const thread of threads.slice(0, 30)) recent.append(threadRow(thread));
-    if (!threads.length) { const empty = document.createElement('p'); empty.className = 'workspace-list-hint'; empty.textContent = t(query ? 'No matching tasks' : 'Your chats will appear here.'); recent.append(empty); }
+    const recentThreads = threads.filter(thread => !next.projectOnlyIds?.has(thread.id)).slice(0, 30);
+    for (const thread of recentThreads) recent.append(threadRow(thread));
+    if (!recentThreads.length) { const empty = document.createElement('p'); empty.className = 'workspace-list-hint'; empty.textContent = t(query ? 'No matching tasks' : 'Your chats will appear here.'); recent.append(empty); }
     root.replaceChildren(pinned, projectSection, recent);
   }
   return {
     render,
     toggleNotifications(){notificationSort=!notificationSort;savePreferences();syncNotificationButton();if(snapshot)render(snapshot);},
     notify(threadId){if(threadId&&threadId!==snapshot?.activeId){unread.set(threadId,Date.now());if(unread.size>500)unread.delete(unread.keys().next().value);}if(snapshot)render(snapshot);},
-    registerProject(cwd) { if (!cwd?.startsWith('/') || projects.has(cwd)) return; projects.add(cwd); localStorage.setItem(projectsKey, JSON.stringify([...projects])); if (snapshot) render(snapshot); },
+    registerProject(cwd, explicit = false) { if (!absoluteProjectPath(cwd) || (removed.has(cwd) && !explicit) || (projects.has(cwd) && !removed.has(cwd))) return; removed.delete(cwd); projects.add(cwd); saveProjects(); if (snapshot) render(snapshot); },
+    removeProject(cwd) { projects.delete(cwd); removed.add(cwd); delete sections[`project:${cwd}`]; localStorage.setItem(sectionsKey, JSON.stringify(sections)); saveProjects(); },
+    hasRemovedProject(cwd) { return removed.has(cwd); },
+    openedProjects() { return Object.keys(sections).filter(key => key.startsWith('project:') && sections[key]).map(key => key.slice(8)).filter(cwd => !removed.has(cwd)); },
+    revealProject(cwd) { sections.projects = sections[`project:${cwd}`] = true; localStorage.setItem(sectionsKey, JSON.stringify(sections)); },
   };
 }

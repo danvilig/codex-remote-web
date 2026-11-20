@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { execFile } from 'node:child_process';
 import { desktopConfig, desktopDirectory } from '../../shared/desktop-config.js';
 import { acquirePrivateLock } from '../services/private-lock.js';
-import { applicationRoot, gatewayCommand, nodeRuntime, standalone } from '../config/paths.js';
+import { applicationRoot, gatewayCommand, nativeMacRuntime, nodeRuntime, standalone } from '../config/paths.js';
 import { codexCommand } from '../config/codex-command.js';
 import { localSetupRequest } from '../setup/http.js';
 import { readJsonBody } from '../http/body.ts';
@@ -16,6 +16,7 @@ import { SetupError } from '../setup/cloudflare.js';
 import { privateDirectory, readPrivate, writePrivate } from './private-store.js';
 import { GatewayProcess } from './process.js';
 import { DesktopDeployment } from './deployment.js';
+import { assertDesktopCleanup } from './cleanup.js';
 import { DesktopConnector } from './connector.js';
 
 const exec = promisify(execFile);
@@ -36,7 +37,8 @@ export async function startDesktopAgent({ home = homedir(), directory = desktopD
     for (const key of ['HOME', 'USERPROFILE', 'SystemRoot', 'APPDATA', 'LOCALAPPDATA', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL', 'SSL_CERT_FILE', 'SSL_CERT_DIR', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY', 'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'CODEX_HOME', 'CODEX_AUTH_PATH', 'CODEX_WEBUI_APP_SERVER_MODE', 'CODEX_WEBUI_APP_SERVER_SOCKET']) if (env[key]) result[key] = env[key];
     result.HOME = home;
     result.PATH = [env.PATH, join(home, '.local/bin'), join(home, '.bun/bin'), ...(process.platform === 'darwin' ? ['/opt/homebrew/bin', '/usr/local/bin'] : []), ...(env.APPDATA ? [join(env.APPDATA, 'npm')] : [])].filter(Boolean).join(delimiter);
-    Object.assign(result, { HOST: '127.0.0.1', PORT: String(config.port), CODEX_WEBUI_CWD: config.cwd, CODEX_WEBUI_REVIEW_ROOT: config.cwd, CODEX_WEBUI_ENABLE_TERMINAL: String(config.terminal), CODEX_WEBUI_NODE: nodeRuntime(env), CODEX_WEBUI_AUTH_MODE: 'local' });
+    Object.assign(result, { HOST: '127.0.0.1', PORT: String(config.port), CODEX_WEBUI_CWD: config.cwd, CODEX_WEBUI_REVIEW_ROOT: config.cwd, CODEX_WEBUI_ENABLE_TERMINAL: String(config.terminal), CODEX_WEBUI_AUTH_MODE: 'local' });
+    if (!nativeMacRuntime) result.CODEX_WEBUI_NODE = nodeRuntime(env);
     if (config.codex) result.CODEX_WEBUI_CODEX = config.codex;
     if (config.cloudflared) result.CODEX_WEBUI_CLOUDFLARED = config.cloudflared;
     return result;
@@ -71,7 +73,7 @@ export async function startDesktopAgent({ home = homedir(), directory = desktopD
     config = { ...config, enabled: false }; await writePrivate(configPath, config);
   }
   async function status() {
-    return { config, local: local.status(), protected: protectedGateway.status(), connector: { running: !!connector.workerProcess }, url: `http://127.0.0.1:${config.port}`, events: [...events], setup: { ...setup.status(), busy: setup.busy } };
+    return { ...(nativeMacRuntime ? { runtime: 'macos-native' } : {}), config, local: local.status(), protected: protectedGateway.status(), connector: { running: !!connector.workerProcess }, url: `http://127.0.0.1:${config.port}`, events: [...events], setup: { ...setup.status(), busy: setup.busy } };
   }
   async function setupRequest(path, body) {
     const [action, query] = path.split('?');
@@ -118,7 +120,14 @@ export async function startDesktopAgent({ home = homedir(), directory = desktopD
     busy = true;
     try {
       if (action === 'setup') return await setupRequest(body.path, body.body);
+      if (action === 'language') {
+        if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length !== 1 || !Object.hasOwn(body, 'language')) throw new SetupError('Invalid desktop preferences');
+        const next = desktopConfig({ ...config, language: body.language }, home);
+        await writePrivate(configPath, next); config = next;
+        return status();
+      }
       if (setup.busy) throw new SetupError('Wait for the remote access operation', 409);
+      if (action === 'cleanupCheck') { await assertDesktopCleanup(directory); return { ready: true }; }
       if (action === 'validateConfig') return await validateConfig(body);
       if (action === 'config') {
         const next = await validateConfig(body);

@@ -35,6 +35,11 @@ const i18n=globalThis.__codexWebuiI18n||createI18n();
 globalThis.__codexWebuiI18n=i18n;
 globalThis.__codexWebuiDomI18n=globalThis.__codexWebuiDomI18n||createDomI18n(i18n);
 const t=(message,values)=>i18n.t(message,values);
+const localServer=/^(?:localhost\.?|\[::1\]|127(?:\.\d{1,3}){3})$/i.test(location.hostname);
+const serverLabel=()=>t(localServer?'Local server':'Remote server');
+// The protocol defaults to CLI and VS Code only. Include other top-level chats,
+// while leaving internal subagent threads out of the ordinary history lists.
+const threadListOptions={modelProviders:[],sourceKinds:['cli','vscode','appServer','exec','unknown'],sortKey:'recency_at',sortDirection:'desc'};
 const remoteAccessWizard = mountRemoteAccess(document.querySelector('#remoteAccessSetup'), { t });
 addEventListener('codex-webui:remote-access', () => remoteAccessWizard.open());
 addEventListener('codex-webui:remote-access-close', () => remoteAccessWizard.close());
@@ -64,6 +69,7 @@ const browserState={history:[],index:-1,loadTimer:null,loadRequest:0};
 const sidePanelTabs=createSidePanelTabs({container:$('.side-panel-tabs'),t,icon:codexIcon,onSelect:view=>setSidePanelView(view),onClose:closeSidePanelTool,onEmpty:()=>setSidePanelOpen(false)});
 const accountRequestGate=createLatestRequestGate();
 const workspaceContextRequestGate=createLatestRequestGate();
+const folderRequestGate=createLatestRequestGate();
 const permissionProfileRequestGate=createLatestRequestGate();
 const threadNavigationRequestGate=createLatestRequestGate();
 const autocompleteState={match:null,items:[],selected:0,requestId:0,message:''};
@@ -142,8 +148,8 @@ function handle(message){
   if(message.type==='delivery/changed'||message.type==='submission/changed'){composerDelivery?.notification();if(message.type==='submission/changed'&&message.receipt?.status==='accepted'&&message.receipt?.threadId===state.active?.id)scheduleActiveThreadSync(0);return;}
   if(message.type==='auth/required'||message.type==='bridge/reconnect'){void renewAccessTransport();return;}
   if(message.type==='bridge/status'){
-    if(message.status==='connected'){const shouldLoad=!state.connected;state.connected=true;setStatus('connected','Codex connected');dispatchEvent(new Event('codex-webui:bridge-connected'));if(shouldLoad){loadInitial().then(syncPendingRequests).then(()=>{composerDelivery?.sync();accessSession?.restoreDraft(state)})}}
-    else{state.connected=false;invalidatePendingApprovals();setStatus('connecting','Connecting to Codex')}
+    if(message.status==='connected'){const shouldLoad=!state.connected;state.connected=true;setStatus('connected','Codex connected');dispatchEvent(new Event('codex-webui:bridge-connected'));if(shouldLoad){renderThreads();loadInitial().then(syncPendingRequests).then(()=>{composerDelivery?.sync();accessSession?.restoreDraft(state)})}}
+    else{const wasConnected=state.connected;state.connected=false;invalidatePendingApprovals();setStatus('connecting','Connecting to Codex');if(wasConnected){projectThreadRequests.clear();renderThreads()}}
     return;
   }
   if(message.type==='rpc/result'||message.type==='rpc/error'){
@@ -160,9 +166,14 @@ function setStatus(kind,text){
 }
 async function loadInitial(refreshAccount=false){
   loadAccount(refreshAccount);
-  try{const [models,threads,profiles]=await Promise.all([rpc('model/list',{limit:50}),rpc('thread/list',{limit:50,sortKey:'recency_at',sortDirection:'desc'}),rpc('permissionProfile/list',{cwd:permissionProfileCwd(),limit:100}).catch(()=>({data:[]}))]);
-    state.models=filterAppModels(models.data||[]);renderModels();applyThreadSummaries(threads.data||[]);setPermissionProfiles(profiles.data||[]);scheduleThreadListRefresh();const rememberedThread=localStorage.getItem(ACTIVE_THREAD_STORAGE_KEY);if(!state.active&&rememberedThread)await openThread(rememberedThread);
-  }catch(e){if(!e?.silentTransportSwitch)toast(e.message);}
+  const cwd=state.workspaceContext?.cwd;
+  if(cwd)void loadProjectThreads(cwd,{refresh:true});
+  void (async()=>{for(const path of workspaceNavigation.openedProjects())if(path!==cwd&&state.connected)await loadProjectThreads(path,{refresh:true});})();
+  await Promise.all([
+    rpc('model/list',{limit:50}).then(models=>{state.models=filterAppModels(models.data||[]);renderModels()}).catch(()=>{}),
+    rpc('thread/list',{...threadListOptions,limit:50},{timeoutMs:30_000}).then(async threads=>{applyThreadSummaries(threads.data||[]);const remembered=localStorage.getItem(ACTIVE_THREAD_STORAGE_KEY);if(!state.active&&remembered)await openThread(remembered)}).catch(error=>{if(!error?.silentTransportSwitch)toast(t('Could not load recent chats'))}).finally(()=>scheduleThreadListRefresh()),
+    loadPermissionProfiles(),
+  ]);
 }
 async function loadAccount(refresh=false){
   const requestId=accountRequestGate.next();
@@ -246,18 +257,76 @@ function openPermissionMenu(){closeModelMenu();syncPermissionControl();$('#permi
 function closePermissionMenu(){const menu=$('#permissionMenu');menu.hidden=true;$('#modeButton').setAttribute('aria-expanded','false')}
 function togglePermissionMenu(){if($('#permissionMenu').hidden)openPermissionMenu();else closePermissionMenu()}
 function choosePermissionMode(mode){closePermissionMenu();if(mode==='full-access'&&state.permissionMode!=='full-access'){pendingFullAccessAction='select';const dialog=$('#fullAccessDialog');if(!dialog.open)dialog.showModal();return}setPermissionMode(mode)}
-async function loadFolders(path=folderBrowse.path){const list=$('#folderList');list.innerHTML='<div class="list-state">Loading folders…</div>';try{const response=await fetch(`/api/folders?path=${encodeURIComponent(path)}`),data=await response.json();if(!response.ok)throw new Error(data.error||'Cannot browse folder');folderBrowse={path:data.path,parent:data.parent,selected:data.path};$('#folderPathInput').value=data.path;$('#folderSelection').textContent=data.path;$('#folderConfirm').disabled=false;$('#folderUp').disabled=!data.parent;list.innerHTML='';for(const folder of data.folders){const b=document.createElement('button');b.type='button';b.className='folder-item';b.innerHTML=`${icons.file}<span>${escapeHtml(folder.name)}</span>`;b.ondblclick=()=>loadFolders(folder.path);b.onclick=()=>{folderBrowse.selected=folder.path;$('#folderSelection').textContent=folder.path;$('#folderConfirm').disabled=false;list.querySelectorAll('.folder-item').forEach(x=>x.classList.remove('selected'));b.classList.add('selected')};list.append(b)}if(!data.folders.length)list.innerHTML='<div class="list-state">No subfolders</div>'}catch(e){list.innerHTML=`<div class="list-state">${escapeHtml(e.message)}</div>`}}
+async function loadFolders(path=folderBrowse.path){
+  const request=folderRequestGate.next(),list=$('#folderList');
+  const current=()=>folderRequestGate.isCurrent(request)&&$('#folderDialog').open;
+  folderBrowse.selected=null;
+  $('#folderConfirm').disabled=true;
+  $('#folderSelection').textContent=t('No folder selected');
+  $('#folderPathInput').value=path;
+  list.innerHTML=`<div class="list-state">${escapeHtml(t('Loading folders…'))}</div>`;
+  try{
+    const response=await fetch(`/api/folders?path=${encodeURIComponent(path)}`),data=await response.json();
+    if(!response.ok)throw new Error(data.error||t('Cannot browse folder'));
+    if(!current())return;
+    folderBrowse={path:data.path,parent:data.parent,selected:data.path};
+    $('#folderPathInput').value=data.path;
+    $('#folderSelection').textContent=data.path;
+    $('#folderConfirm').disabled=false;
+    $('#folderUp').disabled=!data.parent;
+    list.replaceChildren();
+    for(const folder of data.folders){
+      const button=document.createElement('button');button.type='button';button.className='folder-item';
+      button.innerHTML=`${icons.file}<span>${escapeHtml(folder.name)}</span>`;
+      button.onclick=()=>{
+        const hadFocus=document.activeElement===button;
+        loadFolders(folder.path).then(loaded=>{if(loaded&&hadFocus&&document.activeElement===document.body)(list.querySelector('button')||$('#folderConfirm')).focus()});
+      };
+      list.append(button);
+    }
+    if(!data.folders.length)list.innerHTML=`<div class="list-state">${escapeHtml(t('No subfolders'))}</div>`;
+    return true;
+  }catch(error){if(current())list.innerHTML=`<div class="list-state">${escapeHtml(error.message)}</div>`}
+}
 function openFolderPicker(){const dialog=$('#folderDialog');folderBrowse.selected=null;dialog.showModal();loadFolders(state.projectless?(state.config.defaultCwd||'~/projects'):($('#projectPath').textContent||'~/projects'));$('#projectlessOption').classList.toggle('selected',state.projectless)}
 async function syncWorkspaceContext(path){const requestId=workspaceContextRequestGate.next();try{const response=await fetch(`/api/workspace/context?cwd=${encodeURIComponent(path)}`,{cache:'no-store'}),context=await response.json();if(!response.ok)throw new Error(context.error||'Workspace context unavailable');if(!workspaceContextRequestGate.isCurrent(requestId)||state.projectless)return;state.workspaceContext=context;if(!state.active)showEmpty()}catch{if(workspaceContextRequestGate.isCurrent(requestId)&&!state.projectless){state.workspaceContext={cwd:path,project:path.split('/').filter(Boolean).at(-1)||path,environment:'Local',branch:'No branch'};if(!state.active)showEmpty()}}}
 function syncProjectControl(){const label=$('#composerProjectLabel');$('#composerWorkspaceBar').hidden=Boolean(state.active);label.textContent=state.projectless?t('Choose project'):($('#projectName').textContent||t('Choose project'))}
 function refreshComposerPlaceholder(){const followUpType=state.active?(state.active.source==='cloud'?'cloud':'local'):undefined;$('#prompt').placeholder=resolveComposerPlaceholder({followUpType,composerMode:state.composerMode,cloudStartingState:state.cloudStartingState,isBackgroundSubagentsPanelVisible:state.backgroundAgentsVisible,isGoalModeActive:state.goalMode,isPlanModeActive:state.planMode,placeholderText:state.placeholderText,isHome:!state.active})}
-function setWorkspace(path){const name=path.split('/').filter(Boolean).at(-1)||path,resolved=path.replace(/^~/,state.config.home);workspaceContextRequestGate.next();state.projectless=false;state.workspaceContext={cwd:resolved,project:name,environment:'Local',branch:null};$('#projectPath').textContent=shortPath(path);$('#projectName').textContent=name;localStorage.setItem('codex-webui-project',path);switchNewTaskDraft();syncProjectControl();if(!state.active)showEmpty();if(!$('#summaryPanel').hidden)syncSummaryPanel();workspaceNavigation.registerProject(resolved);syncWorkspaceContext(resolved);dispatchEvent(new Event('codex-webui:preferences'));dispatchEvent(new Event('codex-webui:workspace-change'));if(state.connected)loadPermissionProfiles()}
+function setWorkspace(path,{explicit=false}={}){
+  const name=path.split(/[/\\]/).filter(Boolean).at(-1)||path,resolved=path.replace(/^~/,state.config.home);
+  const removed=!explicit&&workspaceNavigation.hasRemovedProject(resolved);
+  if(removed&&!state.active){setProjectless();return}
+  workspaceContextRequestGate.next();state.projectless=false;state.workspaceContext={cwd:resolved,project:name,environment:'Local',branch:null};$('#projectPath').textContent=shortPath(path);$('#projectName').textContent=name;
+  // An existing chat can still use its directory after the project is removed.
+  if(!removed)localStorage.setItem('codex-webui-project',path);
+  switchNewTaskDraft();syncProjectControl();if(!state.active)showEmpty();if(!$('#summaryPanel').hidden)syncSummaryPanel();workspaceNavigation.registerProject(resolved,explicit);syncWorkspaceContext(resolved);dispatchEvent(new Event('codex-webui:preferences'));dispatchEvent(new Event('codex-webui:workspace-change'));if(state.connected)loadPermissionProfiles();
+}
 function setProjectless(){workspaceContextRequestGate.next();state.projectless=true;state.workspaceContext=null;$('#projectPath').textContent='~';$('#projectName').textContent=t('Tasks');localStorage.setItem('codex-webui-project','~');switchNewTaskDraft();syncProjectControl();if(!state.active){$('#threadPath').textContent='';showEmpty()}if(!$('#summaryPanel').hidden)syncSummaryPanel();if(state.connected)loadPermissionProfiles();dispatchEvent(new Event('codex-webui:workspace-change'))}
 function resetReviewState(){state.turnDiffs.clear();state.activeReview=null;reviewPatchState='undo';renderChanges()}
 function clearConversationRuntime(){runtimeProgress.clear();state.requestCards.clear();for(const animation of state.motion.values())animation?.destroy?.();state.items.clear();state.turns.clear();state.activities.clear();state.activityItems.clear();state.sideTasks.clear();state.dividers.clear();state.motion.clear();renderSideTasks()}
 function rememberActiveThread(id){if(id)localStorage.setItem(ACTIVE_THREAD_STORAGE_KEY,String(id));else localStorage.removeItem(ACTIVE_THREAD_STORAGE_KEY)}
-function startNewTask(){conversationLoad?.finish();conversationLoad=null;saveComposerDraft();threadNavigationRequestGate.next();if(mobileSidebarEnabled())setSidebarOpen(false);resetActiveThreadSync();setActiveTurnId('');rememberActiveThread(null);state.active=null;state.goalMode=false;state.composerMentions=[];state.turnWindow=null;clearConversationRuntime();state.changes.clear();resetReviewState();closeComposerAutocomplete();$('#threadTitle').textContent=t('New task');$('#threadPath').textContent=state.projectless?'':$('#projectPath').textContent;restoreComposerDraft();setPlanMode(false);syncProjectControl();renderContextTray();renderContextUsage();resizePrompt();if(!$('#summaryPanel').hidden)syncSummaryPanel();showEmpty();renderThreads();$('#prompt').focus();dispatchEvent(new Event('codex-webui:workspace-change'))}
-function useSelectedFolder(){if(!folderBrowse.selected)return;setWorkspace(folderBrowse.selected);$('#folderDialog').close();startNewTask()}
+function startNewTask(){conversationLoad?.finish();conversationLoad=null;saveComposerDraft();threadNavigationRequestGate.next();if(mobileSidebarEnabled())setSidebarOpen(false);resetActiveThreadSync();setActiveTurnId('');rememberActiveThread(null);state.active=null;if(workspaceNavigation.hasRemovedProject(state.workspaceContext?.cwd))setProjectless();state.goalMode=false;state.composerMentions=[];state.turnWindow=null;clearConversationRuntime();state.changes.clear();resetReviewState();closeComposerAutocomplete();$('#threadTitle').textContent=t('New task');$('#threadPath').textContent=state.projectless?'':$('#projectPath').textContent;restoreComposerDraft();setPlanMode(false);syncProjectControl();renderContextTray();renderContextUsage();resizePrompt();if(!$('#summaryPanel').hidden)syncSummaryPanel();showEmpty();renderThreads();$('#prompt').focus();dispatchEvent(new Event('codex-webui:workspace-change'))}
+function useSelectedFolder(){
+  const cwd=folderBrowse.selected;
+  if(!cwd)return;
+  setWorkspace(cwd,{explicit:true});
+  workspaceNavigation.revealProject(cwd);
+  $('#folderDialog').close();
+  startNewTask();
+  if(mobileSidebarEnabled())setSidebarOpen(true);
+  loadProjectThreads(cwd,{refresh:true,reportError:true});
+}
+function removeWorkspaceProject(cwd){
+  workspaceNavigation.removeProject(cwd);
+  projectThreadRequests.delete(cwd);
+  projectThreadPages.delete(cwd);
+  const savedProject=localStorage.getItem('codex-webui-project')?.replace(/^~/,state.config.home);
+  if(savedProject===cwd)localStorage.setItem('codex-webui-project','~');
+  if(!state.active&&state.workspaceContext?.cwd===cwd)setProjectless();
+  applyThreadSummaries(undefined,{render:true});
+  $('#projectButton')?.focus({preventScroll:true});
+  toast(t('Project removed. Files and chats are kept.'));
+}
 function useProjectless(){setProjectless();$('#folderDialog').close();startNewTask()}
 function titleOf(t){return (t.name||t.preview||'Untitled task').replace(/\s+/g,' ').trim().slice(0,110)}
 function shortPath(path=''){const home=state.config.home;return home&&path.startsWith(home)?'~'+path.slice(home.length):path}
@@ -268,6 +337,8 @@ async function deleteThread(thread){
   try{
     await rpc('thread/delete',{threadId:thread.id});
     const wasActive=state.active?.id===thread.id;
+    recentThreadSummaries=recentThreadSummaries.filter(item=>item.id!==thread.id);
+    for(const page of projectThreadPages.values())page.data=page.data.filter(item=>item.id!==thread.id);
     state.threads=state.threads.filter(item=>item.id!==thread.id);
     await refreshThreadList();
     if(wasActive)startNewTask();else renderThreads();
@@ -275,7 +346,7 @@ async function deleteThread(thread){
     toast(t('Thread deleted'));
   }catch(error){console.error('Could not delete thread',error);toast(t('Could not delete thread'))}
 }
-const workspaceNavigation = createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, onOpen: id => { if(mobileSidebarEnabled())setSidebarOpen(false);openThread(id) }, onDelete: deleteThread, menu: workspaceMenu, onAddProject: openFolderPicker, onSelectProject: cwd => { setWorkspace(cwd); startNewTask(); if(mobileSidebarEnabled())setSidebarOpen(false) } });
+const workspaceNavigation = createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, onOpen: id => { if(mobileSidebarEnabled())setSidebarOpen(false);openThread(id) }, onDelete: deleteThread, menu: workspaceMenu, onAddProject: openFolderPicker, onSelectProject: cwd => { setWorkspace(cwd); startNewTask(); if(mobileSidebarEnabled())setSidebarOpen(false) }, onExpandProject: cwd => loadProjectThreads(cwd,{reportError:true}), onMoreProjectChats: cwd => loadProjectThreads(cwd,{more:true,reportError:true}), onRemoveProject:removeWorkspaceProject });
 const workspaceChrome = createWorkspaceChrome({ rpc, $, state, t, codexIcon, menu: workspaceMenu, returnToWorkspace, openSettings, openReview: () => openReviewPanel(), openBrowser: () => openUtilityPanel('browser'), openFolderPicker, startNewTask, setWorkspace: path => path === '~' ? setProjectless() : setWorkspace(path), openThread, searchChats: () => { setSidebarOpen(true); setSidebarSearchOpen(true) }, openImageViewer });
 
 async function forkRequest(payload){const response=await fetch('/api/conversation/fork',{method:'POST',headers:{'content-type':'application/json','x-workspace-request':'1'},body:JSON.stringify(payload)});const result=await response.json();if(!response.ok)throw new Error(t(result.error));return result;}
@@ -288,7 +359,7 @@ function beginSideChat(text=''){sidePanelTabs.close('side-chat');openUtilityPane
 document.querySelector('#conversation').addEventListener('contextmenu',event=>{const selection=getSelection(),text=selection?.toString().trim();if(!text||text.length>16000||!document.querySelector('#conversation').contains(selection.anchorNode)||!document.querySelector('#conversation').contains(selection.focusNode))return;event.preventDefault();workspaceMenu.open(event.target instanceof Element?event.target:document.querySelector('#conversation'),[{label:'Ask in side chat',icon:'messageSquare',action:()=>beginSideChat(`> ${text.replaceAll('\n','\n> ')}\n\n`)}]);});
 addEventListener('codex-webui:side-image',event=>{const {src,title,path}=event.detail;openImageViewer(src,title,path);});
 addEventListener('codex-webui:open-side-chat',event=>{const thread=event.detail;sidePanelTabs.close('side-chat');if(overlayPanelsEnabled())setSidePanelOpen(false);void openThread(thread.id,thread);});
-const projectOptions=createComposerProjects({anchor:$('#composerProjectButton'),state,t,icon:codexIcon,choose:path=>{startNewTask();path==='~'?setProjectless():setWorkspace(path);},add:openFolderPicker});
+const projectOptions=createComposerProjects({anchor:$('#composerProjectButton'),state,t,icon:codexIcon,choose:path=>{startNewTask();path==='~'?setProjectless():setWorkspace(path);},add:openFolderPicker,isRemoved:path=>workspaceNavigation.hasRemovedProject(path)});
 composerDelivery=createServerComposerDelivery({anchor:$('#sendButton'),host:$('#composer'),t,icon:codexIcon,menu:workspaceMenu,rpc,importLegacy:importLegacyQueuedMessage,context:()=>({threadId:state.active?.id,turnId:activeTurnId(),ready:state.connected&&!conversationLoad&&!composerSubmission&&!accessSession?.required}),onError:error=>toast(t(threadInputErrorMessage(error)),5200),onChange:syncComposerSubmitState});
 const composerAttachments=createComposerAttachments({state,t,menu:workspaceMenu,anchor:document.querySelector('[data-composer-control="add"]'),prompt:$('#prompt'),draftKey:()=>composerDraftKey,toast,setBusy:busy=>{state.attachmentsUploading=busy;syncComposerSubmitState();},openFiles:()=>openUtilityPanel('files'),togglePlan:()=>setPlanMode(!state.planMode),extraItems:()=>composerTools.menuItems(),applyToDraft:(key,mentions)=>{saveComposerDraft();const draft=composerDrafts.get(key);draft.mentions=[...new Map([...draft.mentions,...mentions].map(item=>[item.id,item])).values()];composerDrafts.set(key,draft);if(composerDraftKey===key)restoreComposerDraft(key);}});
 const fileBrowser=createFileExplorer({container:$('#sideFileContent'),search:$('#sideFileSearch'),cwd:()=>state.active?.cwd||(state.projectless?state.config.home:state.workspaceContext?.cwd||state.config.defaultCwd),t,menu:workspaceMenu,toast,reference:text=>{const input=$('#prompt');input.value+=`${input.value?' ':''}${text} `;input.dispatchEvent(new Event('input',{bubbles:true}));if(overlayPanelsEnabled())setSidePanelOpen(false);input.focus();},openImage:openImageViewer,openChat:openThread,rpc,isCurrent:()=>!$('#sidePanel').hidden&&!$('#utilityPanelContent').hidden});
@@ -298,7 +369,12 @@ const currentFilesWorkspaceKey=()=>`${state.active?.id||''}:${state.active?.cwd|
 function refreshWorkspaceFiles(){const key=currentFilesWorkspaceKey();if(key!==filesWorkspaceKey)$('#sideFileSearch').value='';filesWorkspaceKey=key;void fileBrowser.open('files')}
 $('#sideFileSearch').oninput=()=>fileBrowser.search();
 addEventListener('codex-webui:workspace-change',()=>{if(!$('#sidePanel').hidden&&!$('#utilityPanelContent').hidden&&filesWorkspaceKey!==currentFilesWorkspaceKey())refreshWorkspaceFiles();});
-function renderThreads(){workspaceChrome.recordNavigation(state.active?.id, state.projectless ? '~' : state.workspaceContext?.cwd);workspaceNavigation.render({ threads: state.threads, activeId: state.active?.id, query: $('#threadSearch').value, pending: new Set([...state.serverRequests.values()].map(item=>item.params?.threadId).filter(Boolean)), home: state.config.home, connected: state.connected })}
+function renderThreads(){
+  workspaceChrome.recordNavigation(state.active?.id, state.projectless ? '~' : state.workspaceContext?.cwd);
+  const projectOnlyIds=new Set([...projectThreadPages.values()].flatMap(page=>page.data.map(thread=>thread.id)));
+  for(const thread of recentThreadSummaries)projectOnlyIds.delete(thread.id);
+  workspaceNavigation.render({ threads: state.threads, projectThreadPages, projectOnlyIds, activeId: state.active?.id, query: $('#threadSearch').value, pending: new Set([...state.serverRequests.values()].map(item=>item.params?.threadId).filter(Boolean)), home: state.config.home, connected: state.connected, localServer });
+}
 
 async function openThread(id,fallbackSummary=null){
   const navigationId=threadNavigationRequestGate.next();
@@ -306,7 +382,7 @@ async function openThread(id,fallbackSummary=null){
   const listedSummary=state.threads.find(x=>x.id===id),summary=listedSummary||fallbackSummary,deferTransition=Boolean(fallbackSummary&&!listedSummary);
   const current=()=>threadNavigationRequestGate.isCurrent(navigationId);
   const beginLoading=()=>{conversationLoad=createConversationLoading($('#conversation'),{t,retry:()=>void openThread(id,fallbackSummary)});syncComposerSubmitState();return conversationLoad};
-  if(!deferTransition){resetActiveThreadSync();setActiveTurnId('');rememberActiveThread(id);saveComposerDraft();state.active=summary||{id,cwd:state.workspaceContext?.cwd||state.config.defaultCwd};state.goalMode=false;restoreComposerDraft(threadDraftKey(id));state.turnWindow=null;clearConversationRuntime();state.changes.clear();resetReviewState();closeComposerAutocomplete();renderContextTray();renderContextUsage();renderHeader();renderThreads();beginLoading()}
+  if(!deferTransition){resetActiveThreadSync();setActiveTurnId('');rememberActiveThread(id);saveComposerDraft();state.active=summary||{id};state.goalMode=false;restoreComposerDraft(threadDraftKey(id));state.turnWindow=null;clearConversationRuntime();state.changes.clear();resetReviewState();closeComposerAutocomplete();renderContextTray();renderContextUsage();renderHeader();renderThreads();beginLoading()}
   try{
     const result=await rpc('thread/read',{threadId:id,includeTurns:true},{timeoutMs:100000}),thread={...(summary||{}),...result.thread};
     if(!current())return false;
@@ -340,7 +416,7 @@ async function openThread(id,fallbackSummary=null){
 }
 function appendOlderMessagesButton(thread,root){const more=document.createElement('button');more.className='load-older';more.textContent=t('Load earlier messages ({count})',{count:state.turnWindow.hiddenCount});more.onclick=()=>renderThread(thread,DEFAULT_TURN_PAGE_SIZE);root.append(more)}
 
-function renderHeader(){const t=state.active;if(!t)return;$('#threadTitle').textContent=titleOf(t);if(t.projectless){state.projectless=true;state.workspaceContext=null;$('#projectName').textContent='Tasks';$('#projectPath').textContent='~';$('#threadPath').textContent=''}else{$('#threadPath').textContent=shortPath(t.cwd);setWorkspace(t.cwd||state.config.home)}syncProjectControl();dispatchEvent(new Event('codex-webui:workspace-change'));refreshComposerPlaceholder();$('#threadSource').textContent=t.source||'local'}
+function renderHeader(){const t=state.active;if(!t)return;$('#threadTitle').textContent=titleOf(t);if(t.projectless){state.projectless=true;state.workspaceContext=null;$('#projectName').textContent='Tasks';$('#projectPath').textContent='~';$('#threadPath').textContent=''}else{$('#threadPath').textContent=shortPath(t.cwd);if(t.cwd)setWorkspace(t.cwd)}syncProjectControl();dispatchEvent(new Event('codex-webui:workspace-change'));refreshComposerPlaceholder();$('#threadSource').textContent=t.source||'local'}
 function renderThread(thread,loadMore=0){const root=$('#conversation'),turns=thread.turns||[];state.turnWindow=createTurnWindow(turns,DEFAULT_TURN_PAGE_SIZE,state.turnWindow?.threadId===thread.id?state.turnWindow.start:undefined,loadMore);state.turnWindow.threadId=thread.id;clearConversationRuntime();root.innerHTML='';if(state.turnWindow.hiddenCount)appendOlderMessagesButton(thread,root);for(const turn of state.turnWindow.visible)renderTurn(turn,root);if(!root.children.length)showEmpty();else if(!loadMore)scrollBottom()}
 function showEmpty(){ $('#conversation').innerHTML=`<div class="empty-state" id="emptyState">${codexInterfaceMark('empty-codex-mark')}<h1>${t('What should we build?')}</h1></div>`; }
 
@@ -581,10 +657,37 @@ function invalidatePendingApprovals(){
   if(state.serverRequests.size)toast(t('Pending approvals from the earlier connection are no longer actionable. Native approval recovery may be unavailable.'),7000);
   for(const id of [...state.serverRequests.keys()])removeServerRequest(id);
 }
-function threadSummarySignature(threads){return JSON.stringify(threads.map(thread=>[thread.id,thread.updatedAt,thread.recencyAt,thread.status]))}
-function applyThreadSummaries(threads){const nextSignature=threadSummarySignature(threads),changed=nextSignature!==threadListSignature;threadListSignature=nextSignature;state.threads=threads;const summary=state.active&&threads.find(thread=>thread.id===state.active.id);if(summary){const turns=state.active.turns;state.active={...state.active,...summary,turns};if(summary.status?.type==='active')scheduleActiveThreadSync(0)}if(changed)renderThreads()}
+let recentThreadSummaries=[];
+const projectThreadPages=new Map(),projectThreadRequests=new Map();
+function threadSummarySignature(threads){return JSON.stringify(threads.map(thread=>[thread.id,thread.cwd,thread.name,thread.preview,thread.updatedAt,thread.recencyAt,thread.status]))}
+function applyThreadSummaries(threads=recentThreadSummaries,{render=false}={}){
+  recentThreadSummaries=threads;
+  const byId=new Map(threads.map(thread=>[thread.id,thread]));
+  for(const page of projectThreadPages.values())for(const thread of page.data)if(!byId.has(thread.id))byId.set(thread.id,thread);
+  state.threads=[...byId.values()];
+  const nextSignature=JSON.stringify([threadSummarySignature(state.threads),threads.map(thread=>thread.id)]),changed=nextSignature!==threadListSignature;
+  threadListSignature=nextSignature;
+  const summary=state.active&&threads.find(thread=>thread.id===state.active.id);
+  if(summary){const turns=state.active.turns;state.active={...state.active,...summary,turns};if(summary.status?.type==='active')scheduleActiveThreadSync(0)}
+  if(changed||render)renderThreads();
+}
+async function loadProjectThreads(cwd,{more=false,refresh=false,reportError=false}={}){
+  if(!state.connected||!cwd||workspaceNavigation.hasRemovedProject(cwd)||projectThreadRequests.has(cwd))return;
+  const previous=projectThreadPages.get(cwd),cursor=more?previous?.nextCursor:null;
+  if((more&&!cursor)||(!more&&!refresh&&previous))return;
+  const request=Symbol();projectThreadRequests.set(cwd,request);
+  try{
+    const page=await rpc('thread/list',{...threadListOptions,cwd,limit:100,...(cursor?{cursor}:{})},{timeoutMs:30_000});
+    if(projectThreadRequests.get(cwd)!==request)return;
+    const data=new Map((more?previous.data:[]).map(thread=>[thread.id,thread]));
+    for(const thread of page.data||[])if(thread.cwd===cwd&&!thread.projectless)data.set(thread.id,thread);
+    projectThreadPages.set(cwd,{data:[...data.values()],nextCursor:page.nextCursor!==cursor?page.nextCursor:null});
+    applyThreadSummaries(undefined,{render:true});
+  }catch(error){if(reportError&&projectThreadRequests.get(cwd)===request&&!error?.silentTransportSwitch)toast(t('Could not load project chats'))}
+  finally{if(projectThreadRequests.get(cwd)===request)projectThreadRequests.delete(cwd)}
+}
 function scheduleThreadListRefresh(delay=THREAD_LIST_POLL_MS){if(accessSession?.required)return;clearTimeout(threadListTimer);threadListTimer=setTimeout(refreshThreadList,document.visibilityState==='hidden'?Math.max(delay,8000):delay)}
-async function refreshThreadList(){if(threadListInFlight){scheduleThreadListRefresh(1000);return}threadListInFlight=true;try{const result=await rpc('thread/list',{limit:50,sortKey:'recency_at',sortDirection:'desc'});applyThreadSummaries(result.data||[])}catch{}finally{threadListInFlight=false;scheduleThreadListRefresh()}}
+async function refreshThreadList(){if(threadListInFlight){scheduleThreadListRefresh(1000);return}threadListInFlight=true;try{const result=await rpc('thread/list',{...threadListOptions,limit:50},{timeoutMs:30_000});applyThreadSummaries(result.data||[])}catch{}finally{threadListInFlight=false;scheduleThreadListRefresh()}}
 function refreshThreadsSoon(){scheduleThreadListRefresh(600)}
 function resetActiveThreadSync(){activeThreadSyncGeneration++;clearTimeout(activeThreadSyncTimer);activeThreadSyncTimer=null;activeThreadSyncSignature=''}
 function scheduleActiveThreadSync(delay=ACTIVE_THREAD_SYNC_IDLE_MS){if(accessSession?.required)return;clearTimeout(activeThreadSyncTimer);if(!state.active)return;activeThreadSyncTimer=setTimeout(syncActiveThread,document.visibilityState==='hidden'?Math.max(delay,6000):delay)}
@@ -718,6 +821,7 @@ const panelSizing=installPanelSizing({sidebar:$('#sidebar'),panel:$('#sidePanel'
 $('#languageSelect').value=i18n.preference;
 $('#languageSelect').onchange=event=>i18n.setPreference(event.currentTarget.value);
 function refreshLocalizedRuntime(){
+  for(const label of document.querySelectorAll('[data-server-location]'))label.textContent=serverLabel();
   runtimeProgress.refresh();conversationLoad?.refresh();
   sidePanelTabs.refresh();panelSizing.sync();
   $('#languageSelect').value=i18n.preference;

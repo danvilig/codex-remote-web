@@ -1,0 +1,7 @@
+{
+  "identifier": "settings",
+  "description": "The local gateway settings page can invoke the native desktop controller.",
+  "local": true,
+  "webviews": ["settings"],
+  "permissions": ["allow-desktop-operation"]
+}

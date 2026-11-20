@@ -6,7 +6,7 @@
 
 A self-hosted browser workspace using **Cloudflare Tunnel + Access**. Set up remote access through the web UI, then continue conversations, follow tool activity, handle approvals, and edit project files from another device.
 
-> **Beta.1 candidate:** This branch prepares **0.2.0-beta.1** with the desktop gateway and new session defaults. Published **0.2.0-alpha.3** installers still use a terminal launcher; use a Beta.1 build for the features below. See the [Beta.1 release notes](docs/releases/0.2.0-beta.1.md).
+> **Beta.2 candidate:** This branch prepares **0.2.0-beta.2** with a lightweight native gateway. See the [Beta.2 release notes](docs/releases/0.2.0-beta.2.md).
 
 ## Highlights
 
@@ -63,7 +63,7 @@ The macOS DMG, Windows MSI and Linux desktop DEB provide the same initialization
 
 ### Download desktop installers or portable packages (recommended)
 
-Download your package and its `.sha256` from [Releases](https://github.com/danvilig/codex-remote-web/releases). Each executable package includes Bun/Node, web assets and the native terminal module; **no runtime installation or compilation is required**. Keep the extracted directory intact. Install and configure Codex CLI and Git separately; remote access also requires cloudflared.
+Download your package and its `.sha256` from [Releases](https://github.com/danvilig/codex-remote-web/releases). The packages use a lightweight native gateway with a built-in terminal. **No separate gateway runtime installation or compilation is required.** Keep the extracted directory intact. Install and configure Codex CLI and Git separately; remote access also requires cloudflared.
 
 | Platform | Package | Requirements |
 | --- | --- | --- |
@@ -87,13 +87,13 @@ Desktop packages are unsigned. Review the checksum and source, and use your syst
 
 ### Portable CLI packages
 
-The following examples target **0.2.0-beta.1** portable packages. Use the package name and version matching your download; candidate builds are available as CI artifacts until the release is published. They run in a terminal; close it or press Ctrl+C to stop the gateway.
+The following examples target **0.2.0-beta.2** portable packages. Use the package name and version matching your download; candidate builds are available as CI artifacts until the release is published. They run in a terminal; close it or press Ctrl+C to stop the gateway.
 ```sh
-archive=codex-remote-web-0.2.0-beta.1-linux-x64.tar.gz
-# For arm64 use codex-remote-web-0.2.0-beta.1-linux-arm64.tar.gz
+archive=codex-remote-web-0.2.0-beta.2-linux-x64.tar.gz
+# For arm64 use codex-remote-web-0.2.0-beta.2-linux-arm64.tar.gz
 sha256sum -c "$archive.sha256"
 tar -xzf "$archive"
-cd codex-remote-web-0.2.0-beta.1
+cd codex-remote-web-0.2.0-beta.2
 CODEX_WEBUI_CWD=/path/to/your/project ./codex-remote-web
 ```
 
@@ -101,7 +101,7 @@ On macOS, extract the `macos-arm64` archive and run the same command. On Windows
 
 ```powershell
 # Compare with the hash in the adjacent .sha256 file before extracting.
-Get-FileHash .\codex-remote-web-0.2.0-beta.1-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\codex-remote-web-0.2.0-beta.2-windows-x64.zip -Algorithm SHA256
 $env:CODEX_WEBUI_CWD = 'C:\path\to\your\project'
 .\codex-remote-web.exe
 ```
@@ -133,7 +133,7 @@ For a desktop-managed gateway, open **Remote access** in the desktop app; its br
 | --- | --- | --- |
 | Address | Your own domain or subdomain | An automatically assigned temporary HTTPS address |
 | Login protection | Cloudflare Access, restricted to one email address | Email verification code, restricted to one email address |
-| Requirements | Cloudflare account, a domain hosted on Cloudflare, API Token and cloudflared; managed by the desktop app or Linux user-level systemd | cloudflared with `--allowed-mail` support; Node.js is included in executable packages |
+| Requirements | Cloudflare account, a domain hosted on Cloudflare, API Token and cloudflared; managed by the desktop app or Linux user-level systemd | cloudflared with `--allowed-mail` support |
 | Setup | Start setup → Choose Tunnel and domain → Preview → Apply | Temporary access → Enter email → Start |
 | Lifecycle | Desktop-managed background gateway/connector or a Linux user service | Runs with the gateway and connector; generate a new address after stopping |
 
@@ -175,7 +175,7 @@ Sites deployment, image generation, cloud Library, plugin account OAuth, and ful
 
 ### Shared Codex sessions and standalone deployments
 
-WebUI does not launch the shared daemon. Start a compatible daemon through Codex Desktop/CLI; WebUI reconnects when it becomes available without replaying execution requests. Stopping the gateway does not stop that daemon or its tasks. Docker and Compose explicitly select `isolated` mode. Before upgrading an existing isolated deployment, inspect tasks, approvals and queues, then restart its gateway to switch connection modes; refreshing the browser is insufficient.
+Desktop installations reuse the local Codex daemon and ask the configured Codex CLI to start it if it is missing. Standalone shared deployments and desktop installations with an explicit connection override wait for the configured daemon. WebUI reconnects without replaying execution requests, and stopping the gateway does not stop the shared daemon or its tasks. Docker and Compose explicitly select `isolated` mode. Before upgrading an existing isolated deployment, inspect tasks, approvals and queues, then restart its gateway to switch connection modes; refreshing the browser is insufficient.
 
 ## Documentation and development
 
@@ -184,7 +184,7 @@ The detailed guides below are currently in Chinese.
 - [Configuration](docs/CONFIGURATION.md) / [Cloudflare deployment](docs/deployment/CLOUDFLARE.md)
 - [Development and testing](DEVELOPMENT.md) / [Contributing](CONTRIBUTING.md)
 - [Architecture](docs/ARCHITECTURE.md) / [Roadmap](docs/ROADMAP.md)
-- [Release process](docs/RELEASING.md) / [Candidate verification](docs/releases/0.2.0-beta.1-acceptance.md) / [Changelog](CHANGELOG.md)
+- [Release process](docs/RELEASING.md) / [Candidate verification](docs/releases/0.2.0-beta.2-acceptance.md) / [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md) / [Git workflow](docs/GIT_WORKFLOW.md) / [Agent rules](AGENTS.md)
 - [Security](SECURITY.md)
 

@@ -3,7 +3,7 @@ import { connect } from 'node:net';
 import { WebSocket } from 'ws';
 import { codexCommand } from '../config/codex-command.js';
 import { appServerConnection } from '../config/app-server.js';
-import { isolatedWorkerPath, nodeRuntime } from '../config/paths.js';
+import { isolatedWorkerPath, workerCommand } from '../config/paths.js';
 import { windowsIsolatedProcess, waitForWindowsIsolatedReady } from './windows-isolated.js';
 import { reapProcessGroup, isProcessGroupRunning } from './process-group.js';
 
@@ -140,7 +140,8 @@ export function createAppServerBridge({ cwd, clientInfo, onMessage, onStatus, on
     const supervised = process.platform !== 'win32' && process.env.CODEX_WEBUI_DESKTOP_CHILD === '1';
     const command = [binary, ...prefix, 'app-server', '--stdio'];
     const windows = process.platform === 'win32' ? windowsIsolatedProcess(command, cwd) : null;
-    const proc = spawn(windows?.binary || (supervised ? nodeRuntime() : binary), windows?.args || (supervised ? [isolatedWorkerPath()] : command.slice(1)), { cwd, env: windows?.env || process.env, stdio: supervised ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' }) as ChildProcessWithoutNullStreams;
+    const [runtime, ...args] = supervised ? workerCommand('worker-isolated', isolatedWorkerPath()) : command;
+    const proc = spawn(windows?.binary || runtime, windows?.args || args, { cwd, env: windows?.env || process.env, stdio: supervised ? ['pipe', 'pipe', 'pipe', 'ipc'] : ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: process.platform !== 'win32' }) as ChildProcessWithoutNullStreams;
     child = proc; let buffer = '';
     if (windows) booting.add(proc);
     const ready = windows ? waitForWindowsIsolatedReady(proc).then(() => { booting.delete(proc); }) : undefined;

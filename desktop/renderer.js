@@ -1,3 +1,4 @@
+import { desktopLocale } from './localization.js';
 import { mountRemoteAccess } from '../public/remote-access.js';
 import { createI18n, createDomI18n } from '../public/i18n.js';
 import { codexIcon, hydrateCodexIcons } from '../public/codex-icons.js';
@@ -10,13 +11,15 @@ const translations = {
 Object.assign(translations, {
   'Desktop gateway': '桌面网关', 'Runs in your login session': '在当前登录会话中运行', 'Gateway connection': '网关连接', 'Background and terminal': '后台与终端', Theme: '主题', 'Local gateway': '本地网关', 'Local address': '本地地址', 'Dependencies checked.': '依赖检测完成。', 'Gateway started.': '网关已启动。', 'Gateway stopped.': '网关已停止。', 'Gateway restarted.': '网关已重启。', 'No background activity yet.': '暂无后台活动。', 'Gateway configuration saved': '网关设置已保存', 'Background agent ready': '后台代理已就绪', 'Local gateway ready': '本地网关已就绪', 'Protected gateway ready': '受保护网关已就绪', 'Local gateway exited': '本地网关已退出', 'Protected gateway exited': '受保护网关已退出', 'Connector ready': '连接器已就绪', 'Connector stopped': '连接器已停止', 'Background agent stopped': '后台代理已停止', 'Automatic startup failed': '自动启动失败', 'Shutdown failed': '停止后台代理失败', 'Background activity updated': '后台活动已更新', 'Background component removed.': '后台组件已移除。',
 });
-Object.assign(translations, { 'Auto-detect': '自动检测', 'Executable not found': '未找到程序', 'Executable could not be verified': '无法验证程序' });
-const i18n = createI18n();
+Object.assign(translations, { 'Clean up and uninstall': '清理并卸载', 'Remove the remote deployment in Remote access before cleaning up.': '请先在“远程访问”中移除远程部署，再进行清理。', 'Finish remote access or startup recovery before cleaning up.': '请先完成远程访问或启动项恢复，再进行清理。', 'Auto-detect': '自动检测', 'Executable not found': '未找到程序', 'Executable could not be verified': '无法验证程序' });
+// The desktop configuration is authoritative, including in the native
+// WebKit ephemeral origin where localStorage is unavailable.
+const i18n = createI18n({ storage: null });
 createDomI18n(i18n);
 const t = message => i18n.locale === 'zh-CN' ? translations[message] || i18n.t(message) : message;
 const $ = selector => document.querySelector(selector);
 const form = $('#configuration');
-let current, busy = false, hydrated = false, page = 'overview', remote, eventKey = '', lastFeedback;
+let current, busy = false, hydrated = false, page = 'overview', remote, eventKey = '', lastFeedback, lastDependencies, languageBusy = false;
 const pageNames = { overview: 'Overview', configuration: 'Gateway settings', remote: 'Remote access', diagnostics: 'Diagnostics' };
 const eventNames = { 'configuration-saved': 'Gateway configuration saved', 'agent-ready': 'Background agent ready', 'local:gateway-ready': 'Local gateway ready', 'protected:gateway-ready': 'Protected gateway ready', 'local:gateway-exited': 'Local gateway exited', 'protected:gateway-exited': 'Protected gateway exited', 'connector-ready': 'Connector ready', 'connector-stopped': 'Connector stopped', 'agent-stopped': 'Background agent stopped', 'startup-failed': 'Automatic startup failed', 'shutdown-failed': 'Shutdown failed' };
 async function invoke(action, body) {
@@ -78,7 +81,7 @@ function render(state) {
   if (!hydrated) {
     for (const key of ['cwd', 'port', 'codex', 'cloudflared', 'language', 'theme']) form.elements[key].value = state.config[key];
     for (const key of ['autostart', 'terminal']) form.elements[key].checked = state.config[key];
-    i18n.setPreference(state.config.language === 'zh' ? 'zh-CN' : state.config.language); translate(); appearance(); themedSelects.sync(); hydrated = true;
+    i18n.setPreference(desktopLocale(state.config.language, [state.systemLocale || desktopLocale('system', navigator.languages)])); translate(); appearance(); themedSelects.sync(); hydrated = true;
   }
   const running = state.local.phase === 'running', stopped = ['stopped', 'failed'].includes(state.local.phase);
   const phase = t({ running: 'Running', stopped: 'Stopped', starting: 'Starting', stopping: 'Stopping', failed: 'Failed' }[state.local.phase] || 'Stopped');
@@ -89,9 +92,21 @@ function render(state) {
   $('#localAddress').textContent = state.url; $('#projectDirectory').textContent = state.config.cwd;
   $('#start').disabled = busy || !stopped || !state.config.initialized; $('#stop').disabled = busy || stopped; $('#restart').disabled = busy || !running;
   $('#save').disabled = busy || !stopped || !['stopped', 'failed'].includes(state.protected.phase);
-  for (const node of document.querySelectorAll('#checkDependencies, [data-choose], #removeBackground')) node.disabled = busy;
+  for (const node of document.querySelectorAll('#checkDependencies, [data-choose], #removeBackground, #cleanUninstall')) node.disabled = busy;
   $('#openWorkspace').disabled = busy || !running; $('#initialize').hidden = state.config.initialized;
   renderEvents(state.events);
+}
+function renderDependencies(results) {
+  lastDependencies = results;
+  $('#dependencies').replaceChildren(...results.map(item => {
+    const li = document.createElement('li'); li.classList.toggle('failed', !item.ok); li.innerHTML = codexIcon(item.ok ? 'check' : 'triangleAlert');
+    const copy = document.createElement('div'); copy.className = 'dependency-copy';
+    const name = document.createElement('strong'); name.textContent = item.name;
+    const version = document.createElement('small'); version.textContent = t(item.version || item.error);
+    copy.append(name, version);
+    if (item.path) { const path = document.createElement('code'); path.textContent = item.path; path.dataset.i18nIgnore = ''; copy.append(path); }
+    li.append(copy); return li;
+  }));
 }
 async function refresh() { try { render(await invoke('status')); } catch (error) { message(error.message, 'error'); } }
 async function action(fn, button, success) {
@@ -111,19 +126,27 @@ $('#openWorkspace').onclick = event => void action(() => invoke('openWorkspace')
 for (const node of document.querySelectorAll('[data-choose]')) node.onclick = () => void action(async () => { const value = await invoke(node.dataset.choose); if (value) form.elements[node.dataset.field].value = value; }, node);
 $('#checkDependencies').onclick = event => void action(async () => {
   const results = await invoke('dependencies', { config: values() });
-  $('#dependencies').replaceChildren(...results.map(item => {
-    const li = document.createElement('li'); li.classList.toggle('failed', !item.ok); li.innerHTML = codexIcon(item.ok ? 'check' : 'triangleAlert');
-    const copy = document.createElement('div'); copy.className = 'dependency-copy';
-    const name = document.createElement('strong'); name.textContent = item.name;
-    const version = document.createElement('small'); version.textContent = t(item.version || item.error);
-    copy.append(name, version);
-    if (item.path) { const path = document.createElement('code'); path.textContent = item.path; path.dataset.i18nIgnore = ''; copy.append(path); }
-    li.append(copy); return li;
-  }));
+  renderDependencies(results);
 }, event.currentTarget, 'Dependencies checked.');
 form.onsubmit = event => { event.preventDefault(); void action(async () => { render(await invoke('config', values())); showPage('overview'); }, $('#save'), 'Settings saved.'); };
-form.elements.language.onchange = () => { i18n.setPreference(form.elements.language.value === 'zh' ? 'zh-CN' : form.elements.language.value); translate(); themedSelects.sync(); if (current) render(current); remote?.close(); remote = null; $('#remoteAccess').replaceChildren(); };
+form.elements.language.onchange = async () => {
+  if (languageBusy || !current) return;
+  languageBusy = true;
+  form.elements.language.disabled = true; themedSelects.sync();
+  try {
+    const state = await invoke('language', { language: form.elements.language.value });
+    current = { ...state, systemLocale: current.systemLocale };
+  } catch (error) { message(error.message, 'error'); }
+  finally {
+    form.elements.language.value = current.config.language;
+    i18n.setPreference(desktopLocale(current.config.language, [current.systemLocale || desktopLocale('system', navigator.languages)]));
+    translate(); if (lastDependencies) renderDependencies(lastDependencies);
+    render(current); remote?.close(); remote = null; $('#remoteAccess').replaceChildren();
+    languageBusy = false; form.elements.language.disabled = false; themedSelects.sync();
+  }
+};
 form.elements.theme.onchange = appearance; matchMedia('(prefers-color-scheme:dark)').addEventListener('change', appearance);
+$('#cleanUninstall').onclick = event => void action(() => invoke('cleanUninstall'), event.currentTarget);
 $('#removeBackground').onclick = event => void action(() => invoke('removeBackground'), event.currentTarget);
 translate(); await refresh(); if (current && !current.config.initialized) showPage('configuration');
-setInterval(() => { if (!busy) void refresh(); }, 2000);
+setInterval(() => { if (!busy && !languageBusy) void refresh(); }, 2000);

@@ -1,10 +1,11 @@
 // Build native installers from the already-tested portable archive. No user
 // data, services, credentials, remote resources or host configuration is copied.
-import { cp, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { command, portableTarget, installerGuid } from './distribution.ts';
 import { desktopPackage } from './desktop-package.ts';
+import { createMacDmg } from './macos-dmg.ts';
 const root=resolve(import.meta.dir,'..'),target=portableTarget();
 if (!['darwin','win32'].includes(process.platform)) throw new Error('Native installers require macOS or Windows');
 const pkg=await Bun.file(join(root,'package.json')).json(),name=`${pkg.name}-${pkg.version}`;
@@ -20,14 +21,7 @@ try {
  const desktopOutput=join(temp,'desktop-output'); await mkdir(desktopOutput);
  const desktop=await desktopPackage(unpacked,desktopOutput);
  if(process.platform==='darwin') {
-  const image=join(temp,'image');await mkdir(image);
-  await cp(join(desktop,'Codex Remote Web.app'),join(image,'Codex Remote Web.app'),{recursive:true,verbatimSymlinks:true});
-  await symlink('/Applications',join(image,'Applications'));
-  await command(['plutil','-lint',join(image,'Codex Remote Web.app/Contents/Info.plist')],root);
-  const kilobytes=Number((await command(['du','-sk',image],root)).split(/\s+/)[0]);
-  if(!Number.isFinite(kilobytes)||kilobytes<=0)throw new Error('Cannot size DMG payload');
-  const megabytes=Math.max(512,Math.ceil(kilobytes/1024*1.35+64));
-  await command(['hdiutil','create','-size',`${megabytes}m`,'-fs','HFS+','-volname','Codex Remote Web','-srcfolder',image,'-ov','-format','UDZO',installer],root);
+  await createMacDmg(join(desktop,'Codex Remote Web.app'),installer,temp,root);
  } else {
   unpacked=desktop;
   const xml=(v:string)=>v.replaceAll('&','&amp;').replaceAll('"','&quot;').replaceAll('<','&lt;').replaceAll('>','&gt;');
@@ -44,7 +38,9 @@ try {
   }
   const content=await tree(unpacked);
   const wxs=join(temp,'installer.wxs');
-  await writeFile(wxs,`<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"><Package Name="Codex Remote Web ${xml(pkg.version)}" Manufacturer="Codex Remote Web" Version="${pkg.version.split('-')[0]}" UpgradeCode="8F8555D4-C0E0-4B2F-9457-3C824076EB40" Scope="perUser"><MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version is installed."/><MediaTemplate EmbedCab="yes"/><CustomAction Id="StopDesktop" Directory="INSTALLFOLDER" ExeCommand="&quot;[INSTALLFOLDER]Codex Remote Web.exe&quot; --uninstall-background" Execute="immediate" Return="check"/><InstallExecuteSequence><Custom Action="StopDesktop" Before="RemoveFiles" Condition="REMOVE~=&quot;ALL&quot;"/></InstallExecuteSequence><Property Id="INSTALLFOLDER"><RegistrySearch Id="SavedInstallLocation" Root="HKCU" Key="Software\\Codex Remote Web\\Installer" Name="InstallLocation" Type="raw"/></Property><StandardDirectory Id="LocalAppDataFolder"><Directory Id="Programs" Name="Programs"><Directory Id="INSTALLFOLDER" Name="Codex Remote Web">${content}</Directory></Directory></StandardDirectory><StandardDirectory Id="ProgramMenuFolder"><Directory Id="MenuFolder" Name="Codex Remote Web"><Component Id="Menu" Guid="*"><Shortcut Id="Launch" Name="Codex Remote Web" Target="[INSTALLFOLDER]Codex Remote Web.exe" WorkingDirectory="INSTALLFOLDER"/><Shortcut Id="OpenWeb" Name="Open WebUI" Target="[INSTALLFOLDER]Codex Remote Web.exe" Arguments="--open-workspace" WorkingDirectory="INSTALLFOLDER"/><RemoveFolder Id="RemoveMenu" On="uninstall"/><RegistryValue Root="HKCU" Key="Software\\Codex Remote Web\\Installer" Name="Menu" Value="1" Type="integer" KeyPath="yes"/></Component></Directory></StandardDirectory><DirectoryRef Id="INSTALLFOLDER"><Component Id="Directories" Guid="*">${directories.map((dir,i)=>`<RemoveFolder Id="RemoveDir${i}" Directory="${dir}" On="uninstall"/>`).join('')}<RegistryValue Root="HKCU" Key="Software\\Codex Remote Web\\Installer" Name="InstallLocation" Value="[INSTALLFOLDER]" Type="string" KeyPath="yes"/></Component></DirectoryRef><Feature Id="Gateway" Title="Codex Remote Web" Level="1">${[...components,'Menu','Directories'].map(key=>`<ComponentRef Id="${key}"/>`).join('')}</Feature></Package></Wix>`);
+  // Before InstallValidate, feature-based removal need not have set REMOVE=ALL.
+  const stopDesktopCondition=xml('Installed AND (REMOVE~="ALL" OR (!Gateway=3 AND &Gateway=2))');
+  await writeFile(wxs,`<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"><Package Name="Codex Remote Web ${xml(pkg.version)}" Manufacturer="Codex Remote Web" Version="${pkg.version.split('-')[0]}" UpgradeCode="8F8555D4-C0E0-4B2F-9457-3C824076EB40" Scope="perUser"><MajorUpgrade AllowSameVersionUpgrades="yes" DowngradeErrorMessage="A newer version is installed."/><MediaTemplate EmbedCab="yes"/><CustomAction Id="StopDesktop" Directory="INSTALLFOLDER" ExeCommand="&quot;[INSTALLFOLDER]Codex Remote Web.exe&quot; --uninstall-background" Execute="immediate" Return="check"/><InstallExecuteSequence><Custom Action="StopDesktop" Before="InstallValidate" Condition="${stopDesktopCondition}"/></InstallExecuteSequence><Property Id="INSTALLFOLDER"><RegistrySearch Id="SavedInstallLocation" Root="HKCU" Key="Software\\Codex Remote Web\\Installer" Name="InstallLocation" Type="raw"/></Property><StandardDirectory Id="LocalAppDataFolder"><Directory Id="Programs" Name="Programs"><Directory Id="INSTALLFOLDER" Name="Codex Remote Web">${content}</Directory></Directory></StandardDirectory><StandardDirectory Id="ProgramMenuFolder"><Directory Id="MenuFolder" Name="Codex Remote Web"><Component Id="Menu" Guid="*"><Shortcut Id="Launch" Name="Codex Remote Web" Target="[INSTALLFOLDER]Codex Remote Web.exe" WorkingDirectory="INSTALLFOLDER"/><Shortcut Id="OpenWeb" Name="Open WebUI" Target="[INSTALLFOLDER]Codex Remote Web.exe" Arguments="--open-workspace" WorkingDirectory="INSTALLFOLDER"/><RemoveFolder Id="RemoveMenu" On="uninstall"/><RegistryValue Root="HKCU" Key="Software\\Codex Remote Web\\Installer" Name="Menu" Value="1" Type="integer" KeyPath="yes"/></Component></Directory></StandardDirectory><DirectoryRef Id="INSTALLFOLDER"><Component Id="Directories" Guid="*">${directories.map((dir,i)=>`<RemoveFolder Id="RemoveDir${i}" Directory="${dir}" On="uninstall"/>`).join('')}<RegistryValue Root="HKCU" Key="Software\\Codex Remote Web\\Installer" Name="InstallLocation" Value="[INSTALLFOLDER]" Type="string" KeyPath="yes"/></Component></DirectoryRef><Feature Id="Gateway" Title="Codex Remote Web" Level="1">${[...components,'Menu','Directories'].map(key=>`<ComponentRef Id="${key}"/>`).join('')}</Feature></Package></Wix>`);
   await command(['wix','build',wxs,'-arch','x64','-out',installer],root,{stream:true,timeoutMs:240_000});
  }
  const digest=createHash('sha256').update(await readFile(installer)).digest('hex');
