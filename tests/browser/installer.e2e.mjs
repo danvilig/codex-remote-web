@@ -61,22 +61,46 @@ try {
     set appPosition to position of item "Codex Remote Web.app" of folderAlias
     set targetPosition to position of item "Applications" of folderAlias
     set helpPosition to position of item "Install Guide.html" of folderAlias
-    return {item 1 of appPosition, item 2 of appPosition, item 1 of targetPosition, item 2 of targetPosition, item 1 of helpPosition, item 2 of helpPosition, icon size of opts}
+    set windowBounds to bounds of w
+    return {item 1 of appPosition, item 2 of appPosition, item 1 of targetPosition, item 2 of targetPosition, item 1 of helpPosition, item 2 of helpPosition, icon size of opts, item 1 of windowBounds, item 2 of windowBounds}
   end tell`],root); }
-  finally { await command(['screencapture','-x',join(root,'.artifacts/macos-installer-native.png')],root); }
-  assert.equal(layout,[...dmgLayout.app,...dmgLayout.applications,...dmgLayout.help,dmgLayout.iconSize].join(', '),`Final DMG lost Finder positions: ${layout}`);
+  finally { await command(['screencapture','-x','-m',join(root,'.artifacts/macos-installer-native.png')],root); }
+  const coordinates=layout.split(', ').map(Number);
+  assert.equal(coordinates.length,9);
+  const positions=coordinates.slice(0,7);
+  assert.deepEqual(positions,[...dmgLayout.app,...dmgLayout.applications,...dmgLayout.help,dmgLayout.iconSize],`Final DMG lost Finder positions: ${layout}`);
   // Finder's background-picture getter throws -1728 on a read-only image
-  // even when it renders correctly (retained native screenshots reproduce
-  // this). Check the actual rendered background instead of that getter.
+  // even when it renders correctly. Look for the background's arrow shaft
+  // between the icons, relative to the window and allowing for title-bar size.
   const screenshot=join(root,'.artifacts/macos-installer-native.png');
-  const pixel=await command(['swift','-e',`import AppKit
+  const arrowShaftPoints=Number(await command(['swift','-e',`import AppKit
+    import CoreGraphics
     let bitmap = NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: CommandLine.arguments[1])))!
-    let color = bitmap.colorAt(x: 150, y: 480)!.usingColorSpace(.deviceRGB)!
-    print(Int((color.redComponent * 255).rounded()), Int((color.greenComponent * 255).rounded()), Int((color.blueComponent * 255).rounded()))
-  `,screenshot],root,{timeoutMs:60_000});
-  const [red,green,blue]=pixel.split(/\s+/).map(Number);
-  assert.ok(red>=240&&red<=250&&Math.abs(red-green)<=1&&blue>red,`Final DMG background was not rendered: ${pixel}`);
-  evidence.checks.finderLayoutAndBackground={positions:layout,backgroundPixel:[red,green,blue],screenshot:'macos-installer-native.png'};
+    let display = CGDisplayBounds(CGMainDisplayID())
+    let sx = Double(bitmap.pixelsWide) / display.width
+    let sy = Double(bitmap.pixelsHigh) / display.height
+    let x = Double(CommandLine.arguments[2])! - display.minX + ${dmgLayout.width / 2}
+    let y = Double(CommandLine.arguments[3])! - display.minY + ${dmgLayout.app[1]}
+    let left = Int((x-30)*sx), right = Int((x+30)*sx)
+    let top = Int((y-5)*sy), bottom = Int((y+60)*sy)
+    guard left >= 0, top >= 0, right <= bitmap.pixelsWide, bottom <= bitmap.pixelsHigh else {
+      fatalError("Finder background marker is off screen")
+    }
+    var longest = 0
+    for row in top..<bottom {
+      var run = 0
+      for column in left..<right {
+        if let c = bitmap.colorAt(x: column, y: row)?.usingColorSpace(.sRGB),
+           c.redComponent < 0.65, c.greenComponent < 0.65, c.blueComponent < 0.65 {
+          run += 1
+          longest = max(longest, run)
+        } else { run = 0 }
+      }
+    }
+    print(Double(longest)/sx)
+  `,screenshot,...coordinates.slice(7).map(String)],root,{timeoutMs:60_000}));
+  assert.ok(arrowShaftPoints>=26&&arrowShaftPoints<=50,`Final DMG background arrow was not rendered: ${arrowShaftPoints} points`);
+  evidence.checks.finderLayoutAndBackground={positions,arrowShaftPoints,screenshot:'macos-installer-native.png'};
   evidence.checks.mountedSize=await macAppSize(app);
   assert.ok(evidence.checks.mountedSize.allocatedBytes<evidence.checks.mountedSize.logicalBytes*0.8,'Installed payload must actually use transparent filesystem compression');
   await mkdir(destination);
