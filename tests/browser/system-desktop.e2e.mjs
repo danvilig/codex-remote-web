@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, writeFile, copyFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile, copyFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -103,21 +103,32 @@ try {
   await until(() => nativeControl('Stop gateway', true), 'Stopping the gateway from the reopened WebView');
   await until(async () => (await agentRequest(directory, 'status')).local.pid === null, 'Gateway stopped');
   if (msiLog) {
-    await until(() => nativeControl('Start gateway', true), 'Restarting the gateway before uninstall');
-    await until(() => connected().catch(() => false), 'Gateway connected before uninstall');
-    const trayProcess = child;
-    await command('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p = Get-Process -Id ${trayProcess.pid}; if (-not $p.CloseMainWindow()) { exit 2 }`], { env, timeout: 15_000 });
-    await until(async () => !(await nativeControl('Stop gateway')), 'Settings window hidden to tray');
-    assert.equal(trayProcess.exitCode, null);
-    assert.equal(await connected(), true);
-    const before = JSON.parse(await readFile(join(directory, 'config.json'), 'utf8'));
-    assert.equal(before.enabled, true);
-    await command('bun', [join(root, 'tests/helpers/windows-msi.mjs'), process.env.CODEX_WEBUI_INSTALLER, msiLog], { timeout: 130_000, maxBuffer: 4 << 20 });
-    await until(() => trayProcess.exitCode !== null, 'Tray process exited on MSI uninstall', 10_000);
-    assert.equal(trayProcess.exitCode, 0, 'The tray should exit gracefully');
-    await until(async () => !(await connected().catch(() => false)), 'Gateway stopped on MSI uninstall', 10_000);
-    assert.deepEqual(JSON.parse(await readFile(join(directory, 'config.json'), 'utf8')), { ...before, enabled: false }, 'MSI uninstall must preserve desktop settings and disable the gateway');
-    console.log('PASS: MSI uninstall stopped the running tray and gateway without a reboot or deleting settings');
+    const msi = (mode, log, ...args) => command('bun', [join(root, 'tests/helpers/windows-msi.mjs'), process.env.CODEX_WEBUI_INSTALLER, log, mode, ...args], { timeout: 130_000, maxBuffer: 4 << 20 });
+    for (const mode of ['product', 'feature']) {
+      if (mode === 'feature') {
+        await msi('reinstall', join(dirname(msiLog), 'reinstall.log'), dirname(executable));
+        launch();
+      }
+      await until(() => nativeControl('Start gateway', true), 'Restarting the gateway before uninstall');
+      await until(() => connected().catch(() => false), 'Gateway connected before uninstall');
+      const trayProcess = child;
+      await command('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `$p = Get-Process -Id ${trayProcess.pid}; if (-not $p.CloseMainWindow()) { exit 2 }`], { env, timeout: 15_000 });
+      await until(async () => !(await nativeControl('Stop gateway')), 'Settings window hidden to tray');
+      assert.equal(trayProcess.exitCode, null);
+      assert.equal(await connected(), true);
+      const before = JSON.parse(await readFile(join(directory, 'config.json'), 'utf8'));
+      assert.equal(before.enabled, true);
+      await msi(mode, join(dirname(msiLog), `uninstall-${mode}.log`));
+      await until(() => trayProcess.exitCode !== null, 'Tray process exited on MSI uninstall', 10_000);
+      assert.equal(trayProcess.exitCode, 0, 'The tray should exit gracefully');
+      await until(async () => !(await connected().catch(() => false)), 'Gateway stopped on MSI uninstall', 10_000);
+      assert.deepEqual(JSON.parse(await readFile(join(directory, 'config.json'), 'utf8')), { ...before, enabled: false }, 'MSI uninstall must preserve desktop settings and disable the gateway');
+      for (const path of [executable, join(process.env.CODEX_WEBUI_INSTALLED_DIRECTORY, 'codex-remote-web.exe'), join(process.env.APPDATA, 'Microsoft/Windows/Start Menu/Programs/Codex Remote Web/Codex Remote Web.lnk')]) {
+        await assert.rejects(() => access(path), { code: 'ENOENT' }, `File remained after MSI ${mode} uninstall: ${path}`);
+      }
+      await close();
+      console.log(`PASS: MSI ${mode} uninstall stopped the running tray and gateway and removed the installation without a reboot or deleting settings`);
+    }
   } else {
     await close();
     await command(executable, ['--uninstall-background'], { env, timeout: 30_000 });

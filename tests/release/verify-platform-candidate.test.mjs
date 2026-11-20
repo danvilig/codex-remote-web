@@ -35,7 +35,7 @@ async function candidate(t, failedPhase = '') {
           format: 1, platform: os, arch, renderer: windows ? 'system-webview2' : 'system-webkitgtk', sourceCommit: sha,
           installer: name, sha256: hash, installerBytes: Buffer.byteLength('archive fixture'), installed: { allocatedBytes: 32768, logicalBytes: 21777 },
           nativeControls: true, gatewaySurvivedWindowExit: true, uninstall: true,
-          ...(windows ? { uninstallWhileTrayRunning: true } : {}),
+          ...(windows ? { uninstallWhileTrayRunning: true, featureUninstallWhileTrayRunning: true } : {}),
         });
       }
     }

@@ -129,7 +129,9 @@ export async function verifyCandidate(directory, tag, commit, { manualHash = '',
         assert.ok(bytes < systemDesktopBudget.installerBytes);
         for (const measure of ['allocatedBytes', 'logicalBytes']) assert.ok(Number.isSafeInteger(report.installed[measure]) && report.installed[measure] > 0 && report.installed[measure] < systemDesktopBudget.installedBytes, `${platform} installed ${measure}`);
         for (const check of ['nativeControls', 'gatewaySurvivedWindowExit', 'uninstall']) assert.equal(report[check], true, `${platform} ${check}`);
-        if (windows) assert.equal(report.uninstallWhileTrayRunning, true, 'Windows MSI uninstall was not checked with the tray running');
+        if (windows) {
+          for (const check of ['uninstallWhileTrayRunning', 'featureUninstallWhileTrayRunning']) assert.equal(report[check], true, `Windows MSI ${check}`);
+        }
         desktopResults.push(`- ${platform} system WebView installer passed installed controls, gateway continuity and ${windows ? 'uninstall with the tray running' : 'uninstall'}. Download: ${bytes} bytes; installed: ${report.installed.allocatedBytes} allocated bytes (${report.installed.logicalBytes} logical bytes).`);
       }
     }
