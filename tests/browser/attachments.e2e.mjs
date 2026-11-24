@@ -464,8 +464,7 @@ try {
     .click();
   await page.locator(".resource-location").filter({ hasText: home }).waitFor();
   await page.locator("#closeSidePanel").click();
-  await page.locator("[data-composer-control=add]").click();
-  await page.getByRole("menuitem", { name: "Plan mode", exact: true }).click();
+  await page.getByRole("button", { name: "Plan mode", exact: true }).click();
   assert.equal(
     await page.evaluate(() => globalThis.__codexWebuiDebug.state.planMode),
     true,
