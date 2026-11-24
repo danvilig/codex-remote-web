@@ -89,6 +89,7 @@ try {
   const port = await new Promise(resolve=>{const probe=createServer();probe.listen(0,'127.0.0.1',()=>{const value=probe.address().port;probe.close(()=>resolve(value));});});
   const quickBin=join(fixture,'quick-bin');mkdirSync(quickBin);
   copyFileSync(join(root,'tests/fixtures/quick-cloudflared.mjs'),join(quickBin,'quick-cloudflared.mjs'));
+  copyFileSync(join(root,'tests/fixtures/product-demo.mjs'),join(quickBin,'product-demo.mjs'));
   const quickPort=await new Promise(resolve=>{const probe=createServer();probe.listen(0,'127.0.0.1',()=>{const value=probe.address().port;probe.close(()=>resolve(value));});});
   writeFileSync(join(quickBin,'quick-fixture.json'),JSON.stringify({port:quickPort,state:join(fixture,'quick-state.json')}));
   const connectorFixture = join(quickBin, windows ? 'cloudflared.exe' : 'cloudflared');
