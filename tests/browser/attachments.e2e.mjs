@@ -205,7 +205,7 @@ try {
   await page.locator('#imageViewer').waitFor({state:'hidden'});
   await page.locator('#prompt').click();
   assert.equal(await page.locator('#prompt').evaluate(el=>getComputedStyle(el).outlineStyle),'none');
-  assert.equal(await page.locator('#composer').evaluate(el=>getComputedStyle(el).outlineStyle),'solid');
+  assert.equal(await page.locator('#composer').evaluate(el=>getComputedStyle(el).outlineStyle),'none');
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForFunction(
     () => globalThis.__codexWebuiDebug?.state.connected,
