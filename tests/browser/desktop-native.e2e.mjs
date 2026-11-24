@@ -18,9 +18,12 @@ const home = await mkdtemp(join(tmpdir(), 'desktop-native-')), directory = deskt
 const port = await new Promise(resolve => { const probe = createServer(); probe.listen(0, '127.0.0.1', () => { const value = probe.address().port; probe.close(() => resolve(value)); }); });
 const windows = process.platform === 'win32';
 const fixture = join(home, 'codex-fixture.mjs'); await cp(join(root, 'tests/fixtures/codex'), fixture);
+const demoFixture = join(root, 'tests/fixtures/product-demo.mjs');
+await cp(demoFixture, join(home, 'product-demo.mjs'));
 let codex;
 if (windows) {
   const entry = join(home, 'node_modules/@openai/codex/bin'); await mkdir(entry, { recursive: true }); await cp(fixture, join(entry, 'codex.js')); await writeFile(join(entry, '../package.json'), '{"type":"module"}');
+  await cp(demoFixture, join(entry, 'product-demo.mjs'));
   codex = join(home, 'codex.cmd'); await writeFile(codex, '@echo off\r\nexit /b 91\r\n');
 } else {
   codex = join(home, 'codex'); const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
