@@ -1,7 +1,7 @@
 // Browser-owned projects, pins and sidebar organization. Native thread data stays authoritative.
 export const absoluteProjectPath = path => typeof path === 'string' && /^(?:\/|[a-z]:[\\/]|\\\\)/i.test(path);
 
-export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, onOpen, onDelete, onAddProject, onSelectProject, onExpandProject, onMoreProjectChats, onRemoveProject, menu }) {
+export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, onOpen, onDelete, onAddProject, onSelectProject, onExpandProject, onMoreProjectChats, onRemoveProject, onPinsChange, menu }) {
   const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } };
   const pinsKey = 'codex-remote-web-pins', sectionsKey = 'codex-remote-web-sections', projectsKey = 'codex-remote-web-projects', preferencesKey = 'codex-remote-web-sidebar';
   const saved = read(pinsKey, []), pins = new Set(Array.isArray(saved) ? saved.filter(id => typeof id === 'string') : []);
@@ -18,7 +18,12 @@ export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, on
   let sort = ['activity', 'created', 'name'].includes(preferences?.sort) ? preferences.sort : 'activity';
   let notificationSort = preferences?.notificationSort === true;
   const unread = new Map(); let snapshot;
-  function syncNotificationButton(){const button=document.querySelector('#sidebarNotificationsButton');button.setAttribute('aria-pressed',String(notificationSort));button.title=t(notificationSort?'Notification order enabled':'Sort by notifications');}
+  function syncNotificationButton(){
+    const button=document.querySelector('#sidebarNotificationsButton'),badge=button.querySelector('.notification-count');
+    button.setAttribute('aria-pressed',String(notificationSort));button.title=t(notificationSort?'Notification order enabled':'Sort by notifications');
+    badge.hidden=unread.size===0;badge.textContent=unread.size>99?'99+':String(unread.size);
+    document.querySelector('#sidebarUnreadDescription').textContent=unread.size?t('{count} unread chats',{count:unread.size}):'';
+  }
   syncNotificationButton();
   const savePreferences = () => localStorage.setItem(preferencesKey, JSON.stringify({ grouping, sort, notificationSort }));
   function disclosure(label, key, defaultOpen = true) {
@@ -36,10 +41,14 @@ export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, on
     open.onclick = () => onOpen(thread.id);
     const pin = document.createElement('button'); pin.type = 'button'; pin.className = 'thread-pin';
     pin.setAttribute('aria-label', t(pins.has(thread.id) ? 'Unpin chat' : 'Pin chat')); pin.title = pin.getAttribute('aria-label'); pin.setAttribute('aria-pressed', String(pins.has(thread.id))); pin.innerHTML = codexIcon('pin');
-    pin.onclick = () => { if (pins.has(thread.id)) pins.delete(thread.id); else pins.add(thread.id); localStorage.setItem(pinsKey, JSON.stringify([...pins])); render(snapshot); document.querySelector(`[data-section=recents] [data-id="${CSS.escape(thread.id)}"] .thread-pin`)?.focus(); };
+    pin.onclick = () => { if (pins.has(thread.id)) pins.delete(thread.id); else pins.add(thread.id); localStorage.setItem(pinsKey, JSON.stringify([...pins])); onPinsChange?.(); render(snapshot); document.querySelector(`[data-section=recents] [data-id="${CSS.escape(thread.id)}"] .thread-pin`)?.focus(); };
     const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'thread-delete';
     remove.setAttribute('aria-label', t('Delete thread “{title}”', { title: titleOf(thread) })); remove.title = t('Delete thread'); remove.innerHTML = codexIcon('trash'); remove.onclick = () => onDelete(thread);
-    if(unread.has(thread.id)||snapshot.pending?.has(thread.id)){const dot=document.createElement('span');dot.className='thread-notification-dot';dot.setAttribute('aria-label',t(snapshot.pending?.has(thread.id)?'Waiting for your response':'Unread update'));row.append(dot);}
+    if(unread.has(thread.id)||snapshot.pending?.has(thread.id)){
+      const pending=snapshot.pending?.has(thread.id),dot=document.createElement('span'),label=t(pending?'Waiting for your response':'Unread update');
+      dot.className='thread-notification-dot';dot.dataset.pending=String(Boolean(pending));dot.title=label;dot.setAttribute('aria-hidden','true');row.append(dot);
+      open.setAttribute('aria-label',`${titleOf(thread)} · ${label}`);
+    }
     row.append(open, pin, remove); return row;
   }
   function organize(anchor) {
@@ -55,15 +64,14 @@ export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, on
     project.open = Boolean(snapshot.query.trim()) || (sections[projectKey] ?? items.some(thread => thread.id === snapshot.activeId));
     project.addEventListener('toggle', () => { if (!project.isConnected || snapshot.query.trim()) return; sections[projectKey] = project.open; localStorage.setItem(sectionsKey, JSON.stringify(sections)); });
     const summary = document.createElement('summary'), name = document.createElement('span');
-    summary.innerHTML = `<span class="project-folder-icon">${codexIcon('folder')}${snapshot.localServer ? '' : codexIcon('globe', 'project-remote-badge')}</span>`;
+    summary.innerHTML = `<span class="project-folder-icon" aria-hidden="true">${codexIcon('folder','folder-closed')}${codexIcon('folderOpen','folder-open')}</span>`;
     name.className = 'project-label'; name.textContent = cwd === snapshot.home ? t('Home') : cwd.split(/[/\\]/).filter(Boolean).at(-1) || cwd;
     summary.title = cwd; summary.append(name);
     summary.addEventListener('click', () => { if (!project.open) onExpandProject(cwd); });
-    const connection = document.createElement('span'); connection.className = 'project-connection'; connection.textContent = t(snapshot.localServer ? 'Local server' : 'Remote server');
     const status = document.createElement('span'); status.className = `project-connection-dot${snapshot.connected ? ' connected' : ''}`; status.setAttribute('aria-label', t(snapshot.connected ? 'Codex connected' : 'Connecting'));
     const options = document.createElement('button'); options.type = 'button'; options.className = 'project-group-options'; options.title = t('Project options'); options.setAttribute('aria-label', t('Project options')); options.setAttribute('aria-haspopup', 'menu'); options.setAttribute('aria-expanded', 'false'); options.innerHTML = codexIcon('ellipsis');
     options.onclick = event => { event.preventDefault(); event.stopPropagation(); menu.open(options, [{ label: 'Remove project', icon: 'x', action: () => onRemoveProject(cwd) }]); };
-    summary.append(connection, status, options); project.append(summary);
+    summary.append(status, options); project.append(summary);
     if (!items.length) {
       const start = document.createElement('button'); start.type = 'button'; start.className = 'project-new-chat'; start.textContent = t('New chat'); start.onclick = () => onSelectProject(cwd); project.append(start);
     }
@@ -80,6 +88,7 @@ export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, on
     const timestamp = value => Number(value) || Date.parse(value) || 0;
     const time = thread => sort === 'created' ? timestamp(thread.createdAt) : timestamp(thread.recencyAt || thread.updatedAt || thread.createdAt);
     if(next.activeId)unread.delete(next.activeId);
+    syncNotificationButton();
     const priority=thread=>(next.pending?.has(thread.id)?2:unread.has(thread.id)?1:0);
     const threads = next.threads.filter(thread => !query || `${titleOf(thread)} ${thread.cwd || ''}`.toLocaleLowerCase().includes(query)).sort((a, b) => (notificationSort ? priority(b)-priority(a)||(unread.get(b.id)||0)-(unread.get(a.id)||0) : 0) || (sort === 'name' ? titleOf(a).localeCompare(titleOf(b)) : time(b)-time(a)));
     const pinned = disclosure('Pinned', 'pinned', pins.size > 0);
@@ -110,6 +119,8 @@ export function createWorkspaceNavigation({ t, codexIcon, titleOf, shortPath, on
   }
   return {
     render,
+    pinnedIds: () => [...pins],
+    isPinned: id => pins.has(id),
     toggleNotifications(){notificationSort=!notificationSort;savePreferences();syncNotificationButton();if(snapshot)render(snapshot);},
     notify(threadId){if(threadId&&threadId!==snapshot?.activeId){unread.set(threadId,Date.now());if(unread.size>500)unread.delete(unread.keys().next().value);}if(snapshot)render(snapshot);},
     registerProject(cwd, explicit = false) { if (!absoluteProjectPath(cwd) || (removed.has(cwd) && !explicit) || (projects.has(cwd) && !removed.has(cwd))) return; removed.delete(cwd); projects.add(cwd); saveProjects(); if (snapshot) render(snapshot); },

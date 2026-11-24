@@ -6,6 +6,7 @@ export function createWorkspaceMenu({ t, codexIcon }) {
     for (const menu of menus.splice(0)) menu.remove();
     opener?.setAttribute('aria-expanded', 'false');
     if (restoreFocus && opener?.isConnected) opener.focus();
+    opener = null;
   }
   function mount(anchor, items, level = 0) {
     for (const menu of menus.splice(level)) menu.remove();
@@ -29,6 +30,7 @@ export function createWorkspaceMenu({ t, codexIcon }) {
     }
     const bounds = anchor.getBoundingClientRect(), rect = menu.getBoundingClientRect();
     let left = level ? bounds.right + 6 : bounds.left, top = level ? bounds.top : bounds.bottom + 6;
+    if (!level && top + rect.height > innerHeight - 8 && bounds.top - rect.height >= 14) top = bounds.top - rect.height - 6;
     if (left + rect.width > innerWidth - 8) left = level ? bounds.left - rect.width - 6 : innerWidth - rect.width - 8;
     menu.style.left = `${Math.max(8, left)}px`; menu.style.top = `${Math.max(8, Math.min(top, innerHeight - rect.height - 8))}px`;
     menu.onkeydown = event => {
@@ -47,6 +49,7 @@ export function createWorkspaceMenu({ t, codexIcon }) {
   addEventListener('popstate', () => close());
   return {
     close,
+    closeFor(anchor) { if (anchor && anchor === opener) close(); },
     open(anchor, items) {
       if (opener === anchor && menus.length) { close(true); return; }
       const keyboard = anchor.matches(':focus-visible');

@@ -2,7 +2,7 @@ import { buildApprovalModel, permissionRows } from '../src/shared/codex-surfaces
 import { createUserInputCard } from './user-input.js';
 
 // Native decisions keep their structured payloads; all model-provided copy is text.
-export function createSideChatRequest(req,{t,icon,respond,requestEpoch,onResolved,toast}) {
+export function createSideChatRequest(req,{t,icon,menu,respond,requestEpoch,onResolved,toast}) {
   if(req.method==='item/tool/requestUserInput')return createUserInputCard(req,{translate:t,onSubmit:async result=>{await respond(req.id,result,undefined,requestEpoch);onResolved(req.id);}});
   if(!['item/commandExecution/requestApproval','item/fileChange/requestApproval','item/permissions/requestApproval'].includes(req.method))return null;
   const model=buildApprovalModel(req),p=req.params||{},card=document.createElement('section');card.className='approval-card';card.dataset.codexApprovalSurface='';
@@ -16,6 +16,15 @@ export function createSideChatRequest(req,{t,icon,respond,requestEpoch,onResolve
   const answer=async decision=>{card.querySelectorAll('button').forEach(b=>b.disabled=true);try{await respond(req.id,model.kind==='permission'?decision:{decision},undefined,requestEpoch);onResolved(req.id);}catch(error){card.querySelectorAll('button').forEach(b=>b.disabled=false);toast(error.message);}};
   const button=(spec,cls)=>{const b=node('button',cls,t(spec.label));b.type='button';b.onclick=()=>void answer(spec.decision);return b;};
   if(model.leading)form.append(button(model.leading,'approval-leading'));
-  actions.append(button(model.deny,'approval-deny'));if(model.scoped)actions.append(button(model.scoped,'approval-scoped'));
-  actions.append(button(model.primary,'approval-primary'));form.append(actions);form.onsubmit=e=>e.preventDefault();card.append(content,body,form);return card;
+  actions.append(button(model.deny,'approval-deny'));
+  const primary=button(model.primary,'approval-primary');
+  if(model.scoped){
+    const split=node('div','approval-split',''),toggle=node('button','approval-menu-toggle','');
+    toggle.type='button';toggle.innerHTML=icon('chevronDown');
+    toggle.setAttribute('aria-label',t('Approval options'));
+    toggle.setAttribute('aria-haspopup','menu');toggle.setAttribute('aria-expanded','false');
+    toggle.onclick=()=>menu.open(toggle,[{label:model.scoped.label,action:()=>void answer(model.scoped.decision)}]);
+    split.append(primary,toggle);actions.append(split);
+  }else actions.append(primary);
+  form.append(actions);form.onsubmit=e=>e.preventDefault();card.append(content,body,form);return card;
 }

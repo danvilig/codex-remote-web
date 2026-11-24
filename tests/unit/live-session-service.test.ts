@@ -7,6 +7,23 @@ import { LiveSessionStore, parseRollout } from "../../src/server/bridge/live-ses
 const line = (type: string, payload: any, timestamp = "2026-08-11T06:26:25.000Z") => JSON.stringify({ timestamp, type, payload }) + "\n";
 
 describe("Desktop-style live session reader", () => {
+  test("marks a compaction handoff without relabeling the rest of the response", () => {
+    const summary = "**Current Objective**\n\nKeep the fixture task in progress.";
+    const message = (id: string, text: string) =>
+      line("response_item", { type: "message", id, role: "assistant", phase: "final_answer", content: [{ text }] });
+    const state = parseRollout([
+      line("event_msg", { type: "task_started", turn_id: "turn-1" }),
+      message("msg-summary", summary),
+      line("compacted", { message: "Resume from this summary.\n" + summary }),
+      message("msg-answer", "The task is complete."),
+      line("compacted", { message: "Another compaction with no matching message." }),
+    ].join(""));
+    expect(state.turn.items).toMatchObject([
+      { id: "msg-summary", phase: "context_summary", text: summary },
+      { id: "msg-answer", phase: "final_answer" },
+    ]);
+  });
+
   test("reconstructs an active CLI command and its available output", () => {
     const input = [
       line("event_msg", { type: "task_started", turn_id: "turn-1", started_at: 10 }),
@@ -62,6 +79,20 @@ describe("Desktop-style live session reader", () => {
       expect(store.read(path).turn.items[0]).toMatchObject({ status: "completed", aggregatedOutput: "2 pass\n", exitCode: 0 });
       appendFileSync(path, line("event_msg", { type: "task_complete", turn_id: "turn-2", completed_at: 22 }));
       expect(store.read(path)).toMatchObject({ active: false, turn: null });
+      appendFileSync(path, line("event_msg", { type: "token_count", info: {
+        total_token_usage: { total_tokens: 12500, output_tokens: 400 },
+        last_token_usage: { total_tokens: 4600, output_tokens: 120 },
+        model_context_window: 200000,
+      } }) + line("event_msg", { type: "token_count", info: null }));
+      expect(store.read(path)).toMatchObject({
+        active: false,
+        turn: null,
+        tokenUsage: {
+          total: { totalTokens: 12500, outputTokens: 400 },
+          last: { totalTokens: 4600, outputTokens: 120 },
+          modelContextWindow: 200000,
+        },
+      });
     } finally { rmSync(directory, { recursive: true, force: true }); }
   });
 

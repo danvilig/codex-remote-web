@@ -10,11 +10,33 @@ const digest = value => createHash('sha256').update(JSON.stringify(value)).diges
 const identity = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 const copy = entry => entry && structuredClone(entry);
 const publicEntry = entry => { if (!entry) return entry; const { owner, claim, fingerprint, ...value } = entry; return copy(value); };
+const editable = (entry, version) => entry && entry.version === version && !terminal(entry) && !['sending', 'unknown'].includes(entry.status) && !entry.submissionStatus;
+
+function editMessage(entry, text, images) {
+  const input = structuredClone(entry.params.input), mentions = structuredClone(entry.mentions || []);
+  const firstIndex = input.findIndex(item => item.type === 'text');
+  const first = input[firstIndex], old = entry.text.trim();
+  const original = first?.text || '';
+  if (old && original !== old && !original.startsWith(old + '\n')) throw Error('This message cannot be edited safely');
+  const previousSuffix = original.slice(old.length).replace(/^\n/, '');
+  const next = [text.trim(), previousSuffix, ...images.map(image => `Attached file ${JSON.stringify(image.name)}: ${image.path}`)].filter(Boolean).join('\n');
+  if (next !== original && first?.text_elements?.length) throw Error('This message cannot be edited safely');
+  if (next && first) first.text = next;
+  else if (next) input.unshift({ type: 'text', text: next, text_elements: [] });
+  else if (first) input.splice(firstIndex, 1);
+  for (const image of images) {
+    input.push({ type: 'localImage', path: image.path });
+    mentions.push({ id: image.id, source: 'attachment', title: image.name, icon: 'image' });
+  }
+  const params = { ...entry.params, input };
+  if (!input.length || Buffer.byteLength(JSON.stringify({ text, mentions, params })) > 256 * 1024) throw Error('Invalid queued message edit');
+  return { text, params, mentions };
+}
 
 // This lock coordinates local gateways, not an independent Desktop process.
 // Native turn/start has no expected-idle precondition; check immediately before
 // submission, and never replay a request whose acceptance is uncertain.
-export function createDeliveryQueue({ privateRoot, submissions, request, connected, onChange = () => {}, resolveCwd, pollMs = 1000 }) {
+export function createDeliveryQueue({ privateRoot, submissions, request, connected, onChange = () => {}, resolveCwd, resolveAttachments, pollMs = 1000 }) {
   const store = createDeliveryStore(privateRoot), owner = scheduleOwner();
   let timer, stopped = true, ticking = false;
   async function unresolvedReceipts() {
@@ -150,6 +172,35 @@ export function createDeliveryQueue({ privateRoot, submissions, request, connect
     if (typeof action === 'object') { payload = action.payload || action; action = action.action; }
     if (!['enqueue', 'edit', 'reorder', 'cancel', 'pause', 'resume', 'sendNow'].includes(action)) throw Error('Unsupported queue action');
     const receipts = ['resume', 'sendNow', 'reorder'].includes(action) ? await unresolvedReceipts() : [];
+    // Attachment binding takes a separate storage lock. Do it before the queue
+    // transaction and recheck the same version when persisting the edit.
+    let edit;
+    if (action === 'edit') {
+      const { text, id, version, attachmentIds = [] } = payload;
+      if (typeof text !== 'string' || Buffer.byteLength(text) > 128 * 1024 || !Array.isArray(attachmentIds) || attachmentIds.length > 20 || !attachmentIds.every(identity)) throw Error('Invalid queued message edit');
+      const entry = (await store.read()).entries.find(item => item.id === id);
+      if (!editable(entry, version)) throw conflict();
+      const existing = new Set((entry.mentions || []).filter(item => item.source === 'attachment').map(item => item.id));
+      for (const item of entry.params.input) {
+        if (item.type !== 'localImage' || typeof item.path !== 'string') continue;
+        const path = relative(join(privateRoot, 'remote-web-attachments'), resolve(item.path));
+        const parts = path.split(/[\\/]/);
+        if (parts.length === 2 && identity(parts[0])) existing.add(parts[0]);
+      }
+      const ids = [...new Set(attachmentIds)].filter(id => !existing.has(id));
+      if (ids.length && (existing.size + ids.length > 20 || !resolveAttachments)) throw Error('Invalid queued message edit');
+      let images = [];
+      if (ids.length) {
+        const cwd = entry.params.cwd || (await request('thread/read', { threadId: entry.threadId, includeTurns: false })).thread?.cwd;
+        const scope = { ids, cwd, threadId: entry.threadId };
+        ({ items: images } = await resolveAttachments(scope));
+        if (images.length !== ids.length || images.some(item => !item.image)) throw Error('Queued attachments must be images');
+        edit = editMessage(entry, text, images);
+        await resolveAttachments({ ...scope, bind: true });
+      } else {
+        edit = editMessage(entry, text, images);
+      }
+    }
     let threadId;
     const result = await store.transaction(state => {
       recover(state);
@@ -166,7 +217,7 @@ export function createDeliveryQueue({ privateRoot, submissions, request, connect
         state.entries.push(entry); threadId = entry.threadId; return { value: copy(entry) };
       }
       const entry = state.entries.find(item => item.id === payload.id);
-      if (!entry || entry.version !== payload.version || terminal(entry) || (entry.claim && !['cancel','pause'].includes(action)) || ['sending', 'unknown'].includes(entry.status)) throw conflict();
+      if (!entry || entry.version !== payload.version || terminal(entry) || (entry.claim && !['cancel', 'pause', 'edit'].includes(action)) || ['sending', 'unknown'].includes(entry.status)) throw conflict();
       threadId = entry.threadId;
       if (['resume', 'sendNow', 'reorder'].includes(action) && threadBlocked(state, entry.threadId, receipts, entry.id)) throw blocked();
       if (action === 'cancel') { entry.status = 'cancelled'; delete entry.claim; }
@@ -178,10 +229,9 @@ export function createDeliveryQueue({ privateRoot, submissions, request, connect
         if (entry.sendNow) { state.entries = state.entries.filter(item => item !== entry); const first = state.entries.findIndex(item => item.threadId === entry.threadId && !terminal(item)); state.entries.splice(first < 0 ? state.entries.length : first, 0, entry); }
       }
       if (action === 'edit') {
-        if (typeof payload.text !== 'string' || !payload.text.trim() || Buffer.byteLength(payload.text) > 128 * 1024 || entry.submissionStatus) throw Error('Invalid queued message edit');
-        const old = entry.text.trim(), first = entry.params.input.find(item => item.type === 'text');
-        if (!first || (old && !first.text.startsWith(old))) throw Error('This message cannot be edited safely');
-        first.text = payload.text.trim() + first.text.slice(old.length); entry.text = payload.text;
+        if (!editable(entry, payload.version)) throw conflict();
+        Object.assign(entry, edit);
+        delete entry.claim;
       }
       if (action === 'reorder') {
         if (![-1, 1].includes(payload.direction)) throw Error('Invalid queue order');

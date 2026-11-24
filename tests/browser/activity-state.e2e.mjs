@@ -70,9 +70,18 @@ const threadRestore=await page.evaluate(async()=>{
   return{activeId:state.active?.id,storedId:localStorage.getItem('codex-webui-active-thread'),heading:document.querySelector('#threadTitle')?.textContent?.trim(),selected:document.querySelector('.thread-item.active')?.dataset.id};
 });
 
-const sidebar=await page.evaluate(()=>{
-  const api=globalThis.__codexWebuiDebug,node=document.querySelector('#sidebar'),button=document.querySelector('#toggleSidebar');api.setSidebarOpen(true);const open={hidden:document.body.classList.contains('sidebar-hidden'),width:node.getBoundingClientRect().width,pressed:button.getAttribute('aria-pressed')};api.setSidebarOpen(false);const closed={hidden:document.body.classList.contains('sidebar-hidden'),width:node.getBoundingClientRect().width,shadow:getComputedStyle(node).boxShadow,pressed:button.getAttribute('aria-pressed')};api.setSidebarOpen(true);return{open,closed};
-});
+const sidebarState=()=>page.locator('#sidebar').evaluate(node=>({
+  hidden:document.body.classList.contains('sidebar-hidden'),
+  width:node.getBoundingClientRect().width,
+  shadow:getComputedStyle(node).boxShadow,
+  pressed:document.querySelector('#toggleSidebar').getAttribute('aria-pressed'),
+}));
+await page.evaluate(()=>globalThis.__codexWebuiDebug.setSidebarOpen(true));
+await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().width>=250);
+const open=await sidebarState();
+await page.evaluate(()=>globalThis.__codexWebuiDebug.setSidebarOpen(false));
+await page.waitForFunction(()=>document.querySelector('#sidebar').getBoundingClientRect().width===0);
+const sidebar={open,closed:await sidebarState()};
 
 console.log(JSON.stringify({reasoning,groupPersistence,reloadPersistenceBefore,reloadPersistenceAfter,threadRestore,sidebar,errors},null,2));
 await browser.close();

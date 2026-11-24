@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -105,6 +106,65 @@ func TestGatewayLocalBoundary(t *testing.T) {
 		if w.Code != tc.want {
 			t.Errorf("%+v: HTTP %d", tc, w.Code)
 		}
+	}
+}
+
+func TestGatewayWebAssets(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "public"), 0755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name, contents string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(dir, "public", name), []byte(contents), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("index.html", `<meta name="app-bundle-revision" content=""><link href="/style.css">`)
+	write("style.css", "body{color:black}")
+	write("codex-icons.js", "export const fixture = true")
+	write("app.bundle.js", "console.log('fixture')")
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	a, _ := loadLocalAuth(filepath.Join(dir, "credentials"), "synthetic-secret", true)
+	app := &gatewayApp{bridge: new(bridge), root: root, local: a, mux: http.NewServeMux()}
+	app.registerCore()
+	get := func(path, etag string, local bool) *httptest.ResponseRecorder {
+		t.Helper()
+		host := "foreign.test"
+		if local {
+			host = "127.0.0.1:8899"
+		}
+		r := httptest.NewRequest(http.MethodGet, "http://"+host+path, nil)
+		r.RemoteAddr = "127.0.0.1:51300"
+		r.Header.Set("If-None-Match", etag)
+		w := httptest.NewRecorder()
+		app.ServeHTTP(w, r)
+		return w
+	}
+	html := get("/settings/appearance", "", true)
+	css := get("/style.css", "", true)
+	bundle := get("/app.bundle.js", "", true)
+	etag := css.Header().Get("ETag")
+	versioned := "/style.css?v=" + strings.Trim(etag, `"`)
+	if html.Code != 200 || html.Header().Get("Cache-Control") != "no-store" || !strings.Contains(html.Body.String(), versioned) || !strings.Contains(html.Body.String(), `content=`+bundle.Header().Get("ETag")) {
+		t.Fatalf("missing asset revisions or cache policy: %d %s", html.Code, html.Body.String())
+	}
+	if cached := get(versioned, "W/"+etag, true); cached.Code != 304 || cached.Body.Len() != 0 || !strings.Contains(cached.Header().Get("Cache-Control"), "immutable") {
+		t.Fatalf("conditional stylesheet request: %d %v", cached.Code, cached.Header())
+	}
+	if denied := get("/app.bundle.js?v="+strings.Trim(bundle.Header().Get("ETag"), `"`), bundle.Header().Get("ETag"), false); denied.Code != 401 || denied.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("unauthorized bundle response: %d %v", denied.Code, denied.Header())
+	}
+	if icons := get("/codex-icons.js", "", false); icons.Code != 200 || icons.Body.String() != "export const fixture = true" {
+		t.Fatalf("missing login icon module: %d %s", icons.Code, icons.Body.String())
+	}
+	write("style.css", "body{color:blue}")
+	if updated := get(versioned, etag, true); updated.Code != 200 || updated.Body.String() != "body{color:blue}" || updated.Header().Get("ETag") == etag || updated.Header().Get("Cache-Control") != "private, no-cache" {
+		t.Fatalf("stale version incorrectly reused: %d %v", updated.Code, updated.Header())
 	}
 }
 

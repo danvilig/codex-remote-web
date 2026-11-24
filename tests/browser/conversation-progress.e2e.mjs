@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:net';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { join, delimiter } from 'node:path';
 import { chromium } from 'playwright';
 import { root, artifact, launchOptions } from '../helpers/browser-runtime.mjs';
 
 const temp=await mkdtemp('/tmp/crw-progress-'),home=join(temp,'home'),project=join(temp,'project'),log=join(temp,'rpc.jsonl');
 await Promise.all([mkdir(home),mkdir(project)]);
+const imagePath=join(project,'generated.png');
+await writeFile(imagePath,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jT1sAAAAASUVORK5CYII=','base64'));
 const port=await new Promise(resolve=>{const probe=createServer();probe.listen(0,'127.0.0.1',()=>{const port=probe.address().port;probe.close(()=>resolve(port));});}),base=`http://127.0.0.1:${port}`;
 const server=Bun.spawn(['bun','src/server/index.ts'],{cwd:root,stdout:'ignore',stderr:'ignore',env:{...process.env,HOME:home,CODEX_HOME:home,CODEX_AUTH_PATH:join(home,'auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_REVIEW_ROOT:project,CODEX_WEBUI_AUTH_MODE:'local',HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_ENABLE_TERMINAL:'false',CODEX_WEBUI_FIXTURE_CONVERSATION_TOOLS:'true',CODEX_WEBUI_FIXTURE_PROGRESS:'true',CODEX_WEBUI_FIXTURE_LOG:log,PATH:join(root,'tests/fixtures')+delimiter+process.env.PATH}});
 let browser,page,phase='startup';
@@ -59,6 +61,29 @@ try{
   await page.screenshot({path:artifact('conversation-work-below-disclosure.png')});
   await page.locator('.load-older').click();assert.equal(await page.locator('.native-turn-timeline').count(),25);
 
+  phase='context summaries stay in collapsible work details';
+  await page.evaluate(()=>{
+    const d=globalThis.__codexWebuiDebug;
+    const summary={id:'msg-compaction',type:'agentMessage',phase:'final_answer',text:'**Current Objective**\n\nContinue the fixture.'};
+    const turn={id:'compaction-fixture',status:'inProgress',items:[summary]};
+    d.syncTurnSnapshot(turn);
+    d.syncTurnSnapshot({...turn,items:[{...summary,phase:'context_summary'}]});
+    d.syncTurnSnapshot({...turn,status:'completed',items:[
+      {...summary,id:'item-compaction'},
+      {id:'item-answer',type:'agentMessage',phase:'final_answer',text:'The work is complete.'},
+    ]});
+  });
+  const compacted=page.locator('[data-turn-id=compaction-fixture]');
+  assert.equal(await compacted.locator('.turn-final-slot').innerText(),'The work is complete.');
+  await compacted.getByRole('button',{name:'Show work'}).click();
+  const summary=compacted.locator('.context-compaction-summary');
+  assert.equal(await summary.count(),1);
+  assert.equal(await summary.locator('.message-text').isVisible(),false);
+  await summary.locator('summary').click();
+  assert.equal(await summary.locator('.message-text').isVisible(),true);
+  await summary.locator('summary').click();
+  await compacted.screenshot({path:artifact('conversation-context-summary.png')});
+
   phase='a genuinely running history resumes its indicator only after loading';
   await page.evaluate(()=>{window.activeOpening=globalThis.__codexWebuiDebug.openThread('progress-active');});
   await page.locator('.conversation-load-spinner').waitFor();
@@ -81,7 +106,7 @@ try{
   await page.clock.resume();
   assert.equal(await page.evaluate(()=>globalThis.__codexWebuiDebug.state.active.id),'progress-fail');
   await page.evaluate(()=>{void globalThis.__codexWebuiDebug.openThread('progress-history');});
-  await page.locator('.conversation-load-progress').waitFor();
+  await page.locator('#conversationRefresh').waitFor();
   await page.evaluate(()=>globalThis.__codexWebuiDebug.openThread('thread-B'));
   await page.waitForTimeout(1400);
   assert.equal(await page.evaluate(()=>globalThis.__codexWebuiDebug.state.active.id),'thread-B');
@@ -90,42 +115,116 @@ try{
   await page.waitForTimeout(1400);assert.equal(await page.locator('#emptyState').count(),1);
   assert.equal(await page.locator('#conversation').getAttribute('aria-busy'),null);
 
+  phase='large history opens a recent page and keeps its cursor when cached';
+  const pagedIds = () => page.locator('#conversation .native-turn-timeline').evaluateAll(turns => turns.map(turn => turn.dataset.turnId));
+  const pagedRange = (start, length) => Array.from({length}, (_, index) => `paged-${start + index}`);
+  const openPaged = () => page.evaluate(() => globalThis.__codexWebuiDebug.openThread('progress-paged'));
+  assert.equal(await openPaged(), true);
+  assert.deepEqual(await pagedIds(), pagedRange(7, 5));
+  await page.evaluate(() => globalThis.__codexWebuiDebug.openThread('thread-B'));
+  assert.equal(await openPaged(), true);
+  const older = page.getByRole('button', {name:'Load earlier messages', exact:true});
+  await older.click();
+  await page.locator('[data-turn-id=paged-2]').waitFor();
+  assert.deepEqual(await pagedIds(), pagedRange(2, 10));
+  await older.click();
+  await page.locator('[data-turn-id=paged-0]').waitFor();
+  assert.deepEqual(await pagedIds(), pagedRange(0, 12));
+  assert.equal(await older.count(), 0);
+
   phase='native running events, plan, approvals, connection and completion';
   await page.evaluate(()=>{const d=globalThis.__codexWebuiDebug;d.state.active={id:'runtime-thread',cwd:d.state.config.defaultCwd,turns:[]};d.notify('turn/started',{threadId:'runtime-thread',turn:{id:'runtime'}});});
   const status=page.locator('[data-turn-id=runtime] .runtime-progress');
-  await status.getByText('Working',{exact:true}).waitFor();
+  await status.locator('.runtime-heading strong').getByText('Working',{exact:true}).waitFor();
+  const disclosure=status.locator('.runtime-heading');
+  const workBody=page.locator('[data-turn-id=runtime] .assistant-body');
+  assert.equal(await status.getAttribute('open'),null);
   const notify=async(method,params)=>page.evaluate(({method,params})=>globalThis.__codexWebuiDebug.notify(method,{threadId:'runtime-thread',turnId:params.turn?.id||'runtime',...params}),{method,params});
   await notify('item/reasoning/summaryTextDelta',{itemId:'reason',delta:'Inspecting source',summaryIndex:0});
-  await status.getByText('Thinking',{exact:true}).waitFor();
+  await disclosure.getByText('Thinking',{exact:true}).waitFor();
   await notify('item/completed',{item:{id:'reason',type:'reasoning',summary:['Inspecting source']}});
+  await notify('item/started',{item:{id:'note',type:'agentMessage',phase:'commentary',text:''}});
+  await notify('item/agentMessage/delta',{itemId:'note',delta:'I will run the focused checks.'});
+  const commentary=workBody.getByText('I will run the focused checks.',{exact:true});
+  await commentary.waitFor();
+  await notify('item/completed',{item:{id:'note',type:'agentMessage',phase:'commentary',text:'I will run the focused checks.'}});
   await notify('item/started',{item:{id:'read',type:'commandExecution',command:'cat README.md'}});
-  await status.getByText('Reading',{exact:true}).waitFor();await status.getByText('README.md',{exact:true}).waitFor();
+  await disclosure.getByText('Reading',{exact:true}).waitFor();
+  assert.equal(await workBody.locator('[data-item-id=read]').isVisible(),true);
+  await disclosure.press('Enter');
+  await status.locator('.runtime-detail').getByText('README.md',{exact:true}).waitFor();
   await notify('item/completed',{item:{id:'read',type:'commandExecution',command:'cat README.md'}});
   await notify('item/started',{item:{id:'cmd',type:'commandExecution',command:'bun test'}});
-  await status.getByText('Running command',{exact:true}).waitFor();
+  await disclosure.getByText('Running command',{exact:true}).waitFor();
   await notify('item/commandExecution/outputDelta',{itemId:'cmd',delta:'starting tests\n'});
   await notify('turn/plan/updated',{plan:[{step:'Inspect source',status:'completed'},{step:'Run tests',status:'inProgress'},{step:'Report',status:'pending'}]});
   assert.equal(await status.locator('progress').getAttribute('value'),'1');
   assert.equal(await status.locator('progress').getAttribute('max'),'3');
+  await status.locator('.runtime-plan summary').click();
+  await status.getByText('• Run tests',{exact:true}).waitFor();
+  await disclosure.press('Space');
+  assert.equal(await workBody.locator('[data-item-id=read]').isVisible(),false);
+  await workBody.getByText('starting tests',{exact:true}).waitFor();
+  await commentary.waitFor();
   await page.screenshot({path:artifact('conversation-running-command.png')});
-  await page.evaluate(()=>globalThis.__codexWebuiDebug.request({id:'runtime-approval',method:'item/commandExecution/requestApproval',params:{threadId:'runtime-thread',turnId:'runtime',itemId:'cmd',command:'bun test',availableDecisions:['accept','decline']}}));
-  await status.getByText('Waiting for approval',{exact:true}).waitFor();
+  await disclosure.click();
+  await page.screenshot({path:artifact('conversation-running-expanded.png')});
+  await disclosure.click();
+  await page.evaluate(()=>globalThis.__codexWebuiDebug.request({id:'runtime-approval',method:'item/commandExecution/requestApproval',params:{threadId:'runtime-thread',turnId:'runtime',itemId:'cmd',command:'bun test',availableDecisions:['accept','acceptForSession','decline']}}));
+  await disclosure.getByText('Waiting for approval',{exact:true}).waitFor();
+  assert(await page.locator('[data-turn-id=runtime] .approval-card').isVisible());
+  await commentary.waitFor();
+  for(const width of [390,768,1280]){
+    await page.setViewportSize({width,height:580});
+    const approval=page.getByRole('button',{name:'Approval options'});
+    await approval.click();
+    const option=page.getByRole('menuitem',{name:'Allow this conversation'});
+    await option.waitFor();
+    assert(await option.evaluate(el=>{const r=el.getBoundingClientRect();return el.closest('.workspace-popup').parentElement===document.body&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2));}));
+    await page.screenshot({path:artifact(`approval-options-${width}.png`)});
+    await page.keyboard.press('Escape');
+    await option.waitFor({state:'detached'});
+    assert(await approval.evaluate(el=>document.activeElement===el));
+  }
   await page.evaluate(()=>{globalThis.__codexWebuiDebug.state.connected=false;});
   await notify('turn/plan/updated',{plan:[]});
-  await status.getByText('Connection interrupted',{exact:true}).waitFor();
+  await disclosure.getByText('Connection interrupted',{exact:true}).waitFor();
   await page.evaluate(()=>{globalThis.__codexWebuiDebug.state.connected=true;});
   await notify('serverRequest/resolved',{requestId:'runtime-approval'});
-  await status.getByText('Running command',{exact:true}).waitFor();
+  await disclosure.getByText('Running command',{exact:true}).waitFor();
   assert.equal(await page.locator('.activity-group.waiting-approval').count(),0);
   await notify('item/completed',{item:{id:'cmd',type:'commandExecution',command:'bun test'}});
+  assert.equal(await workBody.locator('[data-item-id=cmd]').isVisible(),false);
+  await disclosure.click();
+  const commandGroup=workBody.locator('.activity-group').filter({has:page.locator('[data-item-id=cmd]')});
+  if(!await workBody.locator('[data-item-id=cmd]').isVisible())await commandGroup.locator('.activity-summary').click();
+  assert(await workBody.locator('[data-item-id=cmd]').isVisible());
+  await disclosure.click();
   await notify('item/started',{item:{id:'edit',type:'fileChange',changes:[{path:'main.ts',diff:'@@ -1 +1 @@\n-old\n+new'}]}});
-  await status.getByText('Editing files',{exact:true}).waitFor();
-  await status.getByText('main.ts',{exact:true}).waitFor();
+  await disclosure.getByText('Editing files',{exact:true}).waitFor();
+  assert.equal(await status.locator('.runtime-detail').textContent(),'main.ts');
   await notify('item/completed',{item:{id:'edit',type:'fileChange',changes:[]}});
+  await notify('item/started',{item:{id:'search',type:'webSearch',query:'fixture search'}});
+  await disclosure.getByText('Searching the web',{exact:true}).waitFor();
+  assert(await workBody.locator('.web-search-terms').isVisible());
+  await notify('item/completed',{item:{id:'search',type:'webSearch',query:'fixture search'}});
+  await notify('item/started',{item:{id:'image',type:'imageGeneration'}});
+  await disclosure.getByText('Generating image',{exact:true}).waitFor();
+  await page.locator('[data-turn-id=runtime] .generated-image-pending').waitFor();
+  await notify('item/completed',{item:{id:'image',type:'imageGeneration',src:imagePath}});
+  const generated=page.locator('[data-turn-id=runtime] .generated-image-reveal .message-image-button');
+  await generated.waitFor();
+  await page.waitForFunction(()=>document.querySelector('.generated-image-reveal img')?.naturalWidth>0);
+  await commentary.waitFor();
   await notify('item/agentMessage/delta',{itemId:'reply',delta:'Ready to review'});
-  await status.getByText('Writing response',{exact:true}).waitFor();
+  await disclosure.getByText('Writing response',{exact:true}).waitFor();
+  const answer=page.locator('[data-turn-id=runtime] .turn-final-slot.is-streaming');
+  await answer.getByText('Ready to review',{exact:true}).waitFor();
+  await disclosure.focus();
   await notify('turn/completed',{turn:{id:'runtime',status:'completed',items:[]}});
   assert.equal(await status.count(),0);
+  assert.equal(await answer.count(),0);
+  assert.equal(await page.locator('[data-turn-id=runtime] .turn-work-toggle').evaluate(el=>el===document.activeElement),true);
 
   phase='mobile, Chinese and reduced motion';
   await page.setViewportSize({width:390,height:844});
@@ -174,7 +273,103 @@ try{
   assert.equal(await ssePage.evaluate(()=>globalThis.__codexWebuiDebug.openThread('progress-history')),true);
   assert.equal(await ssePage.locator('.native-turn-timeline').count(),20);
   assert.equal(await ssePage.locator('#conversation').getAttribute('aria-busy'),null);
+
+  phase='cached turn displayed with the refresh response held';
+  await ssePage.evaluate(()=>globalThis.__codexWebuiDebug.openThread('thread-B'));
+  let releaseRead, readStarted, readCount=0;
+  const pendingRead=new Promise(resolve=>{readStarted=resolve});
+  const release=new Promise(resolve=>{releaseRead=resolve});
+  await ssePage.route('**/api/rpc',async route=>{
+    const {method,params}=route.request().postDataJSON();
+    if(method==='thread/read'&&params?.threadId==='progress-history'&&params.includeTurns&&++readCount===1){
+      readStarted();
+      await release;
+    }
+    await route.continue();
+  });
+  const reopen=()=>ssePage.evaluate(()=>{window.reopening=globalThis.__codexWebuiDebug.openThread('progress-history');});
+  await reopen();
+  await pendingRead;
+  const cachedTurn=ssePage.locator('[data-turn-id=history-24]'), refresh=ssePage.locator('#conversationRefresh');
+  await cachedTurn.waitFor();
+  assert.equal(await ssePage.locator('.conversation-load-progress').count(),0);
+  assert.equal(await refresh.innerText(),'Updating conversation…');
+  await ssePage.locator('#prompt').fill('Keep this while revalidating');
+  await ssePage.locator('#prompt').press('Enter');
+  assert.equal(await ssePage.locator('#sendButton').isDisabled(),true);
+  await ssePage.evaluate(()=>globalThis.__codexWebuiDebug.openThread('thread-B'));
+  await reopen();
+  await cachedTurn.waitFor();
+  await cachedTurn.evaluate(el=>{el.dataset.fixturePreserved='true';});
+  releaseRead();
+  assert.equal(await ssePage.evaluate(()=>window.reopening),true);
+  assert.equal(readCount,1,'rapid revisits share the same read');
+  assert.equal(await cachedTurn.getAttribute('data-fixture-preserved'),'true','unchanged history is not rebuilt');
+  assert.equal(await ssePage.locator('#prompt').inputValue(),'Keep this while revalidating');
+  assert.equal(await ssePage.locator('#sendButton').isDisabled(),false);
+  assert.equal(await ssePage.locator('.load-older').count(),1);
+
+  phase='offline cached revisit';
+  await ssePage.evaluate(()=>globalThis.__codexWebuiDebug.openThread('thread-B'));
+  await sseContext.setOffline(true);
+  await ssePage.waitForFunction(()=>!navigator.onLine);
+  const beforeOffline=readCount;
+  await reopen();
+  await cachedTurn.waitFor();
+  assert.match(await refresh.innerText(),/Offline · Showing previously loaded messages/);
+  assert.equal(await ssePage.locator('#sendButton').isDisabled(),true);
+  assert.equal(readCount,beforeOffline,'offline revisit does not try to read the network');
+  await sseContext.setOffline(false);
+  await refresh.waitFor({state:'hidden'});
+  assert.equal(await ssePage.locator('#prompt').inputValue(),'Keep this while revalidating');
+  assert.equal(await ssePage.locator('#sendButton').isDisabled(),false);
   await sseContext.close();
+
+  phase='preloaded pins and background streaming';
+  const pinnedContext=await browser.newContext({viewport:{width:1074,height:760}});
+  await pinnedContext.addInitScript(()=>{
+    localStorage.setItem('codex-remote-web-pins',JSON.stringify(['thread-A','progress-active']));
+    const Native=globalThis.WebSocket;
+    globalThis.WebSocket=class extends Native{constructor(url,...rest){if(new URL(url,location.href).pathname==='/ws')throw Error('Fixture: force SSE');super(url,...rest);}};
+  });
+  const pinnedPage=await pinnedContext.newPage(), reads=[];
+  pinnedPage.on('request',req=>{
+    if(!req.url().endsWith('/api/rpc'))return;
+    const request=req.postDataJSON();
+    if(request.method==='thread/read'&&request.params.includeTurns)reads.push(request.params.threadId);
+  });
+  await pinnedPage.goto(base);
+  const pinned=pinnedPage.locator('[data-section=pinned]');
+  await pinned.locator('[data-id=progress-active] .thread-open').waitFor();
+  assert.deepEqual(reads,['thread-A','progress-active'],'only pinned chats preload, including a chat outside Recents');
+  await pinned.locator('[data-id=thread-A] .thread-open').click();
+  await pinnedPage.waitForFunction(()=>globalThis.__codexWebuiDebug.state.active?.id==='thread-A');
+  const delta=text=>pinnedPage.evaluate(delta=>globalThis.__codexWebuiDebug.notify('item/agentMessage/delta',{
+    threadId:'progress-active',turnId:'history-active',itemId:'active-stream',phase:'final_answer',delta,
+  }),text);
+  await delta('Background');
+  await pinned.locator('[data-id=progress-active] .thread-open').click();
+  const pinnedAnswer=pinnedPage.locator('[data-turn-id=history-active] .turn-final-slot .message-text');
+  await pinnedAnswer.filter({hasText:'Background'}).waitFor();
+  assert.equal(await pinnedAnswer.getAttribute('data-raw'),'Background');
+  await pinned.locator('[data-id=thread-A] .thread-open').click();
+  await delta(' stream');
+  await pinned.locator('[data-id=progress-active] .thread-open').click();
+  await pinnedAnswer.filter({hasText:'Background stream'}).waitFor();
+  await delta(' retained.');
+  await pinnedAnswer.filter({hasText:'Background stream retained.'}).waitFor();
+  assert.equal(await pinnedAnswer.getAttribute('data-raw'),'Background stream retained.');
+  assert.deepEqual(reads,['thread-A','progress-active'],'fresh pinned switches do not download history again');
+  await pinnedPage.evaluate(()=>{
+    window.refreshPinned=globalThis.__codexWebuiDebug.openThread('progress-active',null,true);
+  });
+  await pinnedPage.locator('#conversationRefresh').waitFor();
+  await delta(' While refreshing.');
+  await pinnedAnswer.filter({hasText:'While refreshing.'}).waitFor();
+  assert.equal(await pinnedPage.evaluate(()=>window.refreshPinned),true);
+  assert.equal(await pinnedAnswer.getAttribute('data-raw'),'Background stream retained. While refreshing.');
+  await pinnedPage.screenshot({path:artifact('pinned-stream-cache.png')});
+  await pinnedContext.close();
   assert.deepEqual(errors,[]);
   const records=(await readFile(log,'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.equal(records.filter(record=>['turn/start','turn/steer'].includes(record.method)).length,0,'reads, retries and runtime presentation must never execute a message');

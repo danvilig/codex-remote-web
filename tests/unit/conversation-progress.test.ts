@@ -25,7 +25,7 @@ test('unchanged snapshots confirm running without faking new activity; terminal 
   const state = { active: { id: 'thread' }, connected: true, turns: new Map(), serverRequests: new Map() };
   const ensureTurn = (id: string) => {
     if (!state.turns.has(id)) {
-      const turn = document.createElement('article'); turn.innerHTML = '<div class="turn-final-slot"></div>';
+      const turn = document.createElement('article'); turn.innerHTML = '<div class="assistant-body"></div><div class="turn-final-slot"></div>';
       document.querySelector('main')!.append(turn); state.turns.set(id, turn);
     }
     return state.turns.get(id);
@@ -54,9 +54,9 @@ test('unchanged snapshots confirm running without faking new activity; terminal 
     expect(document.querySelector('.runtime-progress')).toBeNull();
     const observed = ensureTurn('observed');
     runtime.snapshot({ id: 'observed', status: 'inProgress', items: [] });
-    expect(observed.querySelector('.runtime-elapsed').textContent).toBe('Observed for 0s');
+    expect(observed.querySelector('.runtime-elapsed').title).toBe('Observed for 0s');
     runtime.snapshot({ id: 'observed', status: 'inProgress', startedAtMs: time - 5000, items: [] });
-    expect(observed.querySelector('.runtime-elapsed').textContent).toBe('Elapsed 5s');
+    expect(observed.querySelector('.runtime-elapsed').title).toBe('Elapsed 5s');
   } finally { runtime.clear(); globalThis.document = previous; dom.window.close(); }
 });
 
@@ -67,7 +67,7 @@ test('history metadata cannot start work and loading suppresses runtime panels u
   const state = { active: { id: 'thread' }, connected: true, turns: new Map(), serverRequests: new Map() };
   const ensureTurn = (id: string) => {
     if (!state.turns.has(id)) {
-      const turn = document.createElement('article'); turn.innerHTML = '<div class="turn-final-slot"></div>';
+      const turn = document.createElement('article'); turn.innerHTML = '<div class="assistant-body"></div><div class="turn-final-slot"></div>';
       document.querySelector('main')!.append(turn); state.turns.set(id, turn);
     }
     return state.turns.get(id);

@@ -3,7 +3,7 @@ import { createServer } from 'node:net';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join, delimiter } from 'node:path';
 import { chromium } from 'playwright';
-import { root, launchOptions } from '../helpers/browser-runtime.mjs';
+import { root, launchOptions, artifact } from '../helpers/browser-runtime.mjs';
 const home=await mkdtemp(join(root,'.artifacts/conversation-safety-'));
 const port=await new Promise(resolve=>{const probe=createServer();probe.listen(0,'127.0.0.1',()=>{const p=probe.address().port;probe.close(()=>resolve(p));});});
 const base=`http://127.0.0.1:${port}`;
@@ -119,8 +119,69 @@ try{
   await page.waitForFunction(()=>!document.querySelector('.conversation-loading')?.textContent.includes('Loading conversation'));
   assert.equal(await page.locator('#prompt').inputValue(),'Typing while history loads');
   assert.deepEqual(errors,[]);
+  // An open WebSocket can lose a reply without raising a disconnect event.
+  await page.clock.install();
+  await page.evaluate(()=>{
+    const {state}=globalThis.__codexWebuiDebug;
+    const send=state.ws.send.bind(state.ws);
+    state.transport='ws';
+    state.active.canAcceptDirectInput=false;
+    window.droppedCalls=[];
+    state.ws.send=raw=>{
+      const call=JSON.parse(raw);
+      if(call.method==='host/submissions/reconcile'){
+        window.checkDeliveryId=call.id;
+        if(window.dropDeliveryCheck)return;
+      }
+      if(['thread/resume','turn/start','turn/steer'].includes(call.method)){window.droppedCalls.push(call);return;}
+      send(raw);
+    };
+  });
+  await page.locator('#prompt').fill('Keep this draft when resume has no reply');
+  await page.locator('#composer').evaluate(form=>form.requestSubmit());
+  await page.waitForFunction(()=>window.droppedCalls.length===1);
+  assert.equal(await page.locator('#sendButton').getAttribute('aria-busy'),'true');
+  assert.equal(await page.locator('#prompt').inputValue(),'Keep this draft when resume has no reply');
+  await page.screenshot({path:artifact('composer-resume-awaiting-reply.png')});
+  await page.clock.fastForward(31000);
+  await page.getByText('Could not prepare the message in time. Your draft was kept.',{exact:true}).waitFor();
+  assert.deepEqual(await page.evaluate(()=>window.droppedCalls.map(({method,params})=>[method,params.excludeTurns])),[['thread/resume',true]]);
+  assert.equal(await page.locator('#prompt').inputValue(),'Keep this draft when resume has no reply');
+  assert.equal(await page.locator('#sendButton').isEnabled(),true);
+  await page.screenshot({path:artifact('composer-resume-timeout.png')});
+  await page.evaluate(()=>{globalThis.__codexWebuiDebug.state.active.canAcceptDirectInput=true;});
+  await page.locator('#prompt').fill('Confirm delivery without sending twice');
+  await page.locator('#composer').evaluate(form=>form.requestSubmit());
+  await page.waitForFunction(()=>window.droppedCalls.length===2);
+  await page.clock.fastForward(36000);
+  const uncertain=page.locator('.composer-queue-row[data-submission-id][data-status=unknown]');
+  await uncertain.getByRole('button',{name:'Check delivery status'}).waitFor();
+  await uncertain.getByRole('button',{name:'Copy recovery text'}).waitFor();
+  assert.match(await uncertain.innerText(),/Confirm delivery without sending twice/);
+  assert.equal(await page.locator('#sendButton').isEnabled(),true);
+  assert.equal(await page.locator('.user-turn[data-optimistic-user=true]').count(),0);
+  const check=uncertain.getByRole('button',{name:'Check delivery status'});
+  const deliveryStatus=page.locator('.composer-delivery-status');
+  await check.click();
+  await deliveryStatus.getByText('The gateway has no receipt for this message yet.',{exact:true}).waitFor();
+  await page.evaluate(()=>{window.dropDeliveryCheck=true;window.checkDeliveryId=null;});
+  await check.click();
+  await deliveryStatus.getByText('Checking delivery status…',{exact:true}).waitFor();
+  await page.waitForFunction(()=>window.checkDeliveryId!==null);
+  await page.clock.fastForward(13000);
+  await deliveryStatus.getByText('Delivery status check timed out. Try again.',{exact:true}).waitFor();
+  await check.click();
+  await page.evaluate(()=>{
+    const {state}=globalThis.__codexWebuiDebug;
+    state.ws.dispatchEvent(new MessageEvent('message',{data:JSON.stringify({type:'rpc/result',id:window.checkDeliveryId,result:{id:document.querySelector('[data-submission-id]').dataset.submissionId,threadId:state.active.id,status:'accepted'}})}));
+  });
+  await deliveryStatus.getByText('Message received by Codex.',{exact:true}).waitFor();
+  await uncertain.waitFor({state:'detached'});
+  await page.screenshot({path:artifact('composer-delivery-confirmed-mobile.png')});
+  assert.deepEqual(await page.evaluate(()=>window.droppedCalls.map(call=>call.method)),['thread/resume','turn/start']);
+  assert.deepEqual(errors,[]);
   // Broken optional review preferences must not prevent booting the whole app.
   const corrupted=await browser.newContext();await corrupted.addInitScript(()=>{if(window===window.top)localStorage.setItem('codex-webui-review-preferences','{broken');});
   const other=await corrupted.newPage();await other.goto(base,{waitUntil:'networkidle'});await other.waitForFunction(()=>globalThis.__codexWebuiDebug?.state.connected);
-  console.log('PASS: isolated tab drafts, reload recovery, mobile new-chat dismissal, navigation during resume/create/send, duplicate submit prevention and safe failure recovery');
+  console.log('PASS: isolated drafts, navigation during resume/create/send, duplicate prevention, and lost preflight/dispatch reply recovery');
 }finally{await browser?.close();gateway.kill('SIGTERM');await gateway.exited;await rm(home,{recursive:true,force:true});}

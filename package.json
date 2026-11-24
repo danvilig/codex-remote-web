@@ -1,6 +1,6 @@
 {
   "name": "codex-remote-web",
-  "version": "0.2.0-beta.2",
+  "version": "0.2.1-beta.1",
   "private": true,
   "license": "MIT",
   "type": "module",
@@ -14,7 +14,7 @@
     "check": "bun scripts/build.ts --check",
     "test": "bun run test:unit",
     "test:unit": "bun test tests/unit",
-    "test:foundations": "bun tests/browser/web-foundations.e2e.mjs && bun run test:conversation-safety",
+    "test:foundations": "bun tests/browser/web-foundations.e2e.mjs && bun tests/browser/workspace-styles.e2e.mjs && bun tests/browser/conversation-usage.e2e.mjs && bun run test:conversation-safety",
     "test:shared-server": "bun tests/browser/shared-app-server.e2e.mjs",
     "test:shared-server:native": "bun tests/live/shared-app-server-native.mjs",
     "test:progress": "bun tests/browser/conversation-progress.e2e.mjs",

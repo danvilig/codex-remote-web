@@ -1,68 +1,90 @@
-import { createServer } from 'node:net';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import { tmpdir } from 'node:os';
+import assert from 'node:assert/strict';
+import { readFile, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
-import { launchOptions } from '../helpers/browser-runtime.mjs';
+import { artifact, launchOptions } from '../helpers/browser-runtime.mjs';
+import { isolatedWorkspace } from '../helpers/isolated-workspace.mjs';
 
-const root=resolve(import.meta.dirname,'../..');
-const freePort=()=>new Promise((resolvePort,reject)=>{const probe=createServer();probe.once('error',reject);probe.listen(0,'127.0.0.1',()=>{const address=probe.address();if(!address||typeof address==='string')return reject(new Error('Could not allocate file download test port'));probe.close(error=>error?reject(error):resolvePort(address.port))})});
-const port=await freePort();
-const base=`http://127.0.0.1:${port}`;
-const fixtureRoot=mkdtempSync(join(tmpdir(),'codex-webui-download-'));
-const fixture=join(fixtureRoot,"agent's result.txt");
-const body='downloaded from the Codex conversation\n';
-writeFileSync(fixture,body);
-const server=Bun.spawn(['bun','run','src/server/index.ts'],{cwd:root,env:{...process.env,HOST:'127.0.0.1',PORT:String(port),CODEX_WEBUI_DOWNLOAD_ROOTS:fixtureRoot},stdout:'ignore',stderr:'ignore'});
+const workspace = await isolatedWorkspace();
+const { base, project, home, directory } = workspace;
+const name = "agent's result.txt", file = join(project,name);
+const report = join(home,'live progress.html'), picture = join(project,'result.png');
+const body = 'first line\nsecond line\nthird line\n';
 let browser;
-
-try{
-  for(let attempt=0;attempt<80;attempt++){
-    try{if((await fetch(`${base}/api/health`)).ok)break}catch{}
-    if(attempt===79)throw new Error('File download test server did not become ready');
-    await Bun.sleep(100);
+try {
+  await Promise.all([
+    writeFile(file,body),
+    writeFile(report,'<h1>Live progress</h1><meter max="100" value="42"></meter><script>window.untrustedScript=true</script><img src="https://example.invalid/image.png">'),
+    writeFile(picture,Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jT1sAAAAASUVORK5CYII=','base64')),
+    writeFile(join(project,'.env'),'DUMMY_SECRET=not-a-real-credential'),
+    writeFile(join(directory,'outside.txt'),'outside'),
+  ]);
+  const downloadUrl = (path,cwd=project) => base+'/api/files/download?'+new URLSearchParams({path,cwd});
+  const direct=await fetch(downloadUrl(file));
+  assert.equal(await direct.text(),body);
+  assert.match(direct.headers.get('content-disposition'),/filename\*=UTF-8''agent%27s%20result.txt/);
+  assert.equal(direct.headers.get('cache-control'),'no-store');
+  assert.equal(direct.headers.get('x-content-type-options'),'nosniff');
+  for(const [path,cwd] of [[join(directory,'outside.txt'),directory],[join(project,'.env'),project]]){
+    assert.equal((await fetch(downloadUrl(path,cwd))).status,404);
   }
-
-  const direct=await fetch(`${base}/api/files/download?path=${encodeURIComponent(fixture)}&cwd=${encodeURIComponent(fixtureRoot)}`);
-  if(!direct.ok||await direct.text()!==body)throw new Error('Authenticated file endpoint did not stream the fixture');
-  if(!direct.headers.get('content-disposition')?.includes("filename*=UTF-8''agent%27s%20result.txt"))throw new Error(`Unexpected content disposition: ${direct.headers.get('content-disposition')}`);
-  if(direct.headers.get('cache-control')!=='no-store'||direct.headers.get('x-content-type-options')!=='nosniff')throw new Error('File endpoint security headers are incomplete');
-  const denied=await fetch(`${base}/api/files/download?path=${encodeURIComponent('/etc/hosts')}`);
-  if(denied.status!==404)throw new Error(`Outside files must be rejected, got ${denied.status}`);
-  const privateFixture=join(fixtureRoot,'.env');
-  writeFileSync(privateFixture,'DUMMY_SECRET=not-a-real-credential');
-  const privateResponse=await fetch(`${base}/api/files/download?path=${encodeURIComponent(privateFixture)}`);
-  if(privateResponse.status!==404)throw new Error('Private files must be rejected even inside an explicit download root');
-  const outsideFixture=join(tmpdir(),`codex-webui-outside-${process.pid}.txt`);
-  try {
-    writeFileSync(outsideFixture,'outside');
-    const outsideResponse=await fetch(`${base}/api/files/download?path=${encodeURIComponent(outsideFixture)}&cwd=${encodeURIComponent(tmpdir())}`);
-    if(outsideResponse.status!==404)throw new Error('A caller-supplied cwd must not expand download roots');
-  } finally { rmSync(outsideFixture,{force:true}); }
-
   browser=await chromium.launch(launchOptions());
-  const page=await browser.newPage({acceptDownloads:true,viewport:{width:1000,height:720}});
-  await page.goto(base,{waitUntil:'networkidle'});
-  await page.waitForFunction(()=>globalThis.__codexWebuiDebug);
-  await page.evaluate(({fixture})=>{
-    const api=globalThis.__codexWebuiDebug;
-    api.state.active={id:'download-thread',cwd:'/tmp',source:'local'};
-    document.querySelector('#conversation').replaceChildren();
-    api.notify('item/completed',{turnId:'download-turn',item:{id:'download-answer',type:'agentMessage',phase:'final_answer',text:`The result is ready. :codex-file-citation{path="${fixture}" purpose="output" artifact_kind="workbook"}`}});
-  },{fixture});
-  const link=page.locator('[data-local-conversation-final-assistant] a[data-file-download]');
-  await link.waitFor();
-  const attributes=await link.evaluate(node=>({href:node.getAttribute('href'),download:node.getAttribute('download'),path:node.dataset.fileDownload}));
-  if(!attributes.href?.startsWith('/api/files/download?')||attributes.download!=="agent's result.txt"||attributes.path!==fixture)throw new Error(`Unexpected download link: ${JSON.stringify(attributes)}`);
-  const downloadPromise=page.waitForEvent('download');
-  await link.click();
-  const download=await downloadPromise;
-  const downloadedPath=await download.path();
-  if(download.suggestedFilename()!=="agent's result.txt"||!downloadedPath||readFileSync(downloadedPath,'utf8')!==body)throw new Error(`Browser download was incorrect: ${download.suggestedFilename()}`);
-  console.log(JSON.stringify({endpoint:'ok',attributes,suggestedFilename:download.suggestedFilename(),content:'ok'},null,2));
+  for(const width of [1280,768,390]){
+    const page=await browser.newPage({acceptDownloads:true,viewport:{width,height:844},hasTouch:width<900,isMobile:width<900});
+    let downloads=0, downloadRequests=0;
+    page.on('download',()=>downloads++);
+    page.on('request',request=>{if(new URL(request.url()).pathname==='/api/files/download')downloadRequests++;});
+    await page.addInitScript(()=>{if(window===window.top)localStorage.setItem('codex-webui-locale','en');});
+    await page.goto(base);
+    await page.waitForFunction(()=>globalThis.__codexWebuiDebug?.state.connected);
+    await page.evaluate(({file,report,picture})=>{
+      const app=globalThis.__codexWebuiDebug;
+      app.state.active={id:'file-link-fixture',cwd:app.state.config.defaultCwd,source:'local'};
+      const text=`:codex-file-citation{path="${file}" purpose="output"}\n\n[Live progress](sandbox:${encodeURI(report)})\n\n[Source line](<${file}:2-3>)\n\n[Result image](${picture})\n\n[Unsupported](<${file}.pdf>)`;
+      app.notify('item/completed',{turnId:'fixture-turn',item:{id:'answer',type:'agentMessage',phase:'final_answer',text}});
+    },{file,report,picture});
+    const panel=page.locator('#utilityPanelContent'), preview=panel.locator('.explorer-preview');
+    const close=()=>page.locator('#closeSidePanel').click();
+
+    const progress=page.getByRole('link',{name:'Live progress',exact:true});
+    await progress.press('Enter');
+    await preview.getByRole('heading',{name:'Live progress'}).waitFor();
+    assert.equal(await preview.locator('script,img').count(),0);
+    assert.equal(await preview.getByRole('button',{name:'Edit file'}).isDisabled(),true);
+    assert.equal(await preview.getByRole('button',{name:'Close preview'}).evaluate(el=>el===document.activeElement),true);
+    assert.equal(await page.locator('#sidePanelTitle').textContent(),'Files');
+    if(width!==768)await page.screenshot({path:artifact(`file-citation-preview-${width}.png`)});
+    await close();
+    await page.waitForFunction(()=>document.activeElement?.textContent==='Live progress');
+    assert.equal(await progress.evaluate(el=>el===document.activeElement),true);
+
+    await page.getByRole('link',{name:'Source line'}).click();
+    await preview.locator('.explorer-cited-lines').waitFor();
+    assert.equal(await preview.locator('.explorer-cited-lines').textContent(),'2\n3');
+    await close();
+
+    await page.getByRole('link',{name:'Result image'}).click();
+    await preview.locator('img').waitFor();
+    await page.waitForFunction(()=>document.querySelector('.explorer-preview img')?.naturalWidth===1);
+    assert.equal(await page.locator('#imageViewer').evaluate(el=>el.open),false);
+    await close();
+
+    await page.getByRole('link',{name:'Unsupported'}).click();
+    await preview.getByText('Preview unavailable. Download this file to open it.').waitFor();
+    await close();
+    await page.getByRole('link',{name,exact:true}).click();
+    await preview.locator('.explorer-code').filter({hasText:'second line'}).waitFor();
+    assert.equal(downloads,0);
+    assert.equal(downloadRequests,0);
+    const downloadEvent=page.waitForEvent('download');
+    await preview.getByRole('link',{name:'Download'}).click();
+    const download=await downloadEvent;
+    assert.equal(download.suggestedFilename(),name);
+    assert.equal(await readFile(await download.path(),'utf8'),body);
+    await page.close();
+  }
+  console.log('PASS: file links open Files at desktop, tablet and phone widths; HTML, images, line references, explicit download, and file boundaries');
 }finally{
   await browser?.close();
-  server.kill();
-  await server.exited;
-  rmSync(fixtureRoot,{recursive:true,force:true});
+  await workspace.close();
 }

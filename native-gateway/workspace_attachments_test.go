@@ -111,6 +111,80 @@ func TestWorkspaceAttachmentsLifecycle(t *testing.T) {
 	}
 }
 
+func TestQueueEditBindsImagesInCapturedProject(t *testing.T) {
+	s, project, _ := workspaceFixture(t)
+	mux := http.NewServeMux()
+	s.register(mux)
+	upload := func(cwd, name string, body []byte) workspaceAttachment {
+		t.Helper()
+		response := attachmentFixtureRequest(mux, "POST", "/api/attachments/upload", url.Values{"cwd": {cwd}, "name": {name}}, body, "application/octet-stream", "http://127.0.0.1:1337")
+		var item workspaceAttachment
+		if response.Code != 200 || json.Unmarshal(response.Body.Bytes(), &item) != nil {
+			t.Fatalf("fixture upload: %d %s", response.Code, response.Body)
+		}
+		return item
+	}
+	png := []byte{137, 80, 78, 71, 13, 10, 26, 10}
+	original := upload(project, "Original.png", png)
+	added := upload(project, "Added.png", png)
+	other := upload(s.home, "Other.png", png)
+	note := upload(project, "note.txt", []byte("notes"))
+	q := newConversation(new(bridge), s.privateRoot, nil).delivery
+	q.resolveCwd = func(cwd string) (string, error) {
+		_, real, err := s.browse(cwd)
+		return real, err
+	}
+	q.resolveAttachments = s.attachments.resolve
+	path := func(item workspaceAttachment) string {
+		return filepath.Join(s.attachments.path, item.ID, attachmentContentName(item.Name))
+	}
+	entry, err := q.mutate(t.Context(), "enqueue", conversationObject(map[string]any{
+		"id": testSubmission, "threadId": "fixture-thread", "text": "",
+		"params": map[string]any{"threadId": "fixture-thread", "cwd": project, "model": "fixture", "input": []map[string]string{
+			{"type": "localImage", "path": path(original)},
+			{"type": "skill", "name": "fixture", "path": filepath.Join(project, "SKILL.md")},
+		}},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := q.transaction(func(state *deliveryQueueState) (bool, error) {
+		state.Entries[0].Claim = &q.owner
+		return true, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	edit := func(version int, ids ...string) (deliveryQueueEntry, error) {
+		return q.mutate(t.Context(), "edit", conversationObject(map[string]any{"id": entry.ID, "version": version, "text": "Added context", "attachmentIds": ids}))
+	}
+	for _, rejected := range []workspaceAttachment{other, note} {
+		if _, err := edit(entry.Version, rejected.ID); err == nil {
+			t.Fatalf("invalid image %s accepted", rejected.Name)
+		}
+		if _, err := os.Stat(filepath.Join(s.attachments.path, rejected.ID, attachmentLinkName(entry.ThreadID))); !os.IsNotExist(err) {
+			t.Fatalf("invalid image %s was bound: %v", rejected.Name, err)
+		}
+	}
+	updated, err := edit(entry.Version, original.ID, added.ID, added.ID)
+	var saved struct {
+		Model string
+		Input []struct{ Type, Path, Text string }
+	}
+	if err != nil || json.Unmarshal(updated.Params, &saved) != nil || updated.Version != entry.Version+1 || saved.Model != "fixture" || len(saved.Input) != 4 ||
+		saved.Input[0].Text != "Added context\nAttached file \"Added.png\": "+path(added) || saved.Input[1].Path != path(original) || saved.Input[2].Type != "skill" || saved.Input[3].Path != path(added) {
+		t.Fatalf("queue edit lost captured parameters: %+v %v", saved, err)
+	}
+	if _, err := os.Stat(filepath.Join(s.attachments.path, added.ID, attachmentLinkName(entry.ThreadID))); err != nil {
+		t.Fatal(err)
+	}
+	if claimed, err := q.updateClaim(entry.ID, func(*deliveryQueueRecord) bool { return true }); err != nil || claimed != nil {
+		t.Fatalf("pre-edit dispatch claim retained: %v %v", claimed, err)
+	}
+	if _, err := edit(entry.Version); !conversationErrorIs(err, "QUEUE_CONFLICT") {
+		t.Fatalf("stale edit lost compare-and-swap protection: %v", err)
+	}
+}
+
 func TestWorkspaceAttachmentsLegacyRasterAndLock(t *testing.T) {
 	s, project, _ := workspaceFixture(t)
 	mux := http.NewServeMux()

@@ -49,6 +49,45 @@ test('queue edits and reordering use versions; stale mutations fail without alte
   await expect(e.enqueue('00000000-0000-4000-8000-000000000001','Changed')).rejects.toMatchObject({code:'QUEUE_CONFLICT'});
 }));
 
+test('editing a claimed image message keeps captured inputs and binds only newly added project images',()=>fixture(async(e:any)=>{
+  const id='00000000-0000-4000-8000-000000000003';
+  const existing='00000000-0000-4000-8000-000000000004', added='00000000-0000-4000-8000-000000000005';
+  const path=(image:string)=>join(e.root,'remote-web-attachments',image,'content.png');
+  const resolves:any[]=[];
+  const queue=createDeliveryQueue({...e.opts,resolveAttachments:async(scope:any)=>{
+    resolves.push(scope);
+    return {items:[{id:added,name:'Screenshot.png',path:path(added),image:true}]};
+  }});e.instances.push(queue);
+  const original=await queue.mutate('enqueue',{id,threadId:'thread-A',text:'',params:{
+    threadId:'thread-A',cwd:e.root,model:'captured-model',effort:'high',
+    input:[{type:'localImage',path:path(existing)},{type:'skill',name:'fixture',path:'/fixture/SKILL.md'}],
+  }});
+  await createDeliveryStore(e.root).transaction((state:any)=>{state.entries[0].claim=state.entries[0].owner;return {};});
+  const edited=await queue.mutate('edit',{id,version:original.version,text:'New text',attachmentIds:[existing,added,added]});
+  expect(resolves).toEqual([{ids:[added],cwd:e.root,threadId:'thread-A'},{ids:[added],cwd:e.root,threadId:'thread-A',bind:true}]);
+  expect(edited).toMatchObject({
+    text:'New text',version:original.version+1,
+    mentions:[{id:added,title:'Screenshot.png',source:'attachment',icon:'image'}],
+    params:{model:'captured-model',effort:'high',input:[
+      {type:'text',text:`New text\nAttached file "Screenshot.png": ${path(added)}`,text_elements:[]},
+      {type:'localImage',path:path(existing)},{type:'skill',name:'fixture',path:'/fixture/SKILL.md'},{type:'localImage',path:path(added)},
+    ]},
+  });
+  expect((await createDeliveryStore(e.root).read()).entries[0].claim).toBeUndefined();
+  expect(await queue.protectedAttachmentIds()).toEqual(new Set([existing,added]));
+  await expect(queue.mutate('edit',{id,version:original.version,text:'stale edit'})).rejects.toMatchObject({code:'QUEUE_CONFLICT'});
+  expect((await queue.list()).entries[0].text).toBe('New text');
+}));
+
+test('editing queue text preserves the attachment suffix when replacing or clearing the message',()=>fixture(async(e:any)=>{
+  const id='00000000-0000-4000-8000-000000000003', line='Attached file "notes.txt": /fixture/notes.txt';
+  const original=await e.queue.mutate('enqueue',{id,threadId:'thread-A',text:'Old',params:{threadId:'thread-A',input:[{type:'text',text:`Old\n${line}`}]}});
+  const edited=await e.queue.mutate('edit',{id,version:original.version,text:''});
+  expect(edited.params.input[0].text).toBe(line);
+  const again=await e.queue.mutate('edit',{id,version:edited.version,text:'Edited'});
+  expect(again.params.input[0].text).toBe(`Edited\n${line}`);
+}));
+
 test('send now uses expectedTurnId steering and cancellation never interrupts the running turn',()=>fixture(async(e:any)=>{
   const a=await e.enqueue('00000000-0000-4000-8000-000000000001','Steer this');await e.queue.mutate('sendNow',{id:a.id,version:a.version});await e.queue.start();
   await wait(async()=>e.steers()===1);expect(e.calls.find((c:any)=>c.method==='turn/steer').params.expectedTurnId).toBe('turn-existing');

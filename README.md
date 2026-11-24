@@ -6,7 +6,7 @@
 
 A self-hosted browser workspace using **Cloudflare Tunnel + Access**. Set up remote access through the web UI, then continue conversations, follow tool activity, handle approvals, and edit project files from another device.
 
-> **Beta.2 candidate:** This branch prepares **0.2.0-beta.2** with a lightweight native gateway. See the [Beta.2 release notes](docs/releases/0.2.0-beta.2.md).
+> **0.2.1 Beta.1 candidate:** This branch prepares **0.2.1-beta.1** with faster conversation loading and desktop/mobile workspace improvements. See the [0.2.1 Beta.1 release notes](docs/releases/0.2.1-beta.1.md).
 
 ## Highlights
 
@@ -87,13 +87,13 @@ Desktop packages are unsigned. Review the checksum and source, and use your syst
 
 ### Portable CLI packages
 
-The following examples target **0.2.0-beta.2** portable packages. Use the package name and version matching your download; candidate builds are available as CI artifacts until the release is published. They run in a terminal; close it or press Ctrl+C to stop the gateway.
+The following examples target **0.2.1-beta.1** portable packages. Use the package name and version matching your download; candidate builds are available as CI artifacts until the release is published. They run in a terminal; close it or press Ctrl+C to stop the gateway.
 ```sh
-archive=codex-remote-web-0.2.0-beta.2-linux-x64.tar.gz
-# For arm64 use codex-remote-web-0.2.0-beta.2-linux-arm64.tar.gz
+archive=codex-remote-web-0.2.1-beta.1-linux-x64.tar.gz
+# For arm64 use codex-remote-web-0.2.1-beta.1-linux-arm64.tar.gz
 sha256sum -c "$archive.sha256"
 tar -xzf "$archive"
-cd codex-remote-web-0.2.0-beta.2
+cd codex-remote-web-0.2.1-beta.1
 CODEX_WEBUI_CWD=/path/to/your/project ./codex-remote-web
 ```
 
@@ -101,7 +101,7 @@ On macOS, extract the `macos-arm64` archive and run the same command. On Windows
 
 ```powershell
 # Compare with the hash in the adjacent .sha256 file before extracting.
-Get-FileHash .\codex-remote-web-0.2.0-beta.2-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\codex-remote-web-0.2.1-beta.1-windows-x64.zip -Algorithm SHA256
 $env:CODEX_WEBUI_CWD = 'C:\path\to\your\project'
 .\codex-remote-web.exe
 ```
@@ -184,7 +184,7 @@ The detailed guides below are currently in Chinese.
 - [Configuration](docs/CONFIGURATION.md) / [Cloudflare deployment](docs/deployment/CLOUDFLARE.md)
 - [Development and testing](DEVELOPMENT.md) / [Contributing](CONTRIBUTING.md)
 - [Architecture](docs/ARCHITECTURE.md) / [Roadmap](docs/ROADMAP.md)
-- [Release process](docs/RELEASING.md) / [Candidate verification](docs/releases/0.2.0-beta.2-acceptance.md) / [Changelog](CHANGELOG.md)
+- [Release process](docs/RELEASING.md) / [Candidate verification](docs/releases/0.2.1-beta.1.md#validation) / [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md) / [Git workflow](docs/GIT_WORKFLOW.md) / [Agent rules](AGENTS.md)
 - [Security](SECURITY.md)
 

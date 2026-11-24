@@ -18,7 +18,7 @@ import (
 	"time"
 )
 
-var version = "0.2.0-beta.2"
+var version = "0.2.1-beta.1"
 
 func socketPath() string {
 	if socket := os.Getenv("CODEX_WEBUI_APP_SERVER_SOCKET"); socket != "" {
@@ -189,7 +189,7 @@ func runGateway() error {
 	defer func() { <-app.setup.quick.stop() }()
 	app.mux.HandleFunc("GET /api/remote-access/status", app.remoteStatus(w.home))
 	c := newConversation(b, w.privateRoot, app.events.publish)
-	c.delivery.bindAttachments = w.attachments.bind
+	c.delivery.resolveAttachments = w.attachments.resolve
 	w.developer.protectedAttachments = c.delivery.protectedAttachmentIDs
 	w.developer.terminalGate = &app.terminalGate
 	w.developer.worktreeBusy = w.developer.worktreeUsage(c, func() bool { return app.activeTerminals.Load() != 0 })

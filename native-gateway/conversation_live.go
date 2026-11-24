@@ -30,6 +30,7 @@ type liveRollout struct {
 	commands      map[string]string
 	activeCommand string
 	lastEvent     any
+	tokenUsage    map[string]any
 	userSeq       int
 	patchSeq      int
 	itemBytes     int
@@ -60,6 +61,35 @@ func liveString(value any) string         { text, _ := value.(string); return te
 func liveObject(value any) map[string]any { out, _ := value.(map[string]any); return out }
 func liveList(value any) []any            { out, _ := value.([]any); return out }
 
+func liveTokenCount(value any) (float64, bool) {
+	number, ok := value.(float64)
+	return number, ok && number >= 0 && number <= 1<<53-1 && number == float64(int64(number))
+}
+
+func liveTokenUsage(info map[string]any) map[string]any {
+	blocks := make(map[string]any, 3)
+	for key, source := range map[string]string{"total": "total_token_usage", "last": "last_token_usage"} {
+		tokens := liveObject(info[source])
+		total, totalOK := liveTokenCount(tokens["total_tokens"])
+		output, outputOK := liveTokenCount(tokens["output_tokens"])
+		if !totalOK || !outputOK {
+			return nil
+		}
+		breakdown := map[string]float64{"totalTokens": total, "outputTokens": output}
+		if input, ok := liveTokenCount(tokens["input_tokens"]); ok {
+			breakdown["inputTokens"] = input
+		}
+		if cached, ok := liveTokenCount(tokens["cached_input_tokens"]); ok {
+			breakdown["cachedInputTokens"] = cached
+		}
+		blocks[key] = breakdown
+	}
+	blocks["modelContextWindow"] = nil
+	if window, ok := liveTokenCount(info["model_context_window"]); ok && window > 0 {
+		blocks["modelContextWindow"] = window
+	}
+	return blocks
+}
 func (state *liveRollout) upsert(item map[string]any) {
 	id := liveString(item["id"])
 	if id == "" || state.turn == nil {
@@ -175,6 +205,12 @@ func (state *liveRollout) apply(data []byte) {
 	}
 	p := row.Payload
 	kind, turnID := liveString(p["type"]), liveString(p["turn_id"])
+	if row.Type == "event_msg" && kind == "token_count" {
+		if usage := liveTokenUsage(liveObject(p["info"])); usage != nil {
+			state.tokenUsage = usage
+		}
+		return
+	}
 	if row.Type == "event_msg" && kind == "task_started" {
 		state.active, state.items, state.indexes, state.commands = true, []map[string]any{}, make(map[string]int), make(map[string]string)
 		state.activeCommand, state.userSeq, state.patchSeq, state.itemBytes = "", 0, 0, 0
@@ -185,6 +221,28 @@ func (state *liveRollout) apply(data []byte) {
 		return
 	}
 	if state.turn == nil || !state.active {
+		return
+	}
+	if row.Type == "turn_context" && turnID == state.turn["id"] {
+		if model := liveString(p["model"]); model != "" {
+			state.turn["model"] = model
+		}
+		return
+	}
+	if row.Type == "compacted" {
+		summary := strings.TrimSpace(liveText(p["message"]))
+		for i := len(state.items) - 1; i >= 0; i-- {
+			item := state.items[i]
+			if item["type"] != "agentMessage" {
+				continue
+			}
+			text := strings.TrimSpace(liveString(item["text"]))
+			if item["phase"] == "final_answer" && text != "" &&
+				(summary == text || strings.HasSuffix(summary, "\n"+text)) {
+				item["phase"] = "context_summary"
+			}
+			break
+		}
 		return
 	}
 	if row.Type == "event_msg" {
@@ -348,7 +406,7 @@ func (s *conversationLiveStore) read(rootPath, path string) (json.RawMessage, er
 	if entry.active {
 		entry.turn["items"] = entry.items
 	}
-	return marshalConversation(map[string]any{"active": entry.active, "turn": entry.turn, "lastEventAt": entry.lastEvent})
+	return marshalConversation(map[string]any{"active": entry.active, "turn": entry.turn, "lastEventAt": entry.lastEvent, "tokenUsage": entry.tokenUsage})
 }
 
 func (c *conversation) liveRPC(ctx context.Context, params json.RawMessage) (json.RawMessage, error) {

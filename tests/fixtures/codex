@@ -14,6 +14,9 @@ const restoredIds = new Set();
 const resources=process.env.CODEX_WEBUI_FIXTURE_RESOURCES==='true',disabledSkills=new Set(),createdThreads=new Map(),pluginState={installed:true,enabled:true};let sequence=0;
 const conversationTools=process.env.CODEX_WEBUI_FIXTURE_CONVERSATION_TOOLS==='true',goals=new Map(),histories=new Map(),sideRequests=new Map();
 const progressFixture=process.env.CODEX_WEBUI_FIXTURE_PROGRESS==='true';let progressReadFailed=false;
+const productDemo = process.env.CODEX_WEBUI_FIXTURE_PRODUCT_DEMO === 'true';
+const { demoName, demoThreadId, demoTurns } = productDemo ? await import('./product-demo.mjs') : {};
+if (productDemo) histories.set(demoThreadId, demoTurns);
 if(projectHistoryCwd)for(const id of projectHistory)histories.set(id,[{id:`saved-${id}`,status:'completed',items:[{id:`answer-${id}`,type:'agentMessage',text:`Saved history for ${id}`}]}]);
 if(progressFixture) histories.set('progress-history',Array.from({length:25},(_,index)=>({id:`history-${index}`,status:'completed',durationMs:507000,items:[
   {id:`u-${index}`,type:'userMessage',content:[{type:'text',text:`Question ${index}`}]},
@@ -21,12 +24,17 @@ if(progressFixture) histories.set('progress-history',Array.from({length:25},(_,i
   {id:`final-${index}`,type:'agentMessage',phase:'final_answer',text:`Answer ${index}`}
 ]})));
 if(progressFixture)histories.set('progress-active',[{id:'history-active',status:'inProgress',items:[{id:'active-user',type:'userMessage',content:[{type:'text',text:'Already running'}]}]}]);
+if (progressFixture) histories.set('progress-paged', Array.from({length:12}, (_, index) => ({
+  id: `paged-${index}`,
+  status: 'completed',
+  items: [{id:`paged-reply-${index}`,type:'agentMessage',phase:'final_answer',text:`Paged reply ${index}`}],
+})));
 const configValues = { web_search: 'cached', model_reasoning_summary: 'auto', model_verbosity: 'medium' };
 if(conversationTools) histories.set('thread-A', [
  {id:'first-turn',status:'completed',durationMs:65000,items:[{id:'user-one',type:'userMessage',content:[{type:'text',text:'First question'}]},{id:'work-one',type:'agentMessage',phase:'commentary',text:'PRIVATE_WORK_LOG'},{id:'answer-one',type:'agentMessage',phase:'final_answer',text:'# Final summary\n\n'+Array.from({length:18},(_,i)=>`Paragraph ${i+1}: The completed work is ready to review.`).join('\n\n')}]},
  {id:'second-turn',status:'completed',items:[{id:'user-two',type:'userMessage',content:[{type:'text',text:'Second question'}]},{id:'answer-two',type:'agentMessage',phase:'final_answer',text:'Later answer.'}]}
 ]);
-const thread = id => ({ id, ephemeral:createdThreads.get(id)?.ephemeral===true, name: id, cwd:createdThreads.get(id)?.cwd||(projectHistory.includes(id)&&projectHistoryCwd)||(id==='thread-B'&&process.env.CODEX_WEBUI_FIXTURE_OTHER_CWD)||cwd, recencyAt: { 'thread-A': 30, 'thread-B': 20, 'input-thread': 10 }[id] || 1, createdAt: { 'thread-A': 1, 'thread-B': 3, 'input-thread': 2 }[id] || 1, turns: histories.get(id)||[], status: { type: 'idle' } });
+const thread = id => ({ id, ephemeral:createdThreads.get(id)?.ephemeral===true, name: productDemo && id === demoThreadId ? demoName : id, cwd:createdThreads.get(id)?.cwd||(projectHistory.includes(id)&&projectHistoryCwd)||(id==='thread-B'&&process.env.CODEX_WEBUI_FIXTURE_OTHER_CWD)||cwd, recencyAt: { [demoThreadId]: 40, 'thread-A': 30, 'thread-B': 20, 'input-thread': 10 }[id] || 1, createdAt: { 'thread-A': 1, 'thread-B': 3, 'input-thread': 2 }[id] || 1, turns: histories.get(id)||[], status: { type: 'idle' } });
 for await (const line of createInterface({ input: process.stdin })) {
   const message = JSON.parse(line);
   if (!message.method) {
@@ -45,7 +53,21 @@ for await (const line of createInterface({ input: process.stdin })) {
   else if(conversationTools && ['thread/resume','thread/turns/list'].includes(message.method) && createdThreads.get(message.params.threadId)?.ephemeral){send({id:message.id,error:{code:-32600,message:'Unsupported for ephemeral threads'}});continue;}
   else if(conversationTools && message.method==='thread/inject_items')result={};
   else if(conversationTools && message.method.startsWith('thread/goal/')){const id=message.params.threadId;if(message.method.endsWith('/clear'))goals.delete(id);else if(message.method.endsWith('/set'))goals.set(id,{...(goals.get(id)||{}),...message.params,status:message.params.status||'active'});result={goal:goals.get(id)||null};}
-  else if(conversationTools && message.method==='thread/turns/list')result={data:[...(histories.get(message.params.threadId)||[])].reverse()};
+  else if (progressFixture && message.params?.threadId === 'progress-paged' && message.method === 'thread/turns/list') {
+    const {cursor, limit} = message.params;
+    const turns = histories.get('progress-paged').slice().reverse();
+    const start = Number(cursor || 0);
+    const end = start + limit;
+    result = {data:turns.slice(start,end), nextCursor:end < turns.length ? String(end) : null};
+  }
+  else if (progressFixture && message.params?.threadId === 'progress-paged' && message.method === 'thread/read') {
+    if (message.params.includeTurns) {
+      send({id:message.id,error:{code:-32000,message:'Fixture: full history is too large'}});
+      continue;
+    }
+    result = {thread:{...thread('progress-paged'),turns:[]}};
+  }
+  else if((conversationTools || productDemo) && message.method==='thread/turns/list')result={data:[...(histories.get(message.params.threadId)||[])].reverse()};
   else if (message.method === 'model/list') result = { data: [{ model: 'gpt-test-fixture', displayName: 'Test fixture', isDefault: true, defaultReasoningEffort: 'medium', supportedReasoningEfforts: [{ reasoningEffort: 'medium' }, { reasoningEffort: 'high' }] }, { model: 'gpt-second-fixture', displayName: 'Second fixture', defaultReasoningEffort: 'low', supportedReasoningEfforts: [{ reasoningEffort: 'low' }] }] };
   else if (message.method === 'config/read') result = { config: { ...configValues, model_providers: { private: { api_key: 'FIXTURE_SECRET' } } }, origins: {}, layers: [{ name: { type: 'user', file: `${process.env.CODEX_HOME}/config.toml`, profile: null }, version: String(configVersion), config: configValues }] };
   else if (message.method === 'config/batchWrite') {
@@ -68,6 +90,7 @@ for await (const line of createInterface({ input: process.stdin })) {
   else if (message.method === 'thread/list') {
     const { archived, cwd: filter, cursor, modelProviders, sourceKinds } = message.params || {};
     let ids = archived ? [...archivedIds] : ['thread-A', 'thread-B', 'input-thread', ...restoredIds,...[...createdThreads.keys()].filter(id=>!createdThreads.get(id)?.ephemeral)];
+    if (productDemo && !archived) ids = [demoThreadId, ...ids];
     if (projectHistoryCwd && filter === projectHistoryCwd && Array.isArray(modelProviders) && !modelProviders.length && sourceKinds?.includes('appServer') && !archived) {
       ids = [projectHistory[cursor === 'older-page' ? 1 : 0]];
       result.nextCursor = cursor ? null : 'older-page';

@@ -7,6 +7,17 @@ export function attachmentThumbnail(mention) {
   return renderImagePreview(`/api/attachments/file?id=${encodeURIComponent(mention.id)}&view=image`, { title: mention.title, className: 'composer-attachment-thumbnail' });
 }
 
+export async function uploadComposerFile(file, cwd, t) {
+  const response = await fetch('/api/attachments/upload?' + new URLSearchParams({ cwd, name: file.name }), {
+    method: 'POST',
+    headers: { 'content-type': 'application/octet-stream', 'x-workspace-request': '1' },
+    body: file,
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(t(result.error));
+  return { id: result.id, source: 'attachment', title: result.name, icon: result.image ? 'image' : 'file' };
+}
+
 export function createComposerAttachments({
   state,
   t,
@@ -64,26 +75,7 @@ export function createComposerAttachments({
     const uploaded = [];
     try {
       for (const file of entries) {
-        const response = await fetch(
-          "/api/attachments/upload?" +
-            new URLSearchParams({ cwd: project, name: file.name }),
-          {
-            method: "POST",
-            headers: {
-              "content-type": "application/octet-stream",
-              "x-workspace-request": "1",
-            },
-            body: file,
-          },
-        );
-        const result = await response.json();
-        if (!response.ok) throw new Error(t(result.error));
-        uploaded.push({
-          id: result.id,
-          source: "attachment",
-          title: result.name,
-          icon: result.image ? "image" : "file",
-        });
+        uploaded.push(await uploadComposerFile(file, project, t));
         applyToDraft(key, uploaded);
         uploaded.length = 0;
       }
@@ -120,7 +112,7 @@ export function createComposerAttachments({
       },
       {
         label: state.planMode ? "Turn plan mode off" : "Plan mode",
-        icon: "list",
+        icon: "listChecks",
         action: togglePlan,
       },
       ...extra,

@@ -75,7 +75,7 @@ try{
  await page.locator('.explorer-document-status.is-error').filter({hasText:'changed on disk'}).waitFor();assert((await content().innerText()).includes('unsaved draft'));assert.equal(await readFile(join(project,'main.ts'),'utf8'),'// external edit\n');
  await page.evaluate(()=>globalThis.__codexWebuiI18n.setPreference('zh-CN'));await page.getByRole('button',{name:'保存文件',exact:true}).waitFor();await page.getByRole('textbox',{name:'文件编辑器',exact:true}).waitFor();
  await page.evaluate(()=>globalThis.__codexWebuiI18n.setPreference('en'));await page.getByRole('textbox',{name:'File editor',exact:true}).waitFor();assert((await content().innerText()).includes('unsaved draft'));
- await page.locator('#themeSelect').evaluate(el=>{el.value='light';el.dispatchEvent(new Event('change',{bubbles:true}));});assert.equal(await page.locator('html').getAttribute('data-theme'),'light');await page.screenshot({path:artifact('file-editor-code-light.png')});
+ await page.locator('#themeSelect input[value=light]').evaluate(el=>{el.checked=true;el.dispatchEvent(new Event('change',{bubbles:true}));});assert.equal(await page.locator('html').getAttribute('data-theme'),'light');await page.screenshot({path:artifact('file-editor-code-light.png')});
  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'Reload file',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.cm-content')?.textContent.includes('external edit'));
  phase='read-only and narrow editing';
  await open('locked.txt');await page.locator('.explorer-code').filter({hasText:'Read only fixture'}).waitFor();assert.equal(await page.getByRole('button',{name:'Edit file',exact:true}).isDisabled(),true);

@@ -1,5 +1,6 @@
 import { codexIcon } from './codex-icons.js';
 import { mountFileDocument } from './file-document.js';
+import { isImageReference, localDownloadUrl, localImageUrl, uploadedAttachmentId } from './rendering.js';
 
 // Lazy, bounded project explorer. All reads retain the existing server boundaries.
 export function createFileExplorer({ container, search, cwd, t, reference, openImage, menu, toast = () => {}, isCurrent = () => true }) {
@@ -50,7 +51,7 @@ export function createFileExplorer({ container, search, cwd, t, reference, openI
     if (tree.contains(document.activeElement)) focusRow(focused);
     for (const item of cache.get(path)?.items || []) if (item.kind === 'folder' && expanded.has(item.path)) void load(item.path);
   }
-  function fileUrl(item) { return '/api/files/download?' + new URLSearchParams({ cwd: project, path: `${project}/${item.path}` }); }
+  function fileUrl(item) { return localDownloadUrl(item.absolute || `${project}/${item.path}`, project); }
   function addReference(item) { reference(`@${item.path}`); }
   function context(event, item) {
     if (!menu) return;
@@ -104,35 +105,56 @@ export function createFileExplorer({ container, search, cwd, t, reference, openI
     notice.textContent = [...cache.values()].some(entry => entry.partial) ? 'Some files were omitted because the scan limit was reached.' : ''; notice.hidden = !notice.textContent;
     if (restore) focusRow(focused);
   }
-  async function showPreview(item) {
+  async function showPreview(item, { focus = false, lineStart, lineEnd } = {}) {
     documentView?.destroy();documentView=null;
     const id = ++previewId, version = epoch; preview.hidden = false; preview.replaceChildren(); container.classList.add('has-preview');
     const top = node('div', 'explorer-preview-toolbar'), name = node('span', 'explorer-preview-name', item.name); name.title = item.path; name.dataset.i18nIgnore = '';
     const back = iconButton('Back to files', 'arrowLeft', closePreview); back.classList.add('explorer-back');
-    top.append(back, name, iconButton('Reference in chat', 'plus', () => addReference(item)));
+    top.append(back, name);
+    if (!item.absolute || item.inProject) top.append(iconButton('Reference in chat', 'plus', () => addReference(item)));
     if (item.downloadable) { const a = node('a', 'explorer-icon-button'); a.title = 'Download'; a.setAttribute('aria-label', 'Download'); a.innerHTML = codexIcon('arrowDown'); a.href = fileUrl(item); a.download = item.name; top.append(a); }
-    top.append(iconButton('Close preview', 'x', closePreview)); preview.append(top);
+    const close = iconButton('Close preview', 'x', closePreview);
+    top.append(close); preview.append(top);
+    if(focus)requestAnimationFrame(()=>{if(id===previewId&&version===epoch&&isCurrent())close.focus({preventScroll:true});});
     const breadcrumb = node('div', 'explorer-breadcrumb', item.path.split('/').join(' › ')); breadcrumb.dataset.i18nIgnore = ''; preview.append(breadcrumb);
     const body = node('div', 'explorer-preview-body'); preview.append(body);
-    if (item.image && item.downloadable) { const src = '/api/images/local?' + new URLSearchParams({cwd: project, path:item.path}); const image = node('img'); image.src = src; image.alt = item.name; const b = node('button','explorer-image-preview'); b.type = 'button'; b.append(image); b.onclick = () => openImage(src,item.name,`${project}/${item.path}`); body.append(b); return; }
+    if (item.image && item.downloadable) {
+      const path = item.absolute || `${project}/${item.path}`, src = localImageUrl(path, project), image = node('img');
+      image.src = src; image.alt = item.name;
+      const b = node('button','explorer-image-preview'); b.type = 'button'; b.append(image);
+      b.onclick = () => openImage(src,item.name,path);
+      image.onerror = () => { if (id === previewId && version === epoch) body.textContent = 'Preview unavailable. Download this file to open it.'; };
+      body.append(b); return;
+    }
     body.textContent = 'Loading…';
     try {
       if (!item.downloadable) throw Error('Preview unavailable. Download this file to open it.');
       const directory=project,key=`${directory}\0${item.path}`,url='/api/files/document?'+new URLSearchParams({cwd:directory,path:item.path});
+      const absolute = item.absolute || `${directory}/${item.path}`, attachment = uploadedAttachmentId(absolute);
+      const readPreview = async () => {
+        const endpoint = attachment ? '/api/attachments/preview?' + new URLSearchParams({id:attachment})
+          : '/api/library/preview?' + new URLSearchParams({path:absolute});
+        const data = await json(endpoint);
+        if(typeof data.text !== 'string')throw Error('Preview unavailable. Download this file to open it.');
+        return {...data,writable:false};
+      };
+      const readModel = async () => {
+        if(item.absolute&&!item.inProject)return readPreview();
+        try{return await json(url);}catch(error){
+          if(error.status!==404)throw error;
+          return {...await readPreview(),editingUnavailable:true};
+        }
+      };
       let model=documents.get(key);
       if(!model||model.text===model.savedText){
-        let data;
-        try{data=await json(url);}catch(error){
-          if(error.status!==404)throw error;
-          data={...await json('/api/library/preview?'+new URLSearchParams({path:`${directory}/${item.path}`})),writable:false,editingUnavailable:true};
-        }
+        const data=await readModel();
         model={...data,savedText:data.text};
       }
       if (id !== previewId || version !== epoch) return;
       documents.set(key,model);
       for(const [entry,doc] of documents){if(documents.size<=32)break;if(entry!==key&&doc.text===doc.savedText)documents.delete(entry);}
-      documentView=mountFileDocument({body,toolbar:top,model,filename:item.name,cwd:`${directory}/${item.path.includes('/')?item.path.slice(0,item.path.lastIndexOf('/')):''}`,t,toast,
-        save:changes=>changes===null?json(url):json('/api/files/document',{method:'POST',headers:{'content-type':'application/json','x-workspace-request':'1'},body:JSON.stringify({cwd:directory,path:item.path,...changes})})});
+      documentView=mountFileDocument({body,toolbar:top,model,filename:model.name||item.name,cwd:absolute.slice(0,absolute.lastIndexOf('/'))||'/',t,toast,lineStart,lineEnd,
+        save:changes=>changes===null?readModel():json('/api/files/document',{method:'POST',headers:{'content-type':'application/json','x-workspace-request':'1'},body:JSON.stringify({cwd:directory,path:item.path,...changes})})});
     } catch (error) { if (id === previewId && version === epoch && error.name !== 'AbortError') body.textContent = error.message==='The server is older than this page. Update the running WebUI service.'?error.message:'Preview unavailable. Download this file to open it.'; }
   }
   function cancel() { epoch++; previewId++; for (const controller of controllers) controller.abort(); controllers.clear(); clearTimeout(searchTimer); }
@@ -144,5 +166,22 @@ export function createFileExplorer({ container, search, cwd, t, reference, openI
     project = next; cache = new Map(); closePreview(false); location.textContent = project; location.title = project;
     render(); await load('');
   }
-  return { open, search() { clearTimeout(searchTimer); searchTimer = setTimeout(() => { if (!isCurrent()) return; cancel(); cache = new Map(); expanded.add(''); closePreview(false); void load(''); },150); }, close: cancel };
+  function openReference({ path, base, home, lineStart, lineEnd }) {
+    if (!path || !project) return;
+    const normal = value => /^[a-z]:[\\/]/i.test(value) ? value.replaceAll('\\','/') : value;
+    base = normal(base || project);
+    if (path.startsWith('~/') && home) path = `${normal(home).replace(/\/$/,'')}/${path.slice(2)}`;
+    path = normal(path);
+    const absolute = /^(?:\/|[a-z]:\/)/i.test(path) ? path : `${base.replace(/\/$/,'')}/${path.replace(/^\.\//,'')}`;
+    const prefix = normal(project).replace(/\/$/,'')+'/';
+    let decoded = absolute;
+    try { decoded = decodeURIComponent(absolute); } catch {}
+    const inProject = decoded.startsWith(prefix) && !decoded.split('/').includes('..');
+    const itemPath = inProject ? decoded.slice(prefix.length) : absolute;
+    const name = decoded.split('/').at(-1);
+    if (!name) return;
+    if(inProject){selected=itemPath;render();}
+    void showPreview({path:itemPath,name,absolute,inProject,downloadable:true,image:isImageReference(absolute)},{focus:true,lineStart,lineEnd});
+  }
+  return { open, openReference, search() { clearTimeout(searchTimer); searchTimer = setTimeout(() => { if (!isCurrent()) return; cancel(); cache = new Map(); expanded.add(''); closePreview(false); void load(''); },150); }, close: cancel };
 }

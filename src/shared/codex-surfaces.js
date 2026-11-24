@@ -286,13 +286,16 @@ export function summarizeActivity(item) {
     active: item.kind !== "interrupted" && active,
     tone: item.kind === "interrupted" ? "error" : active ? "active" : "success",
   };
-  if (item.type === "webSearch") return {
-    label: active ? "Searching the web" : failed ? "Search failed" : "Searched the web",
-    detail: item.query || "",
-    animation: "searching",
-    active,
-    tone: failed ? "error" : active ? "active" : "success",
-  };
+  if (item.type === "webSearch") {
+    const action = item.action || {};
+    const labels = action.type === 'openPage' ? ['Opening web page','Opened web page']
+      : action.type === 'findInPage' ? ['Finding in web page','Found text in web page'] : ['Searching the web','Searched the web'];
+    return {
+      label: failed ? 'Search failed' : labels[active ? 0 : 1],
+      detail: action.type === 'openPage' ? action.url || '' : action.type === 'findInPage' ? action.pattern || '' : action.query || item.query || action.queries?.[0] || '',
+      animation: 'searching', active, tone: failed ? 'error' : active ? 'active' : 'success',
+    };
+  }
   if (item.type === "reasoning") return { label: active ? "Thinking" : "Thought", detail: "", animation: "local-context", active, tone: failed ? "error" : active ? "active" : "success" };
   return { label: active ? "Working" : failed ? "Tool failed" : "Completed", detail: item.tool || item.type || "", animation: "local-context", active, tone: failed ? "error" : active ? "active" : "success" };
 }

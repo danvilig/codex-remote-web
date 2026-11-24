@@ -7,6 +7,8 @@ import {root,artifact,launchOptions} from '../helpers/browser-runtime.mjs';
 const temp=await mkdtemp('/tmp/crw-conversation-tools-'),home=join(temp,'home'),project=join(temp,'project'),codex=join(home,'.codex'),log=join(temp,'rpc.jsonl');
 for(const dir of [home,project,codex])await mkdir(dir,{recursive:true});
 await writeFile(join(project,'README.md'),'Fixture');
+await mkdir(join(project,'src'));
+await writeFile(join(project,'src/main.ts'),'export const fixture = true;\n');
 const port=await new Promise(resolve=>{const s=createServer();s.listen(0,'127.0.0.1',()=>{const port=s.address().port;s.close(()=>resolve(port));});}),base=`http://127.0.0.1:${port}`;
 const server=Bun.spawn(['bun','src/server/index.ts'],{cwd:root,stdout:'ignore',stderr:'ignore',env:{...process.env,HOME:home,CODEX_HOME:codex,CODEX_AUTH_PATH:join(codex,'auth.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_REVIEW_ROOT:project,CODEX_WEBUI_AUTH_MODE:'local',HOST:'127.0.0.1',PORT:String(port),SHELL:'/bin/bash',CODEX_WEBUI_ENABLE_TERMINAL:'true',CODEX_WEBUI_FIXTURE_CONVERSATION_TOOLS:'true',CODEX_WEBUI_FIXTURE_LOG:log,PATH:join(root,'tests/fixtures')+delimiter+process.env.PATH}});
 let browser,page,phase='startup';
@@ -67,6 +69,27 @@ try {
   assert.equal(await rows.nth(1).locator('.minus').evaluate(el=>getComputedStyle(el).color),colors.deleted);
   assert.match(await turn.locator('.turn-change-summary > summary').innerText(),/Edited 2 files/);
   await page.screenshot({path:artifact('conversation-answer-dark.png')});
+  phase='edited files appear at turn completion and open in Files';
+  const changeSummary=page.locator('[data-turn-id=edit-summary-turn] .turn-change-summary');
+  await page.evaluate(()=>{
+    const debug=globalThis.__codexWebuiDebug;
+    debug.syncTurnSnapshot({id:'edit-summary-turn',status:'inProgress',items:[]});
+    debug.recordTurnReview('edit-summary-turn','diff --git a/src/main.ts b/src/main.ts\n--- a/src/main.ts\n+++ b/src/main.ts\n@@ -1 +1 @@\n-old\n+new\n','native');
+  });
+  assert.equal(await changeSummary.isVisible(),false);
+  await page.evaluate(()=>{
+    const debug=globalThis.__codexWebuiDebug;
+    debug.notify('turn/completed',{threadId:debug.state.active.id,turn:{id:'edit-summary-turn',status:'completed',items:[]}});
+  });
+  await changeSummary.waitFor();
+  await changeSummary.locator('summary').click();
+  const changedFile=changeSummary.getByRole('link',{name:/src\/main\.ts/});
+  await changedFile.press('Enter');
+  const preview=page.locator('#sideFileContent .explorer-preview');
+  await preview.locator('.explorer-preview-name').filter({hasText:'main.ts'}).waitFor();
+  await preview.getByText('export const fixture = true;', {exact:false}).waitFor();
+  await page.screenshot({path:artifact('edited-file-open-in-files.png')});
+  await page.locator('#closeSidePanel').click();
   phase='inclusive native fork without execution';
   const before=await count('turn/start');
   await turn.getByRole('button',{name:'Fork in new chat',exact:true}).click();
@@ -144,6 +167,7 @@ try {
   phase='side chat independent context and draft';
   await page.locator('#prompt').fill('Main draft must stay');
   await page.locator('#toggleSidePanel').click();
+  if(!(await page.locator('#sidePanelLauncher').isVisible()))await page.locator('#openSidePanelTab').click();
   await page.locator('[data-side-panel-action=side-chat]').click();
   const side=page.locator('#sideChatPanel');
   const sideStarts=await count('turn/start');

@@ -7,7 +7,7 @@ COPY src/ src/
 COPY public/ public/
 RUN bun scripts/build.ts --frontend-only && \
     mkdir -p /bundle/public && \
-    cp public/index.html public/app.bundle.js public/setup.html public/setup.bundle.js public/style.css public/workspace.css public/remote-access.css public/favicon.svg public/auth-bootstrap.js public/access-session.js public/i18n.js public/codex-brand.js /bundle/public/ && \
+    cp public/index.html public/app.bundle.js public/setup.html public/setup.bundle.js public/style.css public/workspace.css public/remote-access.css public/favicon.svg public/auth-bootstrap.js public/access-session.js public/i18n.js public/codex-brand.js public/codex-icons.js /bundle/public/ && \
     bun -e 'import { stageBrowserVendor, stageDependencyNotices } from "./scripts/native-gateway.ts"; await stageBrowserVendor("/src", "/bundle"); await stageDependencyNotices("/src", "/bundle"); const {version} = await Bun.file("package.json").json(); if (!/^[0-9A-Za-z.+-]+$/.test(version)) throw new Error("Invalid gateway version"); await Bun.write("/version", version);' && \
     chmod -R a+rX /bundle
 

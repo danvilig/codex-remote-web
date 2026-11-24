@@ -1,27 +1,27 @@
 import { marked } from 'marked';
 import { codexIcon } from './codex-icons.js';
-import { renderFileMarkdown } from './rendering.js';
+import { renderFileMarkdown, renderStaticHtml } from './rendering.js';
 import { createCodeEditor, highlightCode, highlightFences } from './code-editor.js';
 
-export function mountFileDocument({body,toolbar,model,filename,cwd,t,save,toast}) {
+export function mountFileDocument({body,toolbar,model,filename,cwd,t,save,toast,lineStart,lineEnd}) {
   const node = (tag,cls='',text='')=>{const el=document.createElement(tag);el.className=cls;el.textContent=text;return el;};
   const button = (label,glyph,action)=>{const b=node('button','explorer-icon-button');b.type='button';b.title=label;b.setAttribute('aria-label',label);b.innerHTML=codexIcon(glyph);b.onclick=action;return b;};
-  let editing = false, source = !/\.(md|markdown|mdown)$/i.test(filename), editor = null, inline = null, blocks = [], disposed = false, saving = false, error = '', timer;
-  const markdown = !source;
+  const markdown = /\.(md|markdown|mdown)$/i.test(filename), html = /\.html?$/i.test(filename);
+  let editing = false, source = Boolean(lineStart) || !(markdown || html), editor = null, inline = null, blocks = [], disposed = false, saving = false, error = '', timer;
   const actions=node('div','explorer-document-actions');
-  const edit=button('Edit file','squarePen',()=>{finishInline();editing=!editing;error='';render();});
+  const edit=button('Edit file','squarePen',()=>{finishInline();editing=!editing;if(html&&editing)source=true;error='';render();});
   edit.disabled=!model.writable;
   const saveButton=button('Save file','save',()=>void persist());
   const discard=button('Discard changes','undo',()=>{if(!dirty()||confirm(t('Discard unsaved file changes?'))){finishInline(false);model.text=model.savedText;error='';render();}});
   const reload=button('Reload file','refreshCw',()=>void reloadDocument());
-  const toggle=markdown ? button('View source','file',()=>{finishInline();source=!source;toggle.title=source?'Preview':'View source';toggle.setAttribute('aria-label',toggle.title);toggle.setAttribute('aria-pressed',String(source));render();}) : null;
-  if(toggle){toggle.setAttribute('aria-pressed','false');actions.append(toggle);}
+  const toggle=markdown || html ? button(source?'Preview':'View source','file',()=>{finishInline();source=!source;toggle.title=source?'Preview':'View source';toggle.setAttribute('aria-label',toggle.title);toggle.setAttribute('aria-pressed',String(source));render();}) : null;
+  if(toggle){toggle.setAttribute('aria-pressed',String(source));actions.append(toggle);}
   actions.append(edit,saveButton,discard,reload);toolbar.insertBefore(actions,toolbar.lastChild);
   const status=node('div','explorer-document-status');status.role='status';status.setAttribute('aria-live','polite');body.before(status);
   const name=toolbar.querySelector('.explorer-preview-name');
   function dirty(){return model.text!==model.savedText;}
   function sync(){
-    saveButton.disabled=!model.writable||!dirty()||saving;discard.disabled=!dirty()||saving;reload.disabled=saving;edit.disabled=!model.writable||saving;if(toggle)toggle.disabled=saving;
+    saveButton.disabled=!model.writable||!dirty()||saving;discard.disabled=!dirty()||saving;reload.disabled=saving;edit.disabled=!model.writable||saving;if(toggle){toggle.disabled=saving||(html&&editing);toggle.title=source?'Preview':'View source';toggle.setAttribute('aria-label',toggle.title);toggle.setAttribute('aria-pressed',String(source));}
     edit.setAttribute('aria-pressed',String(editing));name?.classList.toggle('is-dirty',dirty());
     status.textContent=error||(saving?'Saving…':!model.writable?(model.editingUnavailable?'Update the running WebUI service to edit files.':'Read only'):dirty()?'Unsaved changes':editing&&!source?'Click a block to edit Markdown.':'');
     if(error&&dirty()){const copy=node('button','explorer-copy-draft','Copy draft');copy.type='button';copy.onclick=async()=>{try{await navigator.clipboard.writeText(model.text);toast(t('Copied'));}catch{toast(t('Copy failed. Select the answer and copy it.'));}};status.append(copy);}
@@ -98,13 +98,25 @@ export function mountFileDocument({body,toolbar,model,filename,cwd,t,save,toast}
   }
   function render(){
     destroyEditor();finishInline(false);body.dataset.i18nIgnore='';
-    if(!source)renderMarkdown();
+    if(!source&&html){
+      body.className='explorer-preview-body message-text explorer-markdown';
+      body.innerHTML=renderStaticHtml(model.text,256*1024);
+      if(!body.textContent.trim())body.textContent=t('This file has no static preview.');
+    }
+    else if(!source)renderMarkdown();
     else if(editing){
       body.className='explorer-preview-body is-code-editor';body.replaceChildren();
       editor=createCodeEditor({parent:body,text:model.text,filename,label:t('File editor'),onChange:changed,onSave:()=>void persist()});editor.focus();
     }else{
       body.className='explorer-preview-body has-code';
-      const code=node('pre','explorer-code'),lines=node('pre','explorer-line-numbers',Array.from({length:model.text.split('\n').length},(_,i)=>i+1).join('\n'));
+      const count=model.text.split('\n').length,start=Number.isSafeInteger(lineStart)&&lineStart>0?Math.min(lineStart,count):null,end=Number.isSafeInteger(lineEnd)?Math.max(start,Math.min(lineEnd,count)):start;
+      const code=node('pre','explorer-code'),lines=node('pre','explorer-line-numbers');
+      const numbers=(from,to)=>Array.from({length:to-from+1},(_,i)=>i+from).join('\n');
+      if(start){
+        const marker=node('span','explorer-cited-lines',numbers(start,end));
+        lines.append(start>1?numbers(1,start-1)+'\n':'',marker,end<count?'\n'+numbers(end+1,count):'');
+        requestAnimationFrame(()=>{if(marker.isConnected)body.scrollTop=marker.getBoundingClientRect().top-body.getBoundingClientRect().top+body.scrollTop-12;});
+      }else lines.textContent=numbers(1,count);
       lines.setAttribute('aria-hidden','true');body.replaceChildren(lines,code);void highlightCode(code,model.text,filename);
     }
     sync();

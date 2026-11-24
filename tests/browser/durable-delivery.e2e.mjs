@@ -3,7 +3,7 @@ import { createServer } from 'node:net';
 import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
 import { join, delimiter } from 'node:path';
 import { chromium } from 'playwright';
-import { root, launchOptions } from '../helpers/browser-runtime.mjs';
+import { root, launchOptions, artifact } from '../helpers/browser-runtime.mjs';
 const temp=await mkdtemp('/tmp/crw-durable-delivery-'),home=join(temp,'home'),project=join(temp,'project'),log=join(temp,'calls.jsonl');await Promise.all([mkdir(home),mkdir(project)]);
 const port=await new Promise(resolve=>{const server=createServer();server.listen(0,'127.0.0.1',()=>{const port=server.address().port;server.close(()=>resolve(port));});}),base=`http://127.0.0.1:${port}`;
 const server=Bun.spawn(['bun','src/server/index.ts'],{cwd:root,stdout:'ignore',stderr:'ignore',env:{...process.env,HOST:'127.0.0.1',PORT:String(port),HOME:home,CODEX_HOME:home,CODEX_AUTH_PATH:join(home,'none.json'),CODEX_WEBUI_CWD:project,CODEX_WEBUI_AUTH_MODE:'local',CODEX_WEBUI_APP_SERVER_MODE:'isolated',CODEX_WEBUI_FIXTURE_CONVERSATION_TOOLS:'true',CODEX_WEBUI_FIXTURE_TURN_DURATION_MS:'2000',CODEX_WEBUI_FIXTURE_LOG:log,PATH:join(root,'tests/fixtures')+delimiter+process.env.PATH}});
@@ -11,13 +11,13 @@ let browser;
 const wait=async predicate=>{for(let n=0;n<150;n++){if(await predicate())return;await Bun.sleep(40);}throw Error('Timed out');};
 try{
   await wait(async()=>{try{return(await(await fetch(base+'/api/health')).json()).codex;}catch{return false;}});
-  browser=await chromium.launch(launchOptions());const context=await browser.newContext({viewport:{width:1180,height:900}});
+  browser=await chromium.launch(launchOptions());const context=await browser.newContext({viewport:{width:1180,height:900},reducedMotion:'reduce'});
   await context.addInitScript(()=>{if(window!==window.top)return;localStorage.setItem('codex-webui-locale','en');const Native=WebSocket;globalThis.WebSocket=class extends Native{constructor(url,...args){if(new URL(url,location.href).pathname==='/ws')throw Error('SSE fixture');super(url,...args);}};});
   const page=await context.newPage(),other=await context.newPage();const errors=[];for(const p of [page,other]){p.on('pageerror',error=>errors.push(error.message));p.setDefaultTimeout(12000);}
   const rpc=(page,method,params={})=>page.evaluate(async({method,params})=>{const response=await fetch('/api/rpc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:77,method,params})});return response.json();},{method,params});
   await page.goto(base);await page.waitForFunction(()=>globalThis.__codexWebuiDebug?.state.connected);await page.evaluate(()=>globalThis.__codexWebuiDebug.openThread('thread-A'));
   await page.locator('#prompt').fill('Running [wait]');await page.locator('#sendButton').click();await page.waitForFunction(()=>document.querySelector('#sendButton').dataset.submitMode==='stop');
-  await page.locator('#composer .composer-delivery-choice').click();await page.getByRole('menuitem',{name:'Queue',exact:true}).click();
+  assert.equal(await page.locator('#composer .composer-delivery-choice').innerText(),'Queue');
   for(const text of ['First queued','Second queued']){await page.locator('#prompt').fill(text);await page.locator('#sendButton').click();await page.waitForFunction(()=>document.querySelector('#sendButton').getAttribute('aria-busy')==='false');}
   await other.goto(base);await other.waitForFunction(()=>globalThis.__codexWebuiDebug?.state.connected);await other.locator('#composer .composer-queue-row').first().waitFor();
   await wait(async()=>await other.locator('#composer .composer-queue-row').count()===2);
@@ -30,12 +30,30 @@ try{
   const edited=await rpc(other,'host/delivery/mutate',{action:'edit',payload:{id:original.id,version:original.version,text:'Edited from second tab'}});assert.equal(edited.type,'rpc/result',JSON.stringify(edited));
   const stale=await rpc(page,'host/delivery/mutate',{action:'edit',payload:{id:original.id,version:original.version,text:'Stale edit'}});assert.equal(stale.code,'QUEUE_CONFLICT');
   await wait(async()=>(await page.locator('#composer .composer-queue-row').first().innerText()).includes('Edited from second tab'));
+  assert(await page.locator('#composer').evaluate(form=>Boolean(form.querySelector('.composer-queue').compareDocumentPosition(form.querySelector('#prompt'))&Node.DOCUMENT_POSITION_FOLLOWING)));
   // Inline editing uses controls inside the existing composer, without a
   // nested form whose submit could execute the main prompt.
   await page.locator('#composer .composer-queue-row').first().getByRole('button',{name:'Queued message actions'}).click();await page.getByRole('menuitem',{name:'Edit queued message',exact:true}).click();
-  await page.getByRole('textbox',{name:'Edit queued message'}).fill('Edited inline');await page.getByRole('button',{name:'Save queued message',exact:true}).click();
+  const editor=page.locator('.composer-queue-editor');
+  await editor.getByRole('textbox',{name:'Edit queued message'}).fill('Edited inline');
+  assert.equal(await editor.locator('xpath=..').locator('.composer-queue-copy').count(),0);
+  await page.locator('#prompt').fill('Keep the main draft');
+  const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jT1sAAAAASUVORK5CYII=','base64');
+  await editor.locator('input[type=file]').setInputFiles({name:'queued-image.png',mimeType:'image/png',buffer:png});
+  await editor.getByRole('button',{name:'View image: queued-image.png',exact:true}).waitFor();
+  assert.equal(await editor.getByText('queued-image.png',{exact:true}).count(),0);
+  assert.equal(await editor.getByRole('textbox').inputValue(),'Edited inline');
+  await page.screenshot({path:artifact('queued-message-edit-desktop.png')});
+  await page.setViewportSize({width:390,height:844});
+  assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+  await page.screenshot({path:artifact('queued-message-edit-mobile.png')});
+  await editor.getByRole('button',{name:'Save queued message',exact:true}).click();
   await wait(async()=>(await rpc(page,'host/delivery/list')).result.entries[0].text==='Edited inline');
-  let entries=(await rpc(page,'host/delivery/list')).result.entries;await rpc(other,'host/delivery/mutate',{action:'reorder',payload:{id:entries[1].id,version:entries[1].version,direction:-1}});
+  assert.equal(await page.locator('#prompt').inputValue(),'Keep the main draft');
+  let entries=(await rpc(page,'host/delivery/list')).result.entries;
+  assert(entries[0].mentions.some(item=>item.title==='queued-image.png'));
+  assert(entries[0].params.input.some(item=>item.type==='localImage'));
+  await rpc(other,'host/delivery/mutate',{action:'reorder',payload:{id:entries[1].id,version:entries[1].version,direction:-1}});
   entries=(await rpc(page,'host/delivery/list')).result.entries;assert.equal(entries[0].text,'Second queued');
   await page.reload();await page.waitForFunction(()=>globalThis.__codexWebuiDebug?.state.connected);await wait(async()=>await page.locator('#composer .composer-queue-row').count()===2);
   const calls=(await readFile(log,'utf8')).trim().split('\n').map(JSON.parse);assert.equal(calls.filter(call=>call.method==='turn/start').length,1);assert.equal(calls.filter(call=>call.method==='turn/steer').length,0);

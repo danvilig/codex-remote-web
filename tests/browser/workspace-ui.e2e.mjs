@@ -90,8 +90,19 @@ try {
   assert.equal(await page.locator('[data-section=projects]').evaluate(node => node.open), projectsOpen);
   const demoProject = page.locator('.workspace-project').filter({ hasText: 'demo-project' });
   assert.equal(await demoProject.count(), 1);
-  assert.equal(await demoProject.locator('.project-connection').textContent(), 'Local server');
-  assert.equal(await page.locator('#composerEnvironmentButton [data-server-location]').textContent(), 'Local server');
+  const projectSummary = demoProject.locator(':scope > summary');
+  assert.equal((await projectSummary.textContent()).trim(), 'demo-project');
+  assert.equal(await projectSummary.getAttribute('title'), join(fixture, 'demo-project'));
+  const sidebarResize = page.locator('.panel-resize-left');
+  await sidebarResize.press('Home');
+  await page.waitForFunction(() => Math.abs(document.querySelector('#sidebar').getBoundingClientRect().width - 200) < 1);
+  const projectNameSize = await projectSummary.locator('.project-label').evaluate(label => ({
+    available: label.clientWidth, text: label.scrollWidth,
+  }));
+  assert(projectNameSize.available >= projectNameSize.text, JSON.stringify(projectNameSize));
+  await page.locator('#sidebar').screenshot({ path: artifact('workspace-project-narrow.png') });
+  await sidebarResize.dblclick();
+  assert.equal(await page.locator('#composerWorkspaceBar [data-server-location]').count(), 0);
   assert.equal(await page.locator('#settingsDialog [data-server-location]').textContent(), 'Local server');
   await demoProject.getByRole('button', {name:'older-project-chat',exact:true}).waitFor();
   await demoProject.getByRole('button', {name:'Load more chats',exact:true}).click();
@@ -252,14 +263,14 @@ try {
   assert.deepEqual(await page.locator('[data-settings-page]:visible').allTextContents(), ['Browser']);
   await page.locator('#clearSettingsSearch').click();
   await page.locator('[data-settings-page=appearance]').click();
-  await page.locator('#themeSelect').selectOption('light');
+  await page.locator('#themeSelect label:has([value=light])').click();
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
   await page.reload({ waitUntil: 'networkidle' });
   assert.equal(await page.locator('html').getAttribute('data-theme'), 'light');
   await page.screenshot({ path: artifact('workspace-settings-light.png') });
   assert.equal(await page.locator('#settingsChatFont').inputValue(), '16');
   assert.equal(await page.evaluate(() => document.documentElement.style.getPropertyValue('--codex-chat-font-size')), '16px');
-  await page.locator('#themeSelect').selectOption('dark');
+  await page.locator('#themeSelect label:has([value=dark])').click();
   await page.locator('[data-settings-page=general-settings]').click();
   await page.locator('#languageSelect').selectOption('zh-CN');
   await page.waitForFunction(() => document.querySelector('#settingsTitle').textContent === '设置');
@@ -334,8 +345,8 @@ try {
       await page.locator('#settingsMobileBack').click();
       await page.locator('[data-settings-page=appearance]').click();
       assert.equal(await page.locator('#settingsDialog').getAttribute('data-mobile-page'), 'true');
-      await fits(page, ['#settingsDialog', '.settings-content', '[data-select=themeSelect]']);
-      assert.equal(await page.locator('[data-select=themeSelect]').evaluate(node => { const rect = node.getBoundingClientRect(); return node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)); }), true, 'Settings must be above the closing drawer');
+      await fits(page, ['#settingsDialog', '.settings-content', '#themeSelect']);
+      assert.equal(await page.locator('#themeSelect').evaluate(node => { const rect = node.getBoundingClientRect(); return node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)); }), true, 'Settings must be above the closing drawer');
       await page.screenshot({ path: artifact('workspace-settings-mobile.png') });
       await page.locator('[data-settings-content=appearance] .settings-mobile-back').click();
       await page.locator('#closeSettingsNav').click();
