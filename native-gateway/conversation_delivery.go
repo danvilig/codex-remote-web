@@ -273,7 +273,7 @@ func (q *deliveryQueue) mutate(ctx context.Context, action string, raw json.RawM
 	}
 	var receipts []submissionReceipt
 	var added deliveryQueueRecord
-	var edited deliveryQueueEntry
+	var edited deliveryQueueEdit
 	switch action {
 	case "edit":
 		var err error
@@ -440,6 +440,13 @@ func (q *deliveryQueue) mutate(ctx context.Context, action string, raw json.RawM
 			if entry.SubmissionStatus != "" {
 				return false, deliveryConflict()
 			}
+			// The attachment lock is nonblocking. Cleanup can hold it while
+			// reading this queue, so binding must never wait for that lock.
+			if edited.bind != nil {
+				if err := edited.bind(); err != nil {
+					return false, err
+				}
+			}
 			entry.Text, entry.Mentions, entry.Params, entry.Claim = edited.Text, edited.Mentions, edited.Params, nil
 		case "reorder":
 			if payload.Direction != -1 && payload.Direction != 1 {
@@ -466,15 +473,20 @@ func (q *deliveryQueue) mutate(ctx context.Context, action string, raw json.RawM
 	return result, err
 }
 
-func (q *deliveryQueue) prepareEdit(ctx context.Context, payload deliveryMutation) (deliveryQueueEntry, error) {
-	var entry deliveryQueueEntry
+type deliveryQueueEdit struct {
+	deliveryQueueEntry
+	bind func() error
+}
+
+func (q *deliveryQueue) prepareEdit(ctx context.Context, payload deliveryMutation) (deliveryQueueEdit, error) {
+	var entry deliveryQueueEdit
 	if payload.Text == nil || len(*payload.Text) > 128<<10 || len(payload.AttachmentIDs) > 20 {
 		return entry, deliveryError("QUEUE_INVALID", "Invalid queued message edit")
 	}
 	if err := q.transaction(func(state *deliveryQueueState) (bool, error) {
 		for _, current := range state.Entries {
 			if current.ID == payload.ID && current.Version == payload.Version && !deliveryTerminal(current.Status) && current.Status != "sending" && current.Status != "unknown" && current.SubmissionStatus == "" {
-				entry = current.deliveryQueueEntry
+				entry.deliveryQueueEntry = current.deliveryQueueEntry
 				return false, nil
 			}
 		}
@@ -605,10 +617,10 @@ func (q *deliveryQueue) prepareEdit(ctx context.Context, payload deliveryMutatio
 		return entry, deliveryError("QUEUE_INVALID", "Invalid queued message edit")
 	}
 	if len(ids) != 0 {
-		// Cleanup takes its attachment lock before reading protected queue IDs.
-		// Bind outside the queue transaction and recheck the version on save.
-		if _, err := q.resolveAttachments(ctx, ids, cwd, entry.ThreadID, true); err != nil {
-			return entry, err
+		threadID := entry.ThreadID
+		entry.bind = func() error {
+			_, err := q.resolveAttachments(ctx, ids, cwd, threadID, true)
+			return err
 		}
 	}
 	return entry, nil

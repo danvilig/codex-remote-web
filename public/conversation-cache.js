@@ -61,7 +61,7 @@ export function createConversationCache({ maxEntries = 24, maxSize = 8 * 1024 * 
   function ensure(id) {
     const previous = entries.get(id);
     if (previous) return previous;
-    const entry = { history: null, complete: false, readAt: 0, live: new Map(), size: 0 };
+    const entry = { history: null, readAt: 0, live: new Map(), size: 0 };
     entries.set(id, entry);
     return entry;
   }
@@ -101,10 +101,7 @@ export function createConversationCache({ maxEntries = 24, maxSize = 8 * 1024 * 
       if (!entry || (!entry.history && !entry.live.size)) return null;
       touch(id, entry);
       const thread = overlay(entry.history || { id, turns: [] }, entry);
-      return {
-        thread: { ...thread, turns: thread.turns.slice() },
-        fresh: entry.complete && Date.now() - entry.readAt < FRESH_MS,
-      };
+      return { thread: { ...thread, turns: thread.turns.slice() } };
     },
     isWarm(id) { return !!entries.get(id)?.readAt; },
     isRecent(id) { return Date.now() - (entries.get(id)?.readAt || 0) < FRESH_MS; },
@@ -124,8 +121,7 @@ export function createConversationCache({ maxEntries = 24, maxSize = 8 * 1024 * 
         entry.size += json.length - (entry.historySize || 0);
         entry.historySize = json.length;
         entry.history = history;
-        entry.complete = history.turns.length === thread.turns.length;
-      } else entry.complete = false;
+      }
       entry.readAt = Date.now();
       touch(thread.id, entry);
       trim(thread.id);

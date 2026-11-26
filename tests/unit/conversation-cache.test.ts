@@ -26,7 +26,7 @@ test("prefers retaining pinned entries and clears stream updates with history", 
   cache.set(thread("recent"));
   cache.set(thread("new"));
   expect(cache.get("recent")).toBeNull();
-  expect(cache.get("pinned").fresh).toBe(true);
+  expect(cache.isRecent("pinned")).toBe(true);
   cache.track("pinned", "item/agentMessage/delta", { turnId: "turn-1", itemId: "answer", delta: " cached" });
   expect(cache.get("pinned").thread.turns[0].items[0].text).toBe("First cached");
   cache.clear();

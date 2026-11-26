@@ -285,7 +285,7 @@ export function createServerComposerDelivery({anchor,host,t,icon,menu,context,rp
     const uncertain=receipts.filter(entry=>entry.threadId===current.threadId&&(['prepared','dispatching','unknown'].includes(entry.status)||(entry.status==='rejected'&&entry.localRecovery))&&!visible.some(item=>item.id===entry.id)&&!recovery.some(item=>item.id===entry.id&&item.dismissed));
     const message=feedback&&feedback.threadId===current.threadId?t(feedback.label):'';
     if(status.textContent!==message)status.textContent=message;
-    choice.disabled=pending;updateDeliveryToggle(choice,mode,t);
+    choice.disabled=pending||!current.ready;updateDeliveryToggle(choice,mode,t);
     list.setAttribute('aria-label',t('Queued messages'));list.hidden=!visible.length&&!uncertain.length&&!legacy.length&&!edit;
     const next=JSON.stringify([visible,uncertain,pending,checking,current.ready,current.canCheck,t('Queue paused'),edit?.entry.id,edit?.added,edit?.uploading,edit?.error,legacy.length]);
     if(next===signature)return;signature=next;

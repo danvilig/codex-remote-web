@@ -587,11 +587,6 @@ async function openThread(id,fallbackSummary=null,retryRead=false){
   const beginLoading=()=>{conversationLoad=createConversationLoading($('#conversation'),{t,retry});syncComposerSubmitState();return conversationLoad};
   if(cached){
     const preview={...(summary||{}),...cached.thread};
-    if(cached.fresh&&!retryRead&&navigator.onLine&&state.connected){
-      selectConversation(preview);renderThread(preview);scrollOpenedThreadToBottom(true);
-      finishConversationLoad(null,preview);
-      return true;
-    }
     conversationLoad=createConversationRefresh($('#conversationRefresh'),{t,retry});
     if(!keepPreview){
       selectConversation(preview);renderThread(preview);scrollOpenedThreadToBottom(true);
@@ -662,9 +657,10 @@ function appendOlderMessagesButton(thread, root) {
     ? t('Load earlier messages')
     : t('Load earlier messages ({count})', {count:hiddenCount});
   more.onclick = () => {
-    if (conversationLoad || state.active !== thread) return;
-    if (hiddenCount) renderThread(thread, DEFAULT_TURN_PAGE_SIZE);
-    else void loadOlderConversationPage(thread, root, more);
+    const current = state.active;
+    if (conversationLoad || current?.id !== thread.id || more.disabled) return;
+    if (hiddenCount) renderThread(current, DEFAULT_TURN_PAGE_SIZE);
+    else void loadOlderConversationPage(current, root, more);
   };
   root.prepend(more);
 }
@@ -675,14 +671,15 @@ async function loadOlderConversationPage(thread, root, button) {
   button.disabled = true;
   try {
     const page = await readConversationPage(thread.id, cursor);
-    if (!threadNavigationRequestGate.isCurrent(navigationId) || state.active !== thread) return;
+    const current = state.active;
+    if (!threadNavigationRequestGate.isCurrent(navigationId) || current?.id !== thread.id || current.historyCursor !== cursor) return;
     if (!isConversationPage(page) || page.nextCursor === cursor) throw new Error('Conversation history unavailable');
-    const loaded = new Set(thread.turns.map(turn => turn.id));
+    const loaded = new Set(current.turns.map(turn => turn.id));
     const earlier = page.data.slice().reverse().filter(turn => !loaded.has(turn.id));
     const distanceFromBottom = root.scrollHeight - root.scrollTop;
-    thread.turns = [...earlier, ...thread.turns];
-    thread.historyCursor = page.nextCursor;
-    renderThread(thread, DEFAULT_TURN_PAGE_SIZE);
+    current.turns = [...earlier, ...current.turns];
+    current.historyCursor = page.nextCursor;
+    renderThread(current, DEFAULT_TURN_PAGE_SIZE);
     root.scrollTop = root.scrollHeight - distanceFromBottom;
   } catch {
     if (button.isConnected) toast(t('Could not load conversation'));
@@ -893,6 +890,7 @@ async function submitPrompt(event){
   saveComposerDraft();
   const navigationId=threadNavigationRequestGate.current(),target=state.active?{...state.active}:null;
   const model=state.selectedModel,effort=$('#effortSelect').value,planMode=state.planMode;
+  const deliveryMode=composerDelivery.mode;
   const cwd=target?.cwd||$('#projectPath').textContent.replace(/^~/,state.config.home),projectless=state.projectless;
   const threadPolicy=permissionThreadPolicy(),turnPolicy=permissionTurnPolicy(cwd);
   const submitted={text:rawText,mentions:state.composerMentions.map(item=>({...item}))};
@@ -929,7 +927,7 @@ async function submitPrompt(event){
     const skills=await composerTools.prepare(submitted.mentions,cwd);ensureCurrent();
     const fullText=[text,...uploaded.map(item=>`Attached file ${JSON.stringify(item.name)}: ${item.path}`)].filter(Boolean).join('\n');
     const nativeInput=[...(fullText?[{type:'text',text:fullText,text_elements:[]}]:[]),...uploaded.filter(item=>item.image).map(item=>({type:'localImage',path:item.path})),...skills];
-    if(turnId&&composerDelivery.mode==='queue'){
+    if(turnId&&deliveryMode==='queue'){
       await composerAttachments.prepare(submitted.mentions,cwd,targetId,true);ensureCurrent();
       clearSubmittedDraft();
       submissionAttempted=true;

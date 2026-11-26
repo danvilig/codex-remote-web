@@ -183,6 +183,22 @@ func TestQueueEditBindsImagesInCapturedProject(t *testing.T) {
 	if _, err := edit(entry.Version); !conversationErrorIs(err, "QUEUE_CONFLICT") {
 		t.Fatalf("stale edit lost compare-and-swap protection: %v", err)
 	}
+	staleImage := upload(project, "Stale.png", png)
+	q.resolveAttachments = func(ctx context.Context, ids []string, cwd, thread string, bind bool) ([]workspaceAttachment, error) {
+		items, err := s.attachments.resolve(ctx, ids, cwd, thread, bind)
+		if err == nil && !bind {
+			_, err = q.mutate(ctx, "edit", conversationObject(map[string]any{
+				"id": entry.ID, "version": updated.Version, "text": "Concurrent text edit",
+			}))
+		}
+		return items, err
+	}
+	if _, err := edit(updated.Version, staleImage.ID); !conversationErrorIs(err, "QUEUE_CONFLICT") {
+		t.Fatalf("concurrent image edit was accepted: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(s.attachments.path, staleImage.ID, attachmentLinkName(entry.ThreadID))); !os.IsNotExist(err) {
+		t.Fatalf("stale image was bound: %v", err)
+	}
 }
 
 func TestWorkspaceAttachmentsLegacyRasterAndLock(t *testing.T) {

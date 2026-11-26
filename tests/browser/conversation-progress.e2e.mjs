@@ -323,6 +323,53 @@ try{
   await refresh.waitFor({state:'hidden'});
   assert.equal(await ssePage.locator('#prompt').inputValue(),'Keep this while revalidating');
   assert.equal(await ssePage.locator('#sendButton').isDisabled(),false);
+
+  phase='listed history paginates across recent-list refreshes';
+  let releasePage;
+  const holdOlderPage=new Promise(resolve=>{releasePage=resolve;});
+  let newTurns=[];
+  const historyRoute=async route=>{
+    const {method,params}=route.request().postDataJSON();
+    if(method==='thread/list'&&!params.cwd){
+      const response=await route.fetch(),json=await response.json();
+      json.result.data.push({id:'progress-paged',cwd:project,name:'Listed paged history'});
+      await route.fulfill({response,json});return;
+    }
+    if(method==='thread/turns/list'&&params.threadId==='progress-paged'){
+      if(params.cursor)await holdOlderPage;
+      const response=await route.fetch(),json=await response.json();
+      if(!params.cursor)json.result.data=[...newTurns,...json.result.data].slice(0,params.limit);
+      await route.fulfill({response,json});return;
+    }
+    await route.fallback();
+  };
+  await ssePage.route('**/api/rpc',historyRoute);
+  await ssePage.waitForFunction(()=>globalThis.__codexWebuiDebug.state.threads.some(thread=>thread.id==='progress-paged'));
+  await ssePage.evaluate(async()=>{
+    const d=globalThis.__codexWebuiDebug;
+    await d.openThread('progress-paged');
+    window.beforeListRefresh=d.state.active;
+  });
+  const waitForListRefresh=()=>ssePage.waitForFunction(()=>globalThis.__codexWebuiDebug.state.active!==window.beforeListRefresh);
+  await waitForListRefresh();
+  await Promise.all([
+    ssePage.waitForRequest(req=>req.url().endsWith('/api/rpc')&&req.postDataJSON()?.method==='thread/turns/list'&&req.postDataJSON()?.params?.cursor),
+    ssePage.locator('.load-older').click(),
+  ]);
+  assert.equal(await ssePage.locator('.load-older').isDisabled(),true);
+  await ssePage.evaluate(()=>{window.beforeListRefresh=globalThis.__codexWebuiDebug.state.active;});
+  await waitForListRefresh();
+  releasePage();
+  await ssePage.locator('[data-turn-id=paged-2]').waitFor();
+  assert.equal(await ssePage.locator('#conversation .native-turn-timeline').count(),10);
+
+  phase='recent cache reconciles turns missed between visits';
+  await ssePage.evaluate(()=>globalThis.__codexWebuiDebug.openThread('thread-B'));
+  newTurns=['latest','middle'].map(id=>({id,status:'completed',items:[{id:'answer-'+id,type:'agentMessage',phase:'final_answer',text:'Missed reply '+id}]}));
+  assert.equal(await ssePage.evaluate(()=>globalThis.__codexWebuiDebug.openThread('progress-paged')),true);
+  await ssePage.locator('[data-turn-id=middle]').waitFor();
+  await ssePage.locator('[data-turn-id=latest]').waitFor();
+  await ssePage.unroute('**/api/rpc',historyRoute);
   await sseContext.close();
 
   phase='preloaded pins and background streaming';
@@ -359,7 +406,8 @@ try{
   await delta(' retained.');
   await pinnedAnswer.filter({hasText:'Background stream retained.'}).waitFor();
   assert.equal(await pinnedAnswer.getAttribute('data-raw'),'Background stream retained.');
-  assert.deepEqual(reads,['thread-A','progress-active'],'fresh pinned switches do not download history again');
+  await pinnedPage.locator('#conversationRefresh').waitFor({state:'hidden'});
+  assert(reads.filter(id=>id==='progress-active').length>1,'pinned chats revalidate after showing the cached stream');
   await pinnedPage.evaluate(()=>{
     window.refreshPinned=globalThis.__codexWebuiDebug.openThread('progress-active',null,true);
   });

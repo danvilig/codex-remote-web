@@ -88,6 +88,30 @@ test('editing queue text preserves the attachment suffix when replacing or clear
   expect(again.params.input[0].text).toBe(`Edited\n${line}`);
 }));
 
+test('a concurrent text edit prevents a stale image edit from binding attachments',()=>fixture(async(e:any)=>{
+  const id='00000000-0000-4000-8000-000000000003', imageId='00000000-0000-4000-8000-000000000004';
+  const attachment=join(e.root,'remote-web-attachments',imageId,'content.png');
+  const resolving=Promise.withResolvers<void>(), release=Promise.withResolvers<void>();
+  const bound:string[]=[];
+  const queue=createDeliveryQueue({...e.opts,resolveAttachments:async({bind}:any)=>{
+    if(bind)bound.push(imageId);
+    else {resolving.resolve();await release.promise;}
+    return {items:[{id:imageId,name:'Screenshot.png',path:attachment,image:true}]};
+  }});
+  e.instances.push(queue);
+  const entry=await queue.mutate('enqueue',{id,threadId:'thread-A',text:'Old',params:{threadId:'thread-A',cwd:e.root,input:[{type:'text',text:'Old'}]}});
+  const stale=queue.mutate('edit',{id,version:entry.version,text:'Image edit',attachmentIds:[imageId]});
+  await resolving.promise;
+  try {
+    await queue.mutate('edit',{id,version:entry.version,text:'Text edit'});
+  } finally {
+    release.resolve();
+  }
+  await expect(stale).rejects.toMatchObject({code:'QUEUE_CONFLICT'});
+  expect(bound).toEqual([]);
+  expect((await queue.list()).entries[0]).toMatchObject({text:'Text edit',mentions:[]});
+}));
+
 test('send now uses expectedTurnId steering and cancellation never interrupts the running turn',()=>fixture(async(e:any)=>{
   const a=await e.enqueue('00000000-0000-4000-8000-000000000001','Steer this');await e.queue.mutate('sendNow',{id:a.id,version:a.version});await e.queue.start();
   await wait(async()=>e.steers()===1);expect(e.calls.find((c:any)=>c.method==='turn/steer').params.expectedTurnId).toBe('turn-existing');

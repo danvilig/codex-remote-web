@@ -106,6 +106,34 @@ try{
   for(const width of [820,390]){await page.setViewportSize({width,height:844});await page.waitForTimeout(150);assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));}
   await page.setViewportSize({width:1180,height:900});phase='cancel after refresh';
   await page.waitForFunction(()=>document.querySelector('#sendButton').getAttribute('aria-busy')==='false');await page.getByRole('button',{name:'Cancel queued message',exact:true}).click();await page.waitForFunction(()=>document.querySelectorAll('#composer .composer-queue-row').length===0);
+  phase='queue mode stays fixed during attachment preparation';
+  let releaseImage, imageHeld=false;
+  const imageReady=new Promise(resolve=>{releaseImage=resolve;});
+  const holdImage=async route=>{
+    if(!route.request().postDataJSON().bind){imageHeld=true;await imageReady;}
+    await route.continue();
+  };
+  await page.route('**/api/attachments/resolve',holdImage);
+  await page.locator('#prompt').evaluate(prompt=>{
+    const files=new DataTransfer();
+    const png=Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jT1sAAAAASUVORK5CYII='),c=>c.charCodeAt(0));
+    files.items.add(new File([png],'Queue.png',{type:'image/png'}));
+    prompt.dispatchEvent(new ClipboardEvent('paste',{bubbles:true,cancelable:true,clipboardData:files}));
+  });
+  await page.locator('#composerContextTray img').waitFor();
+  await page.locator('#prompt').fill('Queue with image');
+  await page.locator('#sendButton').click();
+  await wait(()=>imageHeld);
+  try {
+    assert.equal(await choice.isDisabled(),true);
+    await choice.evaluate(button=>button.click());
+    assert.equal(await choice.innerText(),'Queue');
+  } finally {releaseImage();}
+  await page.locator('#composer .composer-queue-row').getByText('Queue with image',{exact:true}).waitFor();
+  assert.equal((await records()).some(r=>r.method==='turn/steer'&&r.params.input[0].text.startsWith('Queue with image')),false);
+  await page.unroute('**/api/attachments/resolve',holdImage);
+  await page.getByRole('button',{name:'Cancel queued message',exact:true}).click();
+  await page.waitForFunction(()=>document.querySelectorAll('#composer .composer-queue-row').length===0);
   await choice.click();
   await page.locator('#prompt').fill('force delivery failure');await page.locator('#sendButton').click();
   assert.equal(await page.locator('#sendButton').getAttribute('aria-busy'),'true');

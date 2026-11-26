@@ -172,9 +172,7 @@ export function createDeliveryQueue({ privateRoot, submissions, request, connect
     if (typeof action === 'object') { payload = action.payload || action; action = action.action; }
     if (!['enqueue', 'edit', 'reorder', 'cancel', 'pause', 'resume', 'sendNow'].includes(action)) throw Error('Unsupported queue action');
     const receipts = ['resume', 'sendNow', 'reorder'].includes(action) ? await unresolvedReceipts() : [];
-    // Attachment binding takes a separate storage lock. Do it before the queue
-    // transaction and recheck the same version when persisting the edit.
-    let edit;
+    let edit, attachmentScope;
     if (action === 'edit') {
       const { text, id, version, attachmentIds = [] } = payload;
       if (typeof text !== 'string' || Buffer.byteLength(text) > 128 * 1024 || !Array.isArray(attachmentIds) || attachmentIds.length > 20 || !attachmentIds.every(identity)) throw Error('Invalid queued message edit');
@@ -196,13 +194,13 @@ export function createDeliveryQueue({ privateRoot, submissions, request, connect
         ({ items: images } = await resolveAttachments(scope));
         if (images.length !== ids.length || images.some(item => !item.image)) throw Error('Queued attachments must be images');
         edit = editMessage(entry, text, images);
-        await resolveAttachments({ ...scope, bind: true });
+        attachmentScope = scope;
       } else {
         edit = editMessage(entry, text, images);
       }
     }
     let threadId;
-    const result = await store.transaction(state => {
+    const result = await store.transaction(async state => {
       recover(state);
       if (action === 'enqueue') {
         if (!identity(payload.id) || typeof payload.threadId !== 'string' || !payload.threadId || payload.threadId.length > 200 || !payload.params || payload.params.threadId !== payload.threadId || !Array.isArray(payload.params.input) || !payload.params.input.length) throw Error('Invalid queued message');
@@ -230,6 +228,9 @@ export function createDeliveryQueue({ privateRoot, submissions, request, connect
       }
       if (action === 'edit') {
         if (!editable(entry, payload.version)) throw conflict();
+        // Binding takes the attachment lock without waiting. Cleanup can hold
+        // that lock while reading the queue, so waiting here would deadlock.
+        if (attachmentScope) await resolveAttachments({ ...attachmentScope, bind: true });
         Object.assign(entry, edit);
         delete entry.claim;
       }
