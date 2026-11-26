@@ -114,9 +114,9 @@ try{
   assert.equal(await page.evaluate(()=>window.calls.filter(c=>c.method==='turn/start').length),0);
   assert.equal(await page.locator('#prompt').inputValue(),'Do not send after round trip');
   // Slow history reads must not clear input typed into the destination composer.
-  await page.evaluate(()=>{globalThis.__codexWebuiDebug.openThread('thread-A');});
+  await page.evaluate(()=>{window.destinationRead=globalThis.__codexWebuiDebug.openThread('thread-A');});
   await page.locator('#prompt').fill('Typing while history loads');
-  await page.waitForFunction(()=>!document.querySelector('.conversation-loading')?.textContent.includes('Loading conversation'));
+  assert.equal(await page.evaluate(()=>window.destinationRead),true);
   assert.equal(await page.locator('#prompt').inputValue(),'Typing while history loads');
   assert.deepEqual(errors,[]);
   // An open WebSocket can lose a reply without raising a disconnect event.
