@@ -24,10 +24,14 @@ export async function highlightCode(element, text, name, fence = false) {
   element.replaceChildren(fragment);
 }
 
+const highlightedFences = new WeakSet();
 export function highlightFences(root) {
   for (const element of root.querySelectorAll('pre > code')) {
     const language = [...element.classList].find(name=>name.startsWith('language-'))?.slice(9);
-    if (language) void highlightCode(element,element.textContent,language,true);
+    const text = element.textContent;
+    if (!language || text.length > 24000 || highlightedFences.has(element)) continue;
+    highlightedFences.add(element);
+    void highlightCode(element,text,language,true);
   }
 }
 

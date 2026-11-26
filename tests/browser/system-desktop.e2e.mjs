@@ -81,6 +81,7 @@ try {
   const fixture = join(home, 'codex-fixture.mjs');
   const codex = join(home, windows ? 'codex.exe' : 'codex');
   await copyFile(join(root, 'tests/fixtures/codex'), fixture);
+  await copyFile(join(root, 'tests/fixtures/product-demo.mjs'), join(home, 'product-demo.mjs'));
   if (windows) await command('bun', ['build', fixture, '--compile', '--outfile', codex], { timeout: 60_000 });
   else {
     const quote = value => `'${value.replaceAll("'", "'\\''")}'`;

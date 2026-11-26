@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -96,6 +98,7 @@ type gatewayApp struct {
 	terminalGate    sync.RWMutex
 	events          eventsHub
 	mux             *http.ServeMux
+	webAssets       sync.Map
 }
 
 func (a *gatewayApp) status() map[string]string {
@@ -175,7 +178,78 @@ func (a *gatewayApp) registerCore() {
 	})
 }
 
-var publicFiles = map[string]bool{"/index.html": true, "/style.css": true, "/workspace.css": true, "/remote-access.css": true, "/favicon.svg": true, "/auth-bootstrap.js": true, "/access-session.js": true, "/i18n.js": true, "/codex-brand.js": true, "/app.bundle.js": false}
+var publicFiles = map[string]bool{"/index.html": true, "/style.css": true, "/workspace.css": true, "/remote-access.css": true, "/favicon.svg": true, "/auth-bootstrap.js": true, "/access-session.js": true, "/i18n.js": true, "/codex-brand.js": true, "/codex-icons.js": true, "/app.bundle.js": false}
+
+type webAsset struct {
+	info     fs.FileInfo
+	body     []byte
+	revision string
+}
+
+func (a *gatewayApp) webAsset(file string, f *os.File) (webAsset, error) {
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return webAsset{}, fmt.Errorf("not a regular asset")
+	}
+	if entry, ok := a.webAssets.Load(file); ok {
+		cached := entry.(webAsset)
+		if os.SameFile(cached.info, info) && cached.info.Size() == info.Size() && cached.info.ModTime().Equal(info.ModTime()) {
+			return cached, nil
+		}
+	}
+	body, err := io.ReadAll(f)
+	if err != nil {
+		return webAsset{}, err
+	}
+	asset := webAsset{info: info, body: body, revision: fmt.Sprintf("%x", sha256.Sum256(body))}
+	a.webAssets.Store(file, asset)
+	return asset, nil
+}
+
+func (a *gatewayApp) assetRevision(path string) string {
+	file := "public" + path
+	if info, err := a.root.Lstat(file); err != nil || !info.Mode().IsRegular() {
+		return ""
+	}
+	f, err := a.root.Open(file)
+	if err != nil {
+		return ""
+	}
+	defer f.Close()
+	asset, err := a.webAsset(file, f)
+	if err != nil {
+		return ""
+	}
+	return asset.revision
+}
+
+func (a *gatewayApp) serveWebAsset(w http.ResponseWriter, r *http.Request, path, file string, f *os.File) {
+	asset, err := a.webAsset(file, f)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	body := asset.body
+	if path == "/index.html" {
+		w.Header().Set("Cache-Control", "no-store")
+		if revision := a.assetRevision("/app.bundle.js"); revision != "" {
+			body = bytes.Replace(body, []byte(`name="app-bundle-revision" content=""`), []byte(`name="app-bundle-revision" content="`+revision+`"`), 1)
+		}
+		for _, css := range []string{"/style.css", "/workspace.css", "/remote-access.css"} {
+			if revision := a.assetRevision(css); revision != "" {
+				body = bytes.Replace(body, []byte(`href="`+css+`"`), []byte(`href="`+css+"?v="+revision+`"`), 1)
+			}
+		}
+	} else {
+		w.Header().Set("ETag", `"`+asset.revision+`"`)
+		cache := "private, no-cache"
+		if r.URL.RawQuery == "v="+asset.revision {
+			cache = "private, max-age=31536000, immutable"
+		}
+		w.Header().Set("Cache-Control", cache)
+	}
+	http.ServeContent(w, r, filepath.Base(file), time.Time{}, bytes.NewReader(body))
+}
 
 func (a *gatewayApp) asset(w http.ResponseWriter, r *http.Request, loginOnly bool) {
 	path := r.URL.Path
@@ -213,6 +287,10 @@ func (a *gatewayApp) asset(w http.ResponseWriter, r *http.Request, loginOnly boo
 	}
 	if typ := mime.TypeByExtension(filepath.Ext(file)); typ != "" {
 		w.Header().Set("Content-Type", typ)
+	}
+	if _, ok := publicFiles[path]; ok {
+		a.serveWebAsset(w, r, path, file, f)
+		return
 	}
 	http.ServeContent(w, r, filepath.Base(file), info.ModTime(), f)
 }

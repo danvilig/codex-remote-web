@@ -250,6 +250,17 @@ func TestConversationLiveRolloutKeepsPartialLineAndRoot(t *testing.T) {
 	if err != nil || !strings.Contains(string(result), `"text":"hello"`) {
 		t.Fatalf("complete appended record was not restored: %s %v", result, err)
 	}
+	finished := `{"type":"event_msg","payload":{"type":"task_complete","turn_id":"turn"}}` + "\n"
+	usage := `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"total_tokens":12500,"output_tokens":400},"last_token_usage":{"total_tokens":4600,"output_tokens":120},"model_context_window":200000}}}` + "\n"
+	emptyUsage := `{"type":"event_msg","payload":{"type":"token_count","info":null}}` + "\n"
+	if err := os.WriteFile(path, []byte(begin+partial+"\n"+finished+usage+emptyUsage), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err = store.read(root, path)
+	if err != nil || !strings.Contains(string(result), `"active":false`) ||
+		!strings.Contains(string(result), `"tokenUsage":{"last":{"outputTokens":120,"totalTokens":4600},"modelContextWindow":200000,"total":{"outputTokens":400,"totalTokens":12500}}`) {
+		t.Fatalf("completed thread token counts were not restored: %s %v", result, err)
+	}
 	outside := filepath.Join(t.TempDir(), "outside.jsonl")
 	if err := os.WriteFile(outside, []byte(begin), 0600); err != nil {
 		t.Fatal(err)

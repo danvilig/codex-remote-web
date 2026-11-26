@@ -34,6 +34,29 @@ try {
     const errors=[];page.on('pageerror',error=>errors.push(error.message));
     const cdp=await context.newCDPSession(page);
     await page.goto(base,{waitUntil:'networkidle'});
+    for (const id of ['toggleSidebar','threadActionsButton','toggleSummaryPanel','toggleSidePanel']) {
+      const hit = await page.locator('#'+id).boundingBox();
+      assert.ok(hit.width >= 44 && hit.height >= 44 && hit.x >= 0 && hit.x + hit.width <= width, id);
+    }
+    if (width <= 390) {
+      await page.locator('#toggleSidebar').click();
+      await page.locator('#accountButton').click();
+      await page.locator('#accountSettings').click();
+      await page.waitForFunction(() => document.activeElement?.id === 'settingsMobileBack');
+      await page.locator('#settingsMobileBack').click();
+      await page.waitForFunction(() => document.activeElement?.dataset.settingsPage === 'general-settings');
+      assert.equal(await page.locator('#settingsSearch').evaluate(el => getComputedStyle(el).fontSize), '16px');
+      if (width === 390) await page.screenshot({path:artifact('mobile-settings-no-keyboard.png')});
+      await page.locator('#settingsSearch').tap();
+      assert.equal(await page.locator('#settingsSearch').evaluate(el => el === document.activeElement), true);
+      await page.locator('#settingsSearch').fill('Appearance');
+      await page.locator('[data-settings-page=appearance]').tap();
+      assert.equal(await page.locator('[data-settings-content=appearance] .settings-mobile-back').evaluate(el => el === document.activeElement), true);
+      await page.locator('[data-settings-content=appearance] .settings-mobile-back').click();
+      await page.locator('#closeSettingsNav').click();
+      await page.locator('#settingsDialog').waitFor({state:'hidden'});
+      if (await page.locator('#sidebarBackdrop').isVisible()) await page.locator('#sidebarBackdrop').click();
+    }
     await page.evaluate(()=>globalThis.__codexWebuiDebug.openThread('thread-A'));
     await page.waitForFunction(()=>globalThis.__codexWebuiDebug.state.active?.id==='thread-A');
     await page.locator('#prompt').fill('Keep this draft');
@@ -99,8 +122,48 @@ try {
     await context.close();
   }
   // The same visible rightmost button toggles the desktop panel too.
+  progress='desktop: keyboard focus and cache';
   const desktop=await browser.newPage({viewport:{width:1440,height:1000}});
+  const network=await desktop.context().newCDPSession(desktop);
+  await network.send('Network.enable');
+  const requests=new Map();
+  network.on('Network.requestWillBeSent', event=>requests.set(event.requestId,{url:event.request.url}));
+  network.on('Network.requestServedFromCache', ({requestId})=>{if(requests.has(requestId))requests.get(requestId).cached=true;});
+  network.on('Network.responseReceived', ({requestId,response})=>{if(requests.has(requestId)&&response.fromDiskCache)requests.get(requestId).cached=true;});
   await desktop.goto(base,{waitUntil:'networkidle'});
+  await desktop.keyboard.press('Tab');
+  assert.equal(await desktop.evaluate(() => document.activeElement?.getAttribute('href')), '#prompt');
+  await desktop.keyboard.press('Enter');
+  const focus = await desktop.locator('#prompt').evaluate(el => ({
+    active: document.activeElement === el,
+    inputOutline: getComputedStyle(el).outlineStyle,
+    composerOutline: getComputedStyle(el.form).outlineStyle,
+    focusMarker: getComputedStyle(el).backgroundImage,
+  }));
+  assert.equal(focus.active, true);
+  assert.equal(focus.inputOutline, 'none');
+  assert.equal(focus.composerOutline, 'none');
+  assert.match(focus.focusMarker, /linear-gradient/);
+  await desktop.screenshot({path:artifact('desktop-composer-keyboard-focus.png')});
+  const bundle = [...requests.values()].find(({url})=>/\/app\.bundle\.js\?v=[0-9a-f]{64}$/.test(url));
+  assert.ok(bundle, 'Initial navigation requests the content-addressed bundle');
+  const assets = [...requests.values()].filter(({url})=>/\/(?:style|workspace|remote-access)\.css\?v=[0-9a-f]{64}$/.test(url));
+  assert.equal(assets.length,3);
+  const response = await fetch(bundle.url);
+  assert.equal(response.headers.get('cache-control'),'private, max-age=31536000, immutable');
+  const conditional = await fetch(bundle.url,{headers:{'if-none-match':response.headers.get('etag')}});
+  assert.equal(conditional.status,304);
+  assert.equal(await conditional.text(),'');
+  const versionMismatch = await fetch(base+'/app.bundle.js?v=stale');
+  assert.equal(versionMismatch.headers.get('cache-control'),'private, no-cache');
+  assert.equal((await fetch(base+'/api/auth/status')).headers.get('cache-control'),'no-store');
+  requests.clear();
+  await desktop.goto(base+'/?return-visit=1',{waitUntil:'networkidle'});
+  for (const {url} of [bundle,...assets]) {
+    assert.ok([...requests.values()].some(entry=>entry.url===url&&entry.cached), 'Return visit uses browser cache for '+url);
+  }
+  const auth = [...requests.values()].find(({url})=>url.endsWith('/api/auth/status'));
+  assert.ok(auth && !auth.cached, 'Return visit repeats authentication check');
   assert.equal(await desktop.locator('.top-actions > button').last().getAttribute('id'),'toggleSidePanel');
   await desktop.locator('#toggleSidePanel').click();await desktop.locator('#sidePanel:visible').waitFor();
   await desktop.locator('[data-side-panel-action=files]').click();

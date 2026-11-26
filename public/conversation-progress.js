@@ -5,7 +5,7 @@ export function elapsedTime(ms) {
   return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
 }
 
-// A spinner is only animation. Freshness comes from actual notifications and
+// Animation is decorative. Freshness comes from actual notifications and
 // successful reads, never from a local timer or an unchanged polling snapshot.
 export function runtimeStatus(entry, { connected, waiting, now = Date.now() }) {
   if (entry.status !== 'inProgress') return {
@@ -14,14 +14,42 @@ export function runtimeStatus(entry, { connected, waiting, now = Date.now() }) {
   };
   if (!connected) return { label: 'Connection interrupted', glyph: 'triangleAlert', tone: 'offline' };
   if (waiting) return { label: waiting, glyph: 'circleHelp', tone: 'waiting' };
-  const active = [...entry.items.values()].reverse().find(item => summarizeActivity(item).active);
+  const active = [...entry.items.values()].reverse().find(item => item.type !== 'userMessage' && summarizeActivity(item).active);
   const data = active && summarizeActivity(active);
-  const glyph = active?.type === 'fileChange' ? 'fileDiff' : active?.type === 'webSearch' || data?.category === 'search' ? 'search' : data?.category === 'command' ? 'terminal' : data?.category === 'read' || data?.category === 'list' ? 'file' : 'loaderCircle';
+  const glyph = active?.type === 'agentMessage' ? 'squarePen'
+    : active?.type === 'imageGeneration' ? 'image'
+    : active?.type === 'fileChange' ? 'fileDiff'
+    : active?.type === 'webSearch' ? 'globe'
+    : active?.type === 'reasoning' ? 'matrix'
+    : { search: 'search', command: 'terminal', read: 'file', list: 'list' }[data?.category] || 'orb';
   return {
-    label: active?.type === 'agentMessage' ? 'Writing response' : data?.label || 'Working',
-    detail: ['reasoning', 'agentMessage'].includes(active?.type) ? '' : data?.detail || '', glyph,
+    label: active?.type === 'agentMessage' ? 'Writing response'
+      : active?.type === 'imageGeneration' ? 'Generating image' : data?.label || 'Working',
+    detail: ['reasoning', 'agentMessage', 'imageGeneration'].includes(active?.type) ? '' : data?.detail || '', glyph,
     tone: now - entry.lastEvent >= 20000 ? 'quiet' : 'active',
   };
+}
+
+function detachProgress(panel) {
+  if (!panel) return;
+  const turn = panel.parentElement;
+  const body = panel.nextElementSibling;
+  turn.dataset.workExpanded = String(panel.open);
+  body.hidden = !panel.open && turn.querySelector('.worked-for-divider:not([hidden])') !== null;
+  panel.remove();
+}
+
+function progressPanel(turn, icon) {
+  const panel = document.createElement('details');
+  panel.className = 'runtime-progress';
+  panel.innerHTML = `<summary class="runtime-heading" data-i18n-ignore><span class="runtime-glyph" aria-hidden="true"></span><strong role="status"></strong><span class="runtime-elapsed"></span><span class="runtime-chevron" aria-hidden="true">${icon('chevronRight')}</span></summary>
+    <div class="runtime-meta" data-i18n-ignore><code class="runtime-detail"></code><small class="runtime-freshness"></small><details class="runtime-plan"><summary></summary><progress></progress><ol></ol></details></div>`;
+  const body = turn.querySelector('.assistant-body');
+  panel.open = turn.dataset.workExpanded === 'true' || body.contains(document.activeElement);
+  body.hidden = false;
+  panel.ontoggle = () => { turn.dataset.workExpanded = String(panel.open); };
+  body.before(panel);
+  return panel;
 }
 
 export function createRuntimeProgress({ state, t, icon, ensureTurn, authRequired = () => false, isLoading = () => false, now = () => Date.now() }) {
@@ -34,37 +62,47 @@ export function createRuntimeProgress({ state, t, icon, ensureTurn, authRequired
   function refresh() {
     clearTimeout(timer);
     if (isLoading()) {
-      for (const turn of state.turns.values()) turn.querySelector('.runtime-progress')?.remove();
+      for (const turn of state.turns.values()) detachProgress(turn.querySelector('.runtime-progress'));
       return;
     }
     for (const entry of entries.values()) {
       const turn = state.turns.get(entry.id);
       if (!turn?.isConnected) continue;
       let panel = turn.querySelector('.runtime-progress');
-      if (entry.status === 'completed') { panel?.remove(); continue; }
-      if (!panel) {
-        panel = document.createElement('section');
-        panel.className = 'runtime-progress';
-        panel.dataset.i18nIgnore = '';
-        panel.innerHTML = '<div class="runtime-heading"><span class="runtime-glyph" aria-hidden="true"></span><strong role="status" aria-live="polite"></strong><span class="runtime-elapsed"></span></div><code class="runtime-detail"></code><small class="runtime-freshness"></small><details class="runtime-plan"><summary></summary><progress></progress><ol></ol></details>';
-        turn.querySelector('.turn-final-slot').before(panel);
+      if (entry.status === 'completed') {
+        const restoreFocus = panel && (panel.contains(document.activeElement)
+          || (!panel.open && panel.nextElementSibling?.contains(document.activeElement)));
+        detachProgress(panel);
+        if (restoreFocus) {
+          const toggle = turn.querySelector('.turn-work-toggle');
+          if (toggle?.getClientRects().length) toggle.focus({ preventScroll: true });
+        }
+        continue;
       }
+      panel ||= progressPanel(turn, icon);
       const requests = [...state.serverRequests.values()].filter(request => request.params?.threadId === state.active?.id && (!request.params.turnId || request.params.turnId === entry.id));
       const waiting = requests.length ? (requests.some(r => r.method === 'item/tool/requestUserInput') ? 'Waiting for your answer' : 'Waiting for approval') : null;
       const model = authRequired() ? { label: 'Sign in to reconnect', glyph: 'shield', tone: 'offline' } : runtimeStatus(entry, { connected: state.connected, waiting, now: now() });
       panel.dataset.tone = model.tone;
       const setText = (selector, text) => { const node = panel.querySelector(selector); if (node.textContent !== text) node.textContent = text; return node; };
       const glyph = panel.querySelector('.runtime-glyph');
-      if (glyph.dataset.icon !== model.glyph) { glyph.dataset.icon = model.glyph; glyph.innerHTML = icon(model.glyph); }
-      setText('strong', t(model.label));
-      setText('.runtime-elapsed', t(entry.startedKnown ? 'Elapsed {time}' : 'Observed for {time}', { time: elapsedTime((entry.ended || now()) - entry.started) }));
+      if (glyph.dataset.icon !== model.glyph) {
+        glyph.dataset.icon = model.glyph;
+        glyph.innerHTML = model.glyph === 'orb' ? '<span class="runtime-orb"></span>'
+          : model.glyph === 'matrix' ? '<span class="runtime-matrix"><i></i><i></i><i></i><i></i><i></i></span>'
+          : icon(model.glyph);
+      }
+      setText('.runtime-heading strong', t(model.label));
+      const time = elapsedTime((entry.ended || now()) - entry.started);
+      const elapsed = setText('.runtime-elapsed', time);
+      elapsed.title = t(entry.startedKnown ? 'Elapsed {time}' : 'Observed for {time}', { time });
       const detail = setText('.runtime-detail', model.detail || '');
       detail.hidden = !model.detail;
       detail.title = model.detail || '';
       const age = elapsedTime(now() - entry.lastEvent);
       const freshness = model.tone === 'offline' ? 'Progress is unavailable until the connection returns. No request will be resent.'
         : model.tone === 'waiting' ? 'Your response is needed to continue.'
-        : model.tone === 'error' ? 'Execution stopped. Review the work and errors above.'
+        : model.tone === 'error' ? 'Execution stopped. Review the work and errors below.'
         : model.tone === 'quiet' ? (now() - entry.confirmed < 10000 ? 'No new output for {time}. Codex still reports this turn as running.' : 'No new output for {time}. Waiting for a fresh server status.')
         : 'Last activity {time} ago';
       setText('.runtime-freshness', t(freshness, { time: age }));
@@ -72,7 +110,7 @@ export function createRuntimeProgress({ state, t, icon, ensureTurn, authRequired
       plan.hidden = !entry.plan?.length;
       if (entry.plan?.length) {
         const done = entry.plan.filter(step => step.status === 'completed').length;
-        setText('summary', t('Plan · {done}/{total} steps', { done, total: entry.plan.length }));
+        setText('.runtime-plan summary', t('Plan · {done}/{total} steps', { done, total: entry.plan.length }));
         const progress = plan.querySelector('progress');
         progress.max = entry.plan.length; progress.value = done;
         progress.setAttribute('aria-label', t('Plan progress'));
@@ -159,5 +197,30 @@ export function createConversationLoading(root, { t, retry, now = () => Date.now
     render(complete, count) { stage = 'rendering'; total = count; loaded = complete; progress.max = Math.max(1, count); progress.value = complete; refresh(); },
     fail() { failure = true; root.removeAttribute('aria-busy'); refresh(); },
     finish() { clearInterval(timer); node.remove(); root.removeAttribute('aria-busy'); },
+  };
+}
+
+export function createConversationRefresh(node, { t, retry }) {
+  const label = node.querySelector('span'), button = node.querySelector('button');
+  let failed = false, finished = false;
+  function refresh() {
+    if (finished) return;
+    const message = !navigator.onLine ? 'Offline · Showing previously loaded messages'
+      : failed ? 'Could not refresh · Showing previously loaded messages'
+        : 'Updating conversation…';
+    const translated = t(message);
+    if (label.textContent !== translated) label.textContent = translated;
+    button.textContent = t('Retry loading');
+    button.hidden = !failed || !navigator.onLine;
+  }
+  node.hidden = false;
+  button.onclick = retry;
+  refresh();
+  return {
+    cached: true,
+    get failed() { return failed; },
+    refresh,
+    fail() { failed = true; refresh(); },
+    finish() { finished = true; node.hidden = true; button.onclick = null; },
   };
 }

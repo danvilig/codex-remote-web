@@ -28,7 +28,7 @@ const plan=await page.evaluate(()=>({
   placeholder:document.querySelector('#prompt').placeholder,
   value:document.querySelector('#prompt').value,
   menuHidden:document.querySelector('#composerAutocomplete').hidden,
-  approval:document.querySelector('#modeButton .control-label').textContent.trim(),
+  pressed:document.querySelector('#planModeButton').getAttribute('aria-pressed'),
 }));
 
 await page.locator('#prompt').fill('/model');
@@ -67,7 +67,7 @@ if(errors.length
   ||plan.placeholder!=='Describe your task to generate a plan...'
   ||plan.value!==''
   ||!plan.menuHidden
-  ||plan.approval!=='Plan mode'
+  ||plan.pressed!=='true'
   ||!modelCommand.autocompleteHidden
   ||!modelCommand.modelOpen
   ||!modelCommand.slider

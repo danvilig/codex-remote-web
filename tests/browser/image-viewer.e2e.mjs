@@ -27,7 +27,7 @@ try{
     const api=globalThis.__codexWebuiDebug;
     for(const animation of api.state.motion.values())animation?.destroy?.();
     for(const map of [api.state.items,api.state.turns,api.state.activities,api.state.activityItems,api.state.dividers,api.state.motion])map.clear();
-    api.state.active={id:'image-thread',cwd:'/tmp',source:'local'};
+    api.state.active={id:'image-thread',cwd:api.state.config.defaultCwd,source:'local'};
     document.querySelector('#conversation').replaceChildren();
     api.notify('item/completed',{turnId:'image-turn',item:{id:'image-commentary',type:'agentMessage',phase:'commentary',text:`Here is the captured result.\n\n![Agent screenshot](${imageA})\n\n[Open the screenshot](${imageA})`}});
     api.notify('item/completed',{turnId:'image-turn',item:{id:'image-command-before',type:'commandExecution',status:'completed',command:'ls /tmp'}});
@@ -78,14 +78,11 @@ try{
   await page.locator('#closeImageViewer').click();
   if(!await page.locator('[data-local-conversation-commentary] .message-image-button').evaluate(node=>document.activeElement===node))throw new Error('Closing the viewer must restore focus to the image preview');
 
-  const citationResult=await page.evaluate(()=>new Promise(resolve=>{
-    let fileEvents=0;
-    addEventListener('codex-webui:file-reference',()=>fileEvents++);
-    document.querySelector('[data-local-conversation-commentary] .image-citation').click();
-    requestAnimationFrame(()=>resolve({fileEvents,open:document.querySelector('#imageViewer').open,title:document.querySelector('#imageViewerTitle').textContent}));
-  }));
-  if(citationResult.fileEvents!==0||!citationResult.open||citationResult.title!=='codex-webui-agent-image-a.png')throw new Error(`Image citations must open the viewer instead of the file bridge: ${JSON.stringify(citationResult)}`);
-  await page.locator('#closeImageViewer').click();
+  await page.locator('[data-local-conversation-commentary] .file-citation').click();
+  await page.waitForFunction(()=>document.querySelector('#sideFileContent .explorer-preview img')?.naturalWidth>0);
+  const citationResult=await page.evaluate(()=>({open:document.querySelector('#imageViewer').open,title:document.querySelector('#sideFileContent .explorer-preview-name').textContent}));
+  if(citationResult.open||citationResult.title!=='codex-webui-agent-image-a.png')throw new Error(`Linked images must open in Files: ${JSON.stringify(citationResult)}`);
+  await page.locator('#closeSidePanel').click();
 
   await page.setViewportSize({width:390,height:844});
   await page.locator('[data-local-conversation-final-assistant] .message-image-button').click();

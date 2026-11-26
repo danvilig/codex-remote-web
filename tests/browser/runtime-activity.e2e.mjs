@@ -20,8 +20,8 @@ await page.evaluate(()=>{
 });
 
 await page.waitForFunction(()=>document.querySelector('[data-item-id="runtime-command"] .activity-name')?.textContent.includes('Running command'));
-await page.click('[data-item-id="runtime-command"]');
-await page.click('[data-item-id="runtime-interactive"]');
+await page.locator('[data-item-id="runtime-command"][aria-expanded=true]').waitFor();
+await page.locator('[data-item-id="runtime-interactive"][aria-expanded=true]').waitFor();
 await page.click('[data-item-id="runtime-file"]');
 const running=await page.evaluate(()=>({
   commandLabel:document.querySelector('[data-item-id="runtime-command"] .activity-name')?.textContent.trim(),
@@ -45,7 +45,7 @@ await page.evaluate(()=>{
     {id:'synced-file',type:'fileChange',status:'completed',changes:[{path:'/tmp/host-live.ts',kind:{type:'update'},diff:'@@ -1 +1 @@\n-export const live = false;\n+export const live = true;'}]},
   ]});
 });
-await page.click('[data-item-id="synced-command"]');
+await page.locator('[data-item-id="synced-command"][aria-expanded=true]').waitFor();
 await page.evaluate(()=>{
   const api=globalThis.__codexWebuiDebug;
   api.syncTurnSnapshot({id:'synced-turn',status:'inProgress',itemsView:'full',items:[
@@ -54,6 +54,7 @@ await page.evaluate(()=>{
     {id:'synced-file',type:'fileChange',status:'completed',changes:[{path:'/tmp/host-live.ts',kind:{type:'update'},diff:'@@ -1 +1 @@\n-export const live = false;\n+export const live = true;'}]},
   ]});
 });
+await page.locator('[data-turn-id=synced-turn] .runtime-heading').click();
 await page.click('[data-item-id="synced-file"]');
 const syncing=await page.evaluate(()=>({
   output:document.querySelector('[data-item-id="synced-command"] + .activity-output pre')?.textContent,
@@ -72,19 +73,20 @@ await page.evaluate(()=>{
   api.syncTurnSnapshot({id:'synced-turn',status:'completed',itemsView:'full',items:[{id:'synced-command',type:'commandExecution',status:'completed',command:'bun run build',aggregatedOutput:'building\nbundled\n',exitCode:0}]});
 });
 await page.click('#toggleSidePanel');
-await page.click('#reviewTab');
+await page.click('[data-side-panel-action="review"]');
 const recovered=await page.evaluate(()=>({
   stopped:!document.querySelector('#sendButton')?.classList.contains('stop'),
   reviewPath:document.querySelector('.review-file-name')?.textContent,
   reviewText:document.querySelector('#changeList')?.textContent,
   reviewSource:globalThis.__codexWebuiDebug.state.activeReview?.source,
 }));
-await page.evaluate(()=>{
+await page.evaluate(async()=>{
   const root=document.querySelector('#conversation'),filler=document.createElement('div');
   filler.style.height='2400px';
   filler.dataset.openThreadScrollFixture='';
   root.append(filler);
   root.scrollTop=0;
+  await new Promise(resolve=>requestAnimationFrame(resolve));
   globalThis.__codexWebuiDebug.scrollOpenedThreadToBottom();
 });
 await page.waitForFunction(()=>{const root=document.querySelector('#conversation');return root.scrollHeight-root.scrollTop-root.clientHeight<2});

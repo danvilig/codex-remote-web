@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <script>if((matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0)&&innerWidth<=980)document.documentElement.classList.add('mobile-device')</script>
 <meta name="theme-color" content="#181818">
+<meta name="app-bundle-revision" content="">
 <title>Codex Remote Web</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/style.css">
@@ -21,14 +22,15 @@
   <form class="password-login" id="passwordLoginForm">
     <span id="passwordCodexMark"></span>
     <h1 id="passwordTitle">Log in</h1>
-    <label class="sr-only" for="passwordInput">Password</label>
-    <input id="passwordInput" type="password" placeholder="Password" autocomplete="current-password" required>
-    <label class="sr-only" for="passwordConfirmInput">Confirm password</label>
-    <input id="passwordConfirmInput" type="password" placeholder="Confirm password" autocomplete="new-password" required hidden>
+    <label id="passwordLabel" for="passwordInput">Password</label>
+    <div class="password-field"><input id="passwordInput" type="password" autocomplete="current-password" required><button id="passwordVisibility" type="button" aria-label="Show password" title="Show password" aria-pressed="false" aria-controls="passwordInput passwordConfirmInput"></button></div>
+    <label id="passwordConfirmLabel" for="passwordConfirmInput" hidden>Confirm password</label>
+    <input id="passwordConfirmInput" type="password" autocomplete="new-password" hidden>
     <div class="password-error" id="passwordError" role="alert" hidden></div>
     <button id="passwordLoginButton" type="submit">Log in</button>
   </form>
 </section>
+<a class="skip-to-prompt" href="#prompt">Skip to message input</a>
 <nav class="workspace-rail" aria-label="Workspace">
   <button id="railHome" class="rail-button" type="button" title="Home" aria-label="Home" aria-current="page"><span class="icon-slot" data-icon="homeFilled"></span></button>
   <button id="railImages" class="rail-button" type="button" title="Images" aria-label="Images"><span class="icon-slot" data-icon="images"></span></button>
@@ -91,7 +93,7 @@
     <div class="sidebar-top">
       <div class="sidebar-mode-row">
         <div class="sidebar-product" id="productModeButton"><strong>Codex</strong></div>
-        <button class="sidebar-toolbar-button" id="compactDockButton" type="button" aria-label="Workspace tools" title="Workspace tools"><span class="icon-slot" data-icon="ellipsis"></span></button><button class="sidebar-toolbar-button" id="sidebarNotificationsButton" type="button" title="Sort by notifications" aria-label="Sort by notifications" aria-pressed="false"><span class="icon-slot" data-icon="bell"></span></button>
+        <button class="sidebar-toolbar-button" id="compactDockButton" type="button" aria-label="Workspace tools" title="Workspace tools"><span class="icon-slot" data-icon="ellipsis"></span></button><button class="sidebar-toolbar-button" id="sidebarNotificationsButton" type="button" title="Sort by notifications" aria-label="Sort by notifications" aria-describedby="sidebarUnreadDescription" aria-pressed="false"><span class="icon-slot" data-icon="bell"></span><span class="notification-count" aria-hidden="true" hidden></span><span class="sr-only" id="sidebarUnreadDescription" data-i18n-ignore></span></button>
         <button class="sidebar-toolbar-button" id="sidebarSearchButton" type="button" title="Search" aria-label="Search chats" aria-expanded="false" aria-controls="sidebarSearchPanel"><span class="icon-slot" data-icon="search"></span></button>
       </div>
       <div class="sidebar-search-panel" id="sidebarSearchPanel" hidden>
@@ -110,24 +112,27 @@
   </aside>
 
   <main class="conversation-shell">
-    <section class="conversation" id="conversation">
+    <div class="conversation-refresh" id="conversationRefresh" data-i18n-ignore hidden><span role="status"></span><button type="button" hidden></button></div>
+    <section class="conversation" id="conversation" aria-label="Conversation" tabindex="-1">
       <div class="empty-state" id="emptyState">
         <span id="emptyCodexMark"></span>
         <h1>What should we build?</h1>
       </div>
     </section>
     <div class="composer-dock">
+      <button class="conversation-latest" id="conversationLatest" type="button" aria-controls="conversation" hidden><span class="icon-slot" data-icon="chevronDown"></span><span>Latest</span></button>
       <div class="composer-workspace-bar" id="composerWorkspaceBar">
             <button type="button" class="composer-text-button composer-project-control" id="composerProjectButton" data-composer-control="project" aria-label="Project" aria-haspopup="dialog" aria-expanded="false"><span class="icon-slot" data-icon="folderOpen"></span><span id="composerProjectLabel">codex-webui</span><span class="icon-slot chevron" data-icon="chevronDown"></span></button>
-        <button type="button" class="composer-text-button" id="composerEnvironmentButton"><span class="icon-slot" data-icon="monitor"></span><span data-server-location data-i18n-ignore></span></button>
       </div>
       <form class="composer" id="composer">
+        <div class="composer-connection-status" id="composerConnectionStatus" role="status" data-i18n-ignore></div>
         <div class="composer-autocomplete" id="composerAutocomplete" role="listbox" aria-label="Composer suggestions" hidden></div>
         <div class="composer-context-tray" id="composerContextTray" aria-label="Attached context" hidden></div>
         <textarea id="prompt" rows="1" placeholder="Do anything" aria-label="Task prompt"></textarea>
         <div class="composer-footer">
           <div class="composer-left">
             <button type="button" class="composer-circle-button add-control" data-composer-control="add" title="Add" aria-label="Add" aria-haspopup="menu" aria-expanded="false"><span class="icon-slot" data-icon="plus"></span></button>
+            <button type="button" class="composer-circle-button plan-control" id="planModeButton" data-composer-control="plan" title="Plan mode" aria-label="Plan mode" aria-pressed="false"><span class="icon-slot" data-icon="listChecks"></span></button>
 
             <div class="permission-picker" id="permissionPicker" data-composer-control="approval">
               <button type="button" class="composer-text-button approval-control" id="modeButton" title="Change permissions" aria-haspopup="menu" aria-expanded="false"><span class="icon-slot" data-icon="shield"></span><span class="control-label">Ask for approval</span><span class="icon-slot chevron" data-icon="chevronDown"></span></button>
@@ -138,22 +143,34 @@
           </div>
           <div class="composer-right">
             <div class="model-picker composer-model-control" id="modelPicker" data-composer-control="model">
-              <button type="button" class="composer-text-button model-trigger" id="modelButton" data-codex-intelligence-trigger aria-haspopup="dialog" aria-expanded="false"><span id="modelLabel">Loading models…</span><span id="effortLabel">Medium</span><span class="icon-slot chevron" data-icon="chevronDown"></span></button>
+              <button type="button" class="composer-text-button model-trigger" id="modelButton" data-codex-intelligence-trigger aria-haspopup="dialog" aria-expanded="false"><span id="modelLabel">Loading models…</span><span id="effortLabel">Medium</span></button>
               <div class="model-menu" id="modelMenu" role="dialog" aria-label="Reasoning and model" hidden></div>
               <select id="effortSelect" class="sr-only" aria-label="Reasoning effort"><option value="medium">medium</option></select>
             </div>
 
-            <span class="context-usage" id="contextUsage" role="img" tabindex="0" aria-label="Context usage" hidden>
-              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
-                <circle class="context-usage-track" cx="6" cy="6" r="5" pathLength="100"></circle>
-                <circle class="context-usage-progress" cx="6" cy="6" r="5" pathLength="100"></circle>
-              </svg>
-            </span>
             <button type="button" class="composer-circle-button dictation-control" data-composer-control="dictation" disabled title="Dictation is not available yet" aria-label="Dictation is not available yet"><span class="icon-slot" data-icon="mic"></span></button>
             <button class="send-button" id="sendButton" data-composer-control="send" type="submit" title="Send message" aria-label="Send message"><span class="icon-slot" data-icon="arrowUp"></span></button>
           </div>
         </div>
       </form>
+      <dl class="conversation-usage" id="conversationUsage" aria-label="Conversation usage" tabindex="0" hidden>
+        <div><dt title="Time from the turn-start event to the first visible text received by this browser.">TTFT</dt><dd id="conversationUsageTtft" data-i18n-ignore></dd></div>
+        <div><dt title="Reported output tokens divided by elapsed turn time, including tool and approval waits.">TPS</dt><dd id="conversationUsageRate" data-i18n-ignore></dd></div>
+        <div><dt title="Cached input tokens divided by all reported input tokens in this conversation.">Cache</dt><dd id="conversationUsageCache" data-i18n-ignore></dd></div>
+        <div><dt title="Estimated text-token cost for the observed turn at OpenAI Standard API rates in USD. Cache writes may give a range.">Est. cost</dt><dd id="conversationUsageCost" data-i18n-ignore></dd></div>
+        <div><dt title="Total tokens">Tokens</dt><dd id="conversationUsageTotal" data-i18n-ignore></dd></div>
+        <div>
+          <dt title="Context usage">Context</dt>
+          <dd class="conversation-context-value">
+            <span class="context-usage" id="contextUsage" role="img" tabindex="0" aria-label="Context usage" hidden>
+              <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
+                <circle class="context-usage-track" cx="6" cy="6" r="5" pathLength="100"></circle>
+                <circle class="context-usage-progress" cx="6" cy="6" r="5" pathLength="100"></circle>
+              </svg>
+            </span><span id="conversationUsageContext" data-i18n-ignore></span>
+          </dd>
+        </div>
+      </dl>
     </div>
   </main>
 
@@ -327,7 +344,12 @@
       </section>
       <section class="settings-page" data-settings-content="appearance" hidden>
         <header class="settings-page-heading"><button class="settings-mobile-back icon-button" type="button" aria-label="Back to settings"><span class="icon-slot" data-icon="chevronLeft"></span></button><h1>Appearance</h1></header>
-        <div class="settings-group-card"><label class="settings-row settings-select-row"><span><strong>Theme</strong><small>Appearance for this browser</small></span><select class="settings-select" id="themeSelect"><option value="system">System default</option><option value="light">Light</option><option value="dark">Dark</option></select></label>
+        <fieldset id="themeSelect" class="theme-selector"><legend>Theme</legend><div class="theme-options">
+          <label><input class="sr-only" name="workspace-theme" type="radio" value="system" checked><span class="theme-preview" data-preview="system" aria-hidden="true"><i></i><i></i><i></i></span><span class="theme-choice"><span>System default</span><span class="icon-slot theme-check" data-icon="check"></span></span></label>
+          <label><input class="sr-only" name="workspace-theme" type="radio" value="light"><span class="theme-preview" data-preview="light" aria-hidden="true"><i></i><i></i><i></i></span><span class="theme-choice"><span>Light</span><span class="icon-slot theme-check" data-icon="check"></span></span></label>
+          <label><input class="sr-only" name="workspace-theme" type="radio" value="dark"><span class="theme-preview" data-preview="dark" aria-hidden="true"><i></i><i></i><i></i></span><span class="theme-choice"><span>Dark</span><span class="icon-slot theme-check" data-icon="check"></span></span></label>
+        </div></fieldset>
+        <div class="settings-group-card">
         <label class="settings-row settings-select-row"><span><strong>Chat font size</strong><small>Message text and tool labels</small></span><select class="settings-select" id="settingsChatFont"><option value="13">13 px</option><option value="14">14 px</option><option value="15">15 px</option><option value="16">16 px</option><option value="18">18 px</option></select></label>
         <label class="settings-row settings-select-row"><span><strong>Code font size</strong><small>Code blocks, tool output and diffs</small></span><select class="settings-select" id="settingsCodeFont"><option value="11">11 px</option><option value="12">12 px</option><option value="13">13 px</option><option value="14">14 px</option><option value="16">16 px</option></select></label>
 </div>
@@ -368,6 +390,9 @@
     </div>
   </div>
 </dialog>
-<div class="toast" id="toast"></div>
+<dialog class="thread-delete-dialog" id="threadDeleteDialog" aria-labelledby="threadDeleteTitle" aria-describedby="threadDeleteDescription">
+  <form method="dialog"><h2 id="threadDeleteTitle">Delete thread</h2><p id="threadDeleteDescription" data-i18n-ignore></p><div class="thread-delete-actions"><button class="settings-action" type="submit" value="cancel" autofocus>Cancel</button><button class="settings-action thread-delete-confirm" type="submit" value="delete">Delete</button></div></form>
+</dialog>
+<div class="toast" id="toast" role="status" aria-atomic="true"></div>
 </body>
 </html>

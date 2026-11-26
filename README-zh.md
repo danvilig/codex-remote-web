@@ -6,7 +6,7 @@
 
 使用 **Cloudflare Tunnel + Access** 的自托管浏览器工作区：通过网页配置远程访问，在其他设备上继续会话、查看工具进度、处理审批和编辑项目文件。
 
-> **Beta.2 候选说明：** 当前分支准备 **0.2.0-beta.2**，提供轻量原生网关。详见 [Beta.2 发布说明](docs/releases/0.2.0-beta.2.md)。
+> **0.2.1 Beta.1 候选说明：** 当前分支准备 **0.2.1-beta.1**，改进会话加载速度及桌面和移动端工作区。详见 [0.2.1 Beta.1 发布说明](docs/releases/0.2.1-beta.1.md)。
 
 ## 项目亮点
 
@@ -87,13 +87,13 @@ macOS 将 DMG 中的 **Codex Remote Web.app** 拖入 Applications 后打开。Wi
 
 ### CLI 便携包
 
-以下示例针对 **0.2.0-beta.2** 便携包，请按实际下载选择对应的包名与版本；正式发布前，候选包位于 CI Artifact。通过终端运行时，关闭终端或按 Ctrl+C 停止网关。
+以下示例针对 **0.2.1-beta.1** 便携包，请按实际下载选择对应的包名与版本；正式发布前，候选包位于 CI Artifact。通过终端运行时，关闭终端或按 Ctrl+C 停止网关。
 ```sh
-archive=codex-remote-web-0.2.0-beta.2-linux-x64.tar.gz
-# arm64 改为 codex-remote-web-0.2.0-beta.2-linux-arm64.tar.gz
+archive=codex-remote-web-0.2.1-beta.1-linux-x64.tar.gz
+# arm64 改为 codex-remote-web-0.2.1-beta.1-linux-arm64.tar.gz
 sha256sum -c "$archive.sha256"
 tar -xzf "$archive"
-cd codex-remote-web-0.2.0-beta.2
+cd codex-remote-web-0.2.1-beta.1
 CODEX_WEBUI_CWD=/path/to/your/project ./codex-remote-web
 ```
 
@@ -103,7 +103,7 @@ macOS 解压 `macos-arm64` 后使用同样的启动方式。Windows 解压 zip�
 
 ```powershell
 # 解压前将输出与同名 .sha256 内容核对。
-Get-FileHash .\codex-remote-web-0.2.0-beta.2-windows-x64.zip -Algorithm SHA256
+Get-FileHash .\codex-remote-web-0.2.1-beta.1-windows-x64.zip -Algorithm SHA256
 $env:CODEX_WEBUI_CWD = 'C:\path\to\your\project'
 .\codex-remote-web.exe
 ```
@@ -182,7 +182,7 @@ WebUI 不代为启动共享 daemon。请通过 Codex Desktop/CLI 启动兼容的
 - [配置参考](docs/CONFIGURATION.md) / [Cloudflare 部署](docs/deployment/CLOUDFLARE.md)
 - [开发与测试](DEVELOPMENT.md) / [贡献指南](CONTRIBUTING.md)
 - [架构](docs/ARCHITECTURE.md) / [路线图](docs/ROADMAP.md)
-- [发布流程](docs/RELEASING.md) / [候选验证记录](docs/releases/0.2.0-beta.2-acceptance.md) / [变更记录](CHANGELOG.md)
+- [发布流程](docs/RELEASING.md) / [候选验证记录](docs/releases/0.2.1-beta.1.md#validation) / [变更记录](CHANGELOG.md)
 - [贡献规范](CONTRIBUTING.md) / [Git 开发流程](docs/GIT_WORKFLOW.md) / [AI agent 规则](AGENTS.md)
 - [安全说明](SECURITY.md)
 

@@ -196,12 +196,16 @@ try {
   ]);
   assert.equal(await page.locator(".composer-context-chip").count(), 2);
   await page.waitForFunction(()=>document.querySelector('.composer-attachment-thumbnail img')?.naturalWidth===1);
+  assert.equal(await page.locator('#composerContextTray').getByText('picture.png',{exact:true}).count(),0);
+  assert.equal(await page.locator('#composerContextTray').getByText('notes.txt',{exact:true}).count(),1);
   await page.locator('.composer-attachment-thumbnail').click();
   await page.locator('#imageViewer[open]').waitFor();
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.composer-context-chip').count(),2,'preview must not remove the attachment');
-  await page.locator('#prompt').focus();
+  await page.locator('#imageViewer').waitFor({state:'hidden'});
+  await page.locator('#prompt').click();
   assert.equal(await page.locator('#prompt').evaluate(el=>getComputedStyle(el).outlineStyle),'none');
+  assert.equal(await page.locator('#composer').evaluate(el=>getComputedStyle(el).outlineStyle),'none');
   await page.reload({ waitUntil: "networkidle" });
   await page.waitForFunction(
     () => globalThis.__codexWebuiDebug?.state.connected,
@@ -236,7 +240,9 @@ try {
   await page.waitForFunction(()=>document.querySelector('.user-message-images img')?.naturalWidth===1);
   await uploadedImages.first().click();
   await page.locator('#imageViewer[open]').waitFor();
+  assert.equal(await page.locator('#imageViewerPath').textContent(),'');
   await page.keyboard.press('Escape');
+  assert(!((await uploadedImages.first().locator('xpath=ancestor::article').innerText()).includes(imagePath)));
   await page.screenshot({path:artifact('user-uploaded-image-message.png')});
   // Replay a native Desktop image-only user message; no model request is sent.
   await page.evaluate(({threadId,imagePath})=>globalThis.__codexWebuiDebug.notify('item/completed',{threadId,turnId:'desktop-images',item:{id:'desktop-user-image',type:'userMessage',content:[{type:'localImage',path:imagePath}]}}),{threadId,imagePath});
@@ -458,8 +464,7 @@ try {
     .click();
   await page.locator(".resource-location").filter({ hasText: home }).waitFor();
   await page.locator("#closeSidePanel").click();
-  await page.locator("[data-composer-control=add]").click();
-  await page.getByRole("menuitem", { name: "Plan mode", exact: true }).click();
+  await page.getByRole("button", { name: "Plan mode", exact: true }).click();
   assert.equal(
     await page.evaluate(() => globalThis.__codexWebuiDebug.state.planMode),
     true,

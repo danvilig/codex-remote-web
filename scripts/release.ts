@@ -31,7 +31,7 @@ const stage = join(temp, name);
 const files = [
   ...documentationImages,
   'public/setup.html', 'public/setup.bundle.js', 'public/remote-access.css', '.env.example', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'README.md', 'README-zh.md', 'CHANGELOG.md', 'SECURITY.md',
-  'public/index.html', 'public/app.bundle.js', 'public/style.css', 'public/workspace.css', 'public/favicon.svg', 'public/auth-bootstrap.js', 'public/access-session.js', 'public/i18n.js', 'public/codex-brand.js',
+  'public/index.html', 'public/app.bundle.js', 'public/style.css', 'public/workspace.css', 'public/favicon.svg', 'public/auth-bootstrap.js', 'public/access-session.js', 'public/i18n.js', 'public/codex-brand.js', 'public/codex-icons.js',
   'DEVELOPMENT.md', 'CONTRIBUTING.md', 'CODE_OF_CONDUCT.md', 'docs/ARCHITECTURE.md', 'docs/ROADMAP.md', 'docs/CONFIGURATION.md', 'docs/RELEASING.md', 'docs/deployment/CLOUDFLARE.md', 'docs/deployment/SETUP.md', 'docs/deployment/PLATFORMS.md', 'ops/systemd/codex-remote-web.service.example', 'ops/systemd/environment.example', 'ops/cloudflare/ingress.yml.example',
   'docs/licenses/BUN.md', 'AGENTS.md', 'docs/GIT_WORKFLOW.md',
   ...new Set(['docs/releases/0.2.0-beta.1.md', `docs/releases/${pkg.version}.md`]), ...(await Bun.file(join(root, `docs/releases/${pkg.version}-acceptance.md`)).exists() ? [`docs/releases/${pkg.version}-acceptance.md`] : []), ...(provenance ? ['SOURCE_PROVENANCE.json'] : []),

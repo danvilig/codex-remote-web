@@ -1,5 +1,25 @@
 import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 
+function rolloutTokenUsage(info) {
+  const total = info?.total_token_usage;
+  const last = info?.last_token_usage;
+  if (![total?.total_tokens, total?.output_tokens, last?.total_tokens, last?.output_tokens]
+    .every(value => Number.isSafeInteger(value) && value >= 0)) return null;
+  const window = info.model_context_window;
+  const breakdown = tokens => {
+    const value = { totalTokens: tokens.total_tokens, outputTokens: tokens.output_tokens };
+    for (const [field, key] of [['inputTokens', 'input_tokens'], ['cachedInputTokens', 'cached_input_tokens']]) {
+      if (Number.isSafeInteger(tokens[key]) && tokens[key] >= 0) value[field] = tokens[key];
+    }
+    return value;
+  };
+  return {
+    total: breakdown(total),
+    last: breakdown(last),
+    modelContextWindow: Number.isSafeInteger(window) && window > 0 ? window : null,
+  };
+}
+
 function contentText(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -106,6 +126,11 @@ export function applyRolloutEvent(state, event) {
   if (!event || typeof event !== "object") return state;
   if (typeof event.timestamp === "string") state.lastEventAt = event.timestamp;
   const payload = event.payload || {};
+  if (event.type === "event_msg" && payload.type === "token_count") {
+    const tokenUsage = rolloutTokenUsage(payload.info);
+    if (tokenUsage) state.tokenUsage = tokenUsage;
+    return state;
+  }
   if (event.type === "event_msg" && payload.type === "task_started") {
     state.active = true;
     state.itemIndex.clear();
@@ -123,6 +148,22 @@ export function applyRolloutEvent(state, event) {
     return state;
   }
   if (!state.turn) return state;
+  if (event.type === "turn_context" && payload.turn_id === state.turn.id && typeof payload.model === "string") {
+    state.turn.model = payload.model;
+    return state;
+  }
+  if (event.type === "compacted") {
+    const summary = contentText(payload.message).trim();
+    const candidate = state.turn.items.findLast(item => item.type === "agentMessage");
+    const text = candidate?.text.trim();
+    // Codex can write the summary as a final-answer message before the compaction
+    // record. The record may prepend its handoff instructions to the same text.
+    if (candidate?.phase === "final_answer" && text &&
+        (summary === text || summary.endsWith("\n" + text))) {
+      candidate.phase = "context_summary";
+    }
+    return state;
+  }
   if (event.type === "event_msg" && payload.type === "task_complete" && payload.turn_id === state.turn.id) {
     state.active = false;
     state.turn.status = "completed";
@@ -225,6 +266,7 @@ export class LiveSessionStore {
         active: entry.state.active,
         lastEventAt: entry.state.lastEventAt,
         turn: entry.state.active && entry.state.turn ? structuredClone(entry.state.turn) : null,
+        tokenUsage: entry.state.tokenUsage ?? null,
       };
     } finally { closeSync(fd); }
   }

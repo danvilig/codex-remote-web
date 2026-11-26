@@ -1,5 +1,8 @@
 // Keep work logs separate from the copyable final answer. Reconciliation updates
 // existing controls so polling never resets an explicit expansion choice.
+import { highlightFences } from './code-editor.js';
+import { updateAnswerLinks } from './message-links.js';
+
 export function changedFileRows(files, cwd = '') {
   const normalize = value => String(value || '').replace(/\\/g, '/').replace(/\/$/, '');
   const base = normalize(cwd);
@@ -16,6 +19,7 @@ export function changedFileRows(files, cwd = '') {
       } else path = source.split('/').at(-1);
     }
     const row = rows.get(path) || { path, linesAdded: 0, linesDeleted: 0 };
+    row.reference = file.path === '/dev/null' ? null : source;
     row.linesAdded += file.linesAdded || 0;
     row.linesDeleted += file.linesDeleted || 0;
     rows.set(path, row);
@@ -65,6 +69,8 @@ export function createTurnPresentation({
         .join("\n\n");
     const hasFinal = Boolean(final().trim()),
       divider = turn.querySelector(".worked-for-divider");
+    slot.classList.toggle("is-streaming", !done && hasFinal);
+    if (done && hasFinal) highlightFences(slot);
     if (!divider.querySelector("button")) {
       const label = divider.querySelector("span"),
         toggle = button("Show work", "chevronRight", () => {
@@ -80,12 +86,13 @@ export function createTurnPresentation({
     }
     function applyWork() {
       const toggle = divider.querySelector("button"),
-        open = turn.dataset.workExpanded === "true" || !done;
-      body.hidden = done && hasFinal && !open;
+        runtime = turn.querySelector(".runtime-progress"),
+        open = (runtime?.open ?? (turn.dataset.workExpanded === "true")) || !done;
+      body.hidden = !runtime && done && !open;
       toggle.setAttribute("aria-expanded", String(open));
       toggle.title = t(open ? "Hide work" : "Show work");
       toggle.setAttribute("aria-label", toggle.title);
-      divider.hidden = !(done && stream.children.length && hasFinal);
+      divider.hidden = !(done && stream.children.length);
     }
     applyWork();
     let more = turn.querySelector(".turn-answer-toggle");
@@ -102,7 +109,7 @@ export function createTurnPresentation({
       slot.after(more);
     }
     const long =
-      done && hasFinal && (final().length > 800 || slot.scrollHeight > 300);
+      done && hasFinal && !slot.querySelector('.message-html-preview') && (final().length > 800 || slot.scrollHeight > 300);
     const expanded = turn.dataset.answerExpanded === "true";
     slot.classList.toggle("answer-collapsed", long && !expanded);
     more.hidden = !long;
@@ -110,32 +117,40 @@ export function createTurnPresentation({
     more.setAttribute("aria-expanded", String(expanded));
     let changes = turn.querySelector(".turn-change-summary");
     const review = state.turnDiffs.get(turnId);
-    if (review?.hasChanges) {
+    const showChanges = done && Boolean(review?.hasChanges);
+    if (changes) changes.hidden = !showChanges;
+    if (showChanges) {
       if (!changes) {
         changes = document.createElement("details");
         changes.className = "turn-change-summary";
         more.after(changes);
       }
+      const cwd = getCwd();
       const signature = JSON.stringify([
         review.files,
         review.linesAdded,
         review.linesDeleted,
-        getCwd(),
+        cwd,
       ]);
       if (changes.dataset.signature !== signature) {
         changes.dataset.signature = signature;
         changes.replaceChildren();
         const summary = document.createElement("summary");
-        const files = changedFileRows(review.files, getCwd());
-        summary.textContent = t("Edited {count} files", {
+        const files = changedFileRows(review.files, cwd);
+        summary.textContent = t(files.length === 1 ? "Edited 1 file" : "Edited {count} files", {
           count: files.length,
         });
         summary.append(changeStats(review));
         changes.append(summary);
         for (const file of files) {
-          const row = document.createElement("div");
+          const row = document.createElement(file.reference ? "a" : "div");
           row.className = 'turn-change-file';
           row.dataset.i18nIgnore = "";
+          if (file.reference) {
+            row.href = '#file-reference';
+            row.dataset.fileReference = file.reference;
+            if (cwd) row.dataset.fileCwd = cwd;
+          }
           const path = document.createElement('span');
           path.className = 'turn-change-path';
           path.textContent = file.path;
@@ -153,9 +168,13 @@ export function createTurnPresentation({
     if (!actions) {
       actions = document.createElement("div");
       actions.className = "turn-message-actions";
+      let copyTimer;
       const copy = button("Copy answer", "copy", async () => {
         try {
           await navigator.clipboard.writeText(final());
+          if (copyIcon.parentNode === copy) copyIcon.replaceWith(copyConfirmation);
+          clearTimeout(copyTimer);
+          copyTimer = setTimeout(() => copyConfirmation.replaceWith(copyIcon), 1800);
           toast(t("Copied"));
         } catch {
           toast(t("Copy failed. Select the answer and copy it."));
@@ -171,10 +190,20 @@ export function createTurnPresentation({
           branch.disabled = false;
         }
       });
+      const copyIcon = copy.querySelector(".icon-slot");
+      const iconTemplate = document.createElement("template");
+      iconTemplate.innerHTML = icon("check", "turn-copy-confirmation");
+      const copyConfirmation = iconTemplate.content.firstElementChild;
+      for (const [control, label] of [[copy, "Copy answer"], [branch, "Fork in new chat"]]) {
+        const caption = document.createElement("span");
+        caption.textContent = t(label);
+        control.append(caption);
+      }
       actions.append(copy, branch);
       turn.append(actions);
     }
     actions.hidden = !done || !hasFinal;
+    updateAnswerLinks(turn, slot, done && hasFinal);
   }
   return { update };
 }

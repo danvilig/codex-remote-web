@@ -25,6 +25,7 @@ const home = await mkdtemp(join(tmpdir(), 'macos-native-')), directory = desktop
 const port = await new Promise(resolve => { const probe = createServer(); probe.listen(0, '127.0.0.1', () => { const value = probe.address().port; probe.close(() => resolve(value)); }); });
 const fixture = join(home, 'codex-fixture.mjs'), codex = join(home, 'codex');
 await cp(join(root, 'tests/fixtures/codex'), fixture);
+await cp(join(root, 'tests/fixtures/product-demo.mjs'), join(home, 'product-demo.mjs'));
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
 await writeFile(codex, `#!/bin/sh\nif [ "\${1-}" = "--version" ]; then printf 'codex-fixture 0.1\\n'; exit 0; fi\nexec ${quote(process.execPath)} ${quote(fixture)} "$@"\n`, { mode: 0o700 });
 await writePrivate(join(directory, 'config.json'), desktopConfig({ initialized: true, enabled: false, autostart: false, cwd: home, codex, port, language: 'en' }, home));

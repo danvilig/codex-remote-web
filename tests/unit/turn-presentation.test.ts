@@ -9,9 +9,9 @@ test('edited files use project-relative paths and aggregate repeated changes wit
     { path: '/workspace/app-other/config.json', linesAdded: 1, linesDeleted: 0 },
   ];
   expect(changedFileRows(files, '/workspace/app/')).toEqual([
-    { path: 'src/main.ts', linesAdded: 5, linesDeleted: 5 },
-    { path: 'old.md', linesAdded: 0, linesDeleted: 8 },
-    { path: '../app-other/config.json', linesAdded: 1, linesDeleted: 0 },
+    { path: 'src/main.ts', reference: 'src/main.ts', linesAdded: 5, linesDeleted: 5 },
+    { path: 'old.md', reference: null, linesAdded: 0, linesDeleted: 8 },
+    { path: '../app-other/config.json', reference: '/workspace/app-other/config.json', linesAdded: 1, linesDeleted: 0 },
   ]);
   expect(files[0].path).toBe('/workspace/app/src/main.ts');
   expect(files[0].linesAdded).toBe(3);

@@ -45,6 +45,9 @@ try{
   await page.evaluate(()=>globalThis.__codexWebuiDebug.openThread('thread-A'));
   assert.equal(await page.locator('#sendButton').getAttribute('data-submit-mode'),'stop');
   await page.locator('#prompt').fill('Continue from the web without closing Desktop');
+  assert.equal(await page.locator('#sendButton').getAttribute('data-submit-mode'),'queue');
+  await page.locator('#composer .composer-delivery-choice').click();
+  assert.equal(await page.locator('#sendButton').getAttribute('data-submit-mode'),'steer');
   await page.locator('#sendButton').click();
   for(let i=0;!(await records()).some(r=>r.method==='turn/steer');i++){if(i>100)throw Error('steer not dispatched');await Bun.sleep(30);}
   const sent=(await records()).find(r=>r.method==='turn/steer');

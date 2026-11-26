@@ -54,8 +54,18 @@ try {
   });
   assert.equal(foreignVisible, false);
 
+  const planButton = page.getByRole('button', { name: 'Plan mode', exact: true });
+  const approvalLabel = await page.locator('#modeButton .control-label').textContent();
+  await page.locator('#prompt').fill('Draft to preserve');
+  await planButton.press('Space');
+  assert.equal(await planButton.getAttribute('aria-pressed'), 'true');
+  assert.equal(await page.locator('#prompt').inputValue(), 'Draft to preserve');
+  assert.equal(await page.locator('#modeButton .control-label').textContent(), approvalLabel);
+  await planButton.click();
+  assert.equal(await planButton.getAttribute('aria-pressed'), 'false');
   await page.locator('#prompt').fill('/plan');
   await page.locator('[data-autocomplete-id="plan"]').click();
+  assert.equal(await planButton.getAttribute('aria-pressed'), 'true');
   await page.locator('#prompt').fill('Plan this fixture task');
   await page.locator('#composer').evaluate(form => form.requestSubmit());
   // Dispatch persists a receipt before reaching the fixture. Wait for its

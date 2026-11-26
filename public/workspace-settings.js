@@ -7,7 +7,7 @@ export function createWorkspaceSettings({ $, state, t, rpc, onThreadsChanged, us
   try { preferences = JSON.parse(localStorage.getItem(preferenceKey) || '{}'); } catch {}
   preferences = {
     sendKey: preferences?.sendKey === 'mod-enter' ? 'mod-enter' : 'enter',
-    chatFont: [13,14,15,16,18].includes(preferences?.chatFont) ? preferences.chatFont : 13,
+    chatFont: [13,14,15,16,18].includes(preferences?.chatFont) ? preferences.chatFont : 15,
     codeFont: [11,12,13,14,16].includes(preferences?.codeFont) ? preferences.codeFont : 12,
   };
   function applyPreferences() {
@@ -160,7 +160,10 @@ export function createWorkspaceSettings({ $, state, t, rpc, onThreadsChanged, us
     dataPages.show(selected);
     $('#settingsPageTitle').textContent = t(pages[selected]?.title || legacyTitles[selected]);
     $('#settingsContent').scrollTo({ top: 0 });
-    $('#settingsDialog').dataset.mobilePage = 'true';
+    const dialog = $('#settingsDialog');
+    const fromNavigation = mobileLayout && dialog.open && document.activeElement?.closest('.settings-nav');
+    dialog.dataset.mobilePage = 'true';
+    if (fromNavigation) settingsPageBack()?.focus({ preventScroll: true });
     if (updateRoute && settingsRoutePage()) history.replaceState({ ...history.state, codexWebuiSettings: true }, '', `/settings/${selected}`);
   }
   const keywords = {
@@ -187,7 +190,12 @@ export function createWorkspaceSettings({ $, state, t, rpc, onThreadsChanged, us
     }
     $('#settingsNavEmpty').hidden = count !== 0;
   }
-  function showSettingsMobileNavigation() { $('#settingsDialog').dataset.mobilePage = 'false'; $('#settingsSearch').focus(); }
+  function settingsPageBack() { return $('#settingsContent [data-settings-content]:not([hidden]) .settings-mobile-back'); }
+  function showSettingsMobileNavigation() {
+    $('#settingsDialog').dataset.mobilePage = 'false';
+    const target = $('[data-settings-page][aria-current="page"]:not([hidden])') || $('#closeSettingsNav');
+    target.focus({ preventScroll: true });
+  }
   function hideSettings() {
     if ($('#settingsDialog').open) $('#settingsDialog').close();
     document.body.classList.remove('settings-open');
@@ -216,10 +224,15 @@ export function createWorkspaceSettings({ $, state, t, rpc, onThreadsChanged, us
     $('#settingsSearch').value = ''; filterSettingsNavigation(); setSettingsPage(page, { updateRoute });
     mobileLayout = matchMedia('(max-width:600px)').matches;
     dialog.dataset.mobilePage = String(mobileLayout);
-    if (!dialog.open) dialog.show();
+    const focus = (mobileLayout && settingsPageBack()) || $('#closeSettingsNav');
+    if (!dialog.open) {
+      focus.setAttribute('autofocus', '');
+      dialog.show();
+      focus.removeAttribute('autofocus');
+    }
     document.body.classList.add('settings-open'); $('#app').inert = true;
     $('#railHome').setAttribute('aria-current', 'false');
-    requestAnimationFrame(() => (mobileLayout ? $('#settingsSearch') : $('#closeSettingsNav')).focus());
+    if (document.activeElement !== focus) focus.focus({ preventScroll: true });
   }
   function openSettings(page = 'general-settings') {
     const selected = normalize(page), current = settingsRoutePage();

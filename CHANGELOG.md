@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1-beta.1
+
+- Open long conversations in pages, preload pinned chats, and retain in-progress responses across chat switches. Cache versioned frontend assets for repeat visits.
+- Keep queued messages above the composer, with in-place editing, image attachments, and explicit queue or steering controls. Improve uncertain delivery recovery and approval layout.
+- Stream work updates, collapse completed activity, and link completed edits to the Files panel. Improve code blocks, web search, citations, HTML previews, and attachment display.
+- Show latency, throughput, cache hit rate, estimated turn cost, token totals, and context usage on one line. Give project names more room in the sidebar and composer.
+- Improve mobile settings, keyboard focus, and narrow-layout controls.
+
 ## 0.2.0-beta.2
 
 - Ship a lightweight native Go gateway on macOS, Windows and Linux, including Docker, without Bun, Node.js, or Node addons for the gateway itself.

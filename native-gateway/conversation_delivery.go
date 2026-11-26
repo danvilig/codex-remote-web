@@ -52,8 +52,8 @@ type deliveryQueue struct {
 	wake      chan struct{}
 	completed chan deliveryTurnEvent
 	// Integration installs these before serving HTTP or starting queue work.
-	resolveCwd      func(string) (string, error)
-	bindAttachments func(context.Context, []string, string, string) error
+	resolveCwd         func(string) (string, error)
+	resolveAttachments func(context.Context, []string, string, string, bool) ([]workspaceAttachment, error)
 }
 
 type deliveryTurn struct {
@@ -237,14 +237,15 @@ func deliveryThreadBlocked(state *deliveryQueueState, thread, except string, rec
 }
 
 type deliveryMutation struct {
-	ID        string          `json:"id"`
-	ThreadID  string          `json:"threadId"`
-	Params    json.RawMessage `json:"params"`
-	Text      *string         `json:"text"`
-	Mentions  json.RawMessage `json:"mentions"`
-	Version   int             `json:"version"`
-	Paused    bool            `json:"paused"`
-	Direction int             `json:"direction"`
+	ID            string          `json:"id"`
+	ThreadID      string          `json:"threadId"`
+	Params        json.RawMessage `json:"params"`
+	Text          *string         `json:"text"`
+	Mentions      json.RawMessage `json:"mentions"`
+	Version       int             `json:"version"`
+	Paused        bool            `json:"paused"`
+	Direction     int             `json:"direction"`
+	AttachmentIDs []string        `json:"attachmentIds"`
 }
 
 func deliveryFingerprint(payload deliveryMutation) string {
@@ -272,8 +273,15 @@ func (q *deliveryQueue) mutate(ctx context.Context, action string, raw json.RawM
 	}
 	var receipts []submissionReceipt
 	var added deliveryQueueRecord
+	var edited deliveryQueueEdit
 	switch action {
-	case "edit", "pause", "cancel":
+	case "edit":
+		var err error
+		edited, err = q.prepareEdit(ctx, payload)
+		if err != nil {
+			return deliveryQueueEntry{}, err
+		}
+	case "pause", "cancel":
 	case "resume", "sendNow", "reorder":
 		var err error
 		receipts, err = q.c.submissions.listPending("")
@@ -329,7 +337,7 @@ func (q *deliveryQueue) mutate(ctx context.Context, action string, raw json.RawM
 			}
 		}
 		if len(attachmentIDs) != 0 {
-			if q.bindAttachments == nil {
+			if q.resolveAttachments == nil {
 				return deliveryQueueEntry{}, deliveryError("QUEUE_INVALID", "Attachment binding is unavailable")
 			}
 			if cwd == "" {
@@ -349,7 +357,7 @@ func (q *deliveryQueue) mutate(ctx context.Context, action string, raw json.RawM
 			for id := range attachmentIDs {
 				ids = append(ids, id)
 			}
-			if err := q.bindAttachments(ctx, ids, cwd, thread); err != nil {
+			if _, err := q.resolveAttachments(ctx, ids, cwd, thread, true); err != nil {
 				return deliveryQueueEntry{}, err
 			}
 		}
@@ -399,7 +407,7 @@ func (q *deliveryQueue) mutate(ctx context.Context, action string, raw json.RawM
 			return false, deliveryConflict()
 		}
 		entry := &state.Entries[index]
-		if entry.Version != payload.Version || deliveryTerminal(entry.Status) || ((entry.Claim != nil) && action != "cancel" && action != "pause") || entry.Status == "sending" || entry.Status == "unknown" {
+		if entry.Version != payload.Version || deliveryTerminal(entry.Status) || (entry.Claim != nil && action != "cancel" && action != "pause" && action != "edit") || entry.Status == "sending" || entry.Status == "unknown" {
 			return false, deliveryConflict()
 		}
 		if (action == "resume" || action == "sendNow" || action == "reorder") && deliveryThreadBlocked(state, entry.ThreadID, entry.ID, receipts) {
@@ -429,9 +437,17 @@ func (q *deliveryQueue) mutate(ctx context.Context, action string, raw json.RawM
 				entry = &state.Entries[first]
 			}
 		case "edit":
-			if err := editDeliveryEntry(entry, payload.Text); err != nil {
-				return false, err
+			if entry.SubmissionStatus != "" {
+				return false, deliveryConflict()
 			}
+			// The attachment lock is nonblocking. Cleanup can hold it while
+			// reading this queue, so binding must never wait for that lock.
+			if edited.bind != nil {
+				if err := edited.bind(); err != nil {
+					return false, err
+				}
+			}
+			entry.Text, entry.Mentions, entry.Params, entry.Claim = edited.Text, edited.Mentions, edited.Params, nil
 		case "reorder":
 			if payload.Direction != -1 && payload.Direction != 1 {
 				return false, deliveryError("QUEUE_INVALID", "Invalid queue order")
@@ -457,31 +473,157 @@ func (q *deliveryQueue) mutate(ctx context.Context, action string, raw json.RawM
 	return result, err
 }
 
-func editDeliveryEntry(entry *deliveryQueueRecord, text *string) error {
-	if text == nil || len(*text) > 128<<10 || strings.TrimSpace(*text) == "" || entry.SubmissionStatus != "" {
-		return deliveryError("QUEUE_INVALID", "Invalid queued message edit")
+type deliveryQueueEdit struct {
+	deliveryQueueEntry
+	bind func() error
+}
+
+func (q *deliveryQueue) prepareEdit(ctx context.Context, payload deliveryMutation) (deliveryQueueEdit, error) {
+	var entry deliveryQueueEdit
+	if payload.Text == nil || len(*payload.Text) > 128<<10 || len(payload.AttachmentIDs) > 20 {
+		return entry, deliveryError("QUEUE_INVALID", "Invalid queued message edit")
 	}
+	if err := q.transaction(func(state *deliveryQueueState) (bool, error) {
+		for _, current := range state.Entries {
+			if current.ID == payload.ID && current.Version == payload.Version && !deliveryTerminal(current.Status) && current.Status != "sending" && current.Status != "unknown" && current.SubmissionStatus == "" {
+				entry.deliveryQueueEntry = current.deliveryQueueEntry
+				return false, nil
+			}
+		}
+		return false, deliveryConflict()
+	}); err != nil {
+		return entry, err
+	}
+
 	var params map[string]json.RawMessage
 	var input []map[string]json.RawMessage
+	var mentions []json.RawMessage
 	if json.Unmarshal(entry.Params, &params) != nil || json.Unmarshal(params["input"], &input) != nil {
-		return deliveryError("QUEUE_INVALID", "This message cannot be edited safely")
+		return entry, deliveryError("QUEUE_INVALID", "This message cannot be edited safely")
+	}
+	_ = json.Unmarshal(entry.Mentions, &mentions)
+	seen := make(map[string]bool)
+	for _, item := range mentions {
+		var mention struct{ ID, Source string }
+		if json.Unmarshal(item, &mention) == nil && mention.Source == "attachment" {
+			seen[mention.ID] = true
+		}
 	}
 	for _, item := range input {
-		var kind, original string
+		var kind, path string
 		_ = json.Unmarshal(item["type"], &kind)
-		if kind != "text" {
-			continue
+		if kind == "localImage" && json.Unmarshal(item["path"], &path) == nil {
+			if id := q.attachmentID(path); id != "" {
+				seen[id] = true
+			}
 		}
-		old := strings.TrimSpace(entry.Text)
-		if json.Unmarshal(item["text"], &original) != nil || !strings.HasPrefix(original, old) {
+	}
+	var ids []string
+	for _, id := range payload.AttachmentIDs {
+		if !submissionUUID.MatchString(id) {
+			return entry, deliveryError("QUEUE_INVALID", "Invalid queued message edit")
+		}
+		if !seen[id] {
+			ids = append(ids, id)
+			seen[id] = true
+		}
+	}
+
+	var cwd string
+	var images []workspaceAttachment
+	if len(ids) != 0 {
+		if len(seen) > 20 || q.resolveAttachments == nil {
+			return entry, deliveryError("QUEUE_INVALID", "Invalid queued message edit")
+		}
+		_ = json.Unmarshal(params["cwd"], &cwd)
+		if cwd == "" {
+			result, err := q.c.request(ctx, "thread/read", conversationObject(map[string]any{"threadId": entry.ThreadID, "includeTurns": false}))
+			if err != nil {
+				return entry, err
+			}
+			var reply struct {
+				Thread struct{ Cwd string } `json:"thread"`
+			}
+			if json.Unmarshal(result, &reply) != nil || reply.Thread.Cwd == "" {
+				return entry, deliveryError("QUEUE_INVALID", "Attachment project is unavailable")
+			}
+			cwd = reply.Thread.Cwd
+		}
+		var err error
+		images, err = q.resolveAttachments(ctx, ids, cwd, entry.ThreadID, false)
+		if err != nil {
+			return entry, err
+		}
+		if len(images) != len(ids) || slices.ContainsFunc(images, func(image workspaceAttachment) bool { return !image.Image }) {
+			return entry, deliveryError("QUEUE_INVALID", "Queued attachments must be images")
+		}
+	}
+
+	firstIndex := -1
+	var original string
+	old := strings.TrimSpace(entry.Text)
+	for i, item := range input {
+		var kind string
+		_ = json.Unmarshal(item["type"], &kind)
+		if kind == "text" {
+			firstIndex = i
+			if json.Unmarshal(item["text"], &original) != nil {
+				return entry, deliveryError("QUEUE_INVALID", "This message cannot be edited safely")
+			}
 			break
 		}
-		item["text"] = conversationObject(strings.TrimSpace(*text) + original[len(old):])
-		params["input"] = conversationObject(input)
-		entry.Params, entry.Text = conversationObject(params), *text
-		return nil
 	}
-	return deliveryError("QUEUE_INVALID", "This message cannot be edited safely")
+	if old != "" && old != original && !strings.HasPrefix(original, old+"\n") {
+		return entry, deliveryError("QUEUE_INVALID", "This message cannot be edited safely")
+	}
+	text := strings.TrimSpace(*payload.Text)
+	appendText := func(line string) {
+		if line != "" {
+			if text != "" {
+				text += "\n"
+			}
+			text += line
+		}
+	}
+	appendText(strings.TrimPrefix(original[len(old):], "\n"))
+	for _, image := range images {
+		var name bytes.Buffer
+		writeConversationJSONString(&name, image.Name)
+		appendText("Attached file " + name.String() + ": " + image.Path)
+		input = append(input, map[string]json.RawMessage{"type": conversationObject("localImage"), "path": conversationObject(image.Path)})
+		mentions = append(mentions, conversationObject(map[string]string{"id": image.ID, "source": "attachment", "title": image.Name, "icon": "image"}))
+	}
+	if firstIndex >= 0 {
+		item := input[firstIndex]
+		var elements []json.RawMessage
+		_ = json.Unmarshal(item["text_elements"], &elements)
+		if text != original && len(elements) != 0 {
+			return entry, deliveryError("QUEUE_INVALID", "This message cannot be edited safely")
+		}
+		if text == "" {
+			input = slices.Delete(input, firstIndex, firstIndex+1)
+		} else {
+			item["text"] = conversationObject(text)
+		}
+	} else if text != "" {
+		input = slices.Insert(input, 0, map[string]json.RawMessage{"type": conversationObject("text"), "text": conversationObject(text), "text_elements": json.RawMessage("[]")})
+	}
+	if mentions == nil {
+		mentions = []json.RawMessage{}
+	}
+	params["input"] = conversationObject(input)
+	entry.Params, entry.Text, entry.Mentions = conversationObject(params), *payload.Text, conversationObject(mentions)
+	if len(input) == 0 || len(entry.Params)+len(conversationObject(entry.Text))+len(entry.Mentions) > 256<<10 {
+		return entry, deliveryError("QUEUE_INVALID", "Invalid queued message edit")
+	}
+	if len(ids) != 0 {
+		threadID := entry.ThreadID
+		entry.bind = func() error {
+			_, err := q.resolveAttachments(ctx, ids, cwd, threadID, true)
+			return err
+		}
+	}
+	return entry, nil
 }
 
 func (q *deliveryQueue) attachmentID(path string) string {

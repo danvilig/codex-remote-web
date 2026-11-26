@@ -1,7 +1,8 @@
 import { createAttachmentService } from '../services/attachments.js';
 import { createConversationTools } from '../services/conversation-tools.js';
 import { name as packageName, version as packageVersion } from '../../../package.json';
-import { createReadStream, readFileSync } from 'node:fs';
+import { createReadStream, readFileSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, resolve, extname } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { listFolders, resolveBrowsePath, isDirectory } from '../files/folders.js';
@@ -33,12 +34,57 @@ const mime: Record<string, string> = {
   ".json": "application/json; charset=utf-8", ".svg": "image/svg+xml", ".png": "image/png", ".ico": "image/x-icon",
 };
 
+function webAssets(publicDir: string) {
+  const assets = new Map<string, { key: string; body: Buffer; revision: string }>();
+  function read(file: string) {
+    const info = statSync(file);
+    const key = `${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`;
+    const cached = assets.get(file);
+    if (cached?.key === key) return cached;
+    const body = readFileSync(file);
+    const asset = { key, body, revision: createHash('sha256').update(body).digest('hex') };
+    assets.set(file, asset);
+    return asset;
+  }
+  function revision(path: string) {
+    const file = resolvePublicAsset(path, publicDir);
+    try { return file ? read(file).revision : ''; } catch { return ''; }
+  }
+  return (req: IncomingMessage, res: ServerResponse, url: URL, file: string) => {
+    const extension = extname(file);
+    res.setHeader('content-type', mime[extension] || 'application/octet-stream');
+    const { body, revision: digest } = read(file);
+    if (extension === '.html') {
+      res.setHeader('cache-control', 'no-store');
+      let html = body.toString();
+      html = html.replace('name="app-bundle-revision" content=""', `name="app-bundle-revision" content="${revision('/app.bundle.js')}"`);
+      for (const css of ['/style.css', '/workspace.css', '/remote-access.css']) {
+        const version = revision(css);
+        if (version) html = html.replace(`href="${css}"`, `href="${css}?v=${version}"`);
+      }
+      res.end(html);
+      return;
+    }
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const etag = `"${digest}"`;
+      res.setHeader('etag', etag);
+      res.setHeader('cache-control', url.search === `?v=${digest}` ? 'private, max-age=31536000, immutable' : 'private, no-cache');
+      const validators = req.headers['if-none-match']?.split(',') || [];
+      if (validators.some(value => ['*', etag, `W/${etag}`].includes(value.trim()))) {
+        res.writeHead(304); res.end(); return;
+      }
+    } else res.setHeader('cache-control', 'no-store');
+    res.end(body);
+  };
+}
+
 export function createHttpHandler(context: any) {
   const { request, sideChats, appRoot, publicDir, authConfig, localAuth, accessAuth, managedPasswordPath, defaultCwd, browseRoots, homeDir, imageRoots, fileRoots, privateCodexRoot, reviewRoots, capabilities, projectless, dispatchBrowserMessage, reviewDiffs, accountLoader, sseClients, leases, isConnected } = context;
   const attachments = createAttachmentService({privateRoot:privateCodexRoot,home:homeDir,browseRoots});
   const settingsService = createSettingsService(request);
   const customization = createCustomizationService(request, { privateRoot: privateCodexRoot, home: homeDir, browseRoots });
   const conversationTools = createConversationTools(request);
+  const serveWebAsset = webAssets(publicDir);
   let storagePending: Promise<unknown> | null = null;
   const handle = async (req: IncomingMessage, res: ServerResponse) => {
   const connected = isConnected();
@@ -50,7 +96,7 @@ export function createHttpHandler(context: any) {
     return;
   }
   const appRoute = req.method === "GET" && (url.pathname === "/" || /^\/settings(?:\/[^/]+)?\/?$/.test(url.pathname));
-  const loginAssets = new Set(["/", "/index.html", "/style.css", "/workspace.css", "/remote-access.css", "/favicon.svg", "/auth-bootstrap.js", "/access-session.js", "/i18n.js", "/codex-brand.js"]);
+  const loginAssets = new Set(["/", "/index.html", "/style.css", "/workspace.css", "/remote-access.css", "/favicon.svg", "/auth-bootstrap.js", "/access-session.js", "/i18n.js", "/codex-brand.js", "/codex-icons.js"]);
   const auth = accessAuth ? await accessAuth(req) : { ok: localAuth!.authorized(req), principal: null, code: 'AUTH_REQUIRED', status: 401 };
   if (accessAuth && url.pathname.startsWith('/api/auth/')) {
     if (url.pathname !== '/api/auth/status') { res.writeHead(404); res.end(); return; }
@@ -63,8 +109,7 @@ export function createHttpHandler(context: any) {
     if (appRoute || loginAssets.has(url.pathname)) {
       const file = resolvePublicAsset(appRoute ? "/" : url.pathname, publicDir);
       if (file) {
-        res.writeHead(200, { "content-type": mime[extname(file)] || "application/octet-stream", "cache-control": "no-store" });
-        res.end(readFileSync(file));
+        serveWebAsset(req, res, url, file);
         return;
       }
     }
@@ -503,8 +548,7 @@ export function createHttpHandler(context: any) {
   if (!file) {
     res.writeHead(404, { "content-type": "text/plain; charset=utf-8" }); res.end("Not found"); return;
   }
-  res.writeHead(200, { "content-type": mime[extname(file)] || "application/octet-stream", "cache-control": "no-store" });
-  res.end(readFileSync(file));
+  serveWebAsset(req, res, url, file);
   };
   return async (req: IncomingMessage, res: ServerResponse) => {
     res.setHeader('X-Frame-Options', 'DENY');

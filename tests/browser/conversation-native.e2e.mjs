@@ -98,13 +98,18 @@ const result=await page.evaluate(()=>{
     dividerBeforeFinal:!!divider&&!!final&&Boolean(divider.compareDocumentPosition(final)&Node.DOCUMENT_POSITION_FOLLOWING),
     citation:(()=>{const link=message?.querySelector('.file-citation');return link?{text:link.textContent,href:link.getAttribute('href'),path:link.dataset.fileReference,lineStart:link.dataset.fileLineStart,lineEnd:link.dataset.fileLineEnd,title:link.title}:null})(),
     externalLink:(()=>{const link=[...message?.querySelectorAll('a')||[]].find(link=>link.href==='https://example.com/guide');return link?{target:link.target,rel:link.rel}:null})(),
-    protocol:(()=>{const turn=document.querySelector('[data-turn-id="protocol-turn"]'),finals=[...turn.querySelectorAll('[data-local-conversation-final-assistant]')],link=turn.querySelector('[data-file-download]'),text=finals[0]?.textContent?.trim()||'';return{finalCount:finals.length,text,memoryVisible:/MEMORY\.md|oai-mem-citation|codex-file-citation/.test(text),link:link?{text:link.textContent,path:link.dataset.fileDownload,download:link.getAttribute('download'),href:link.getAttribute('href')}:null}})(),
+    protocol:(()=>{const turn=document.querySelector('[data-turn-id="protocol-turn"]'),finals=[...turn.querySelectorAll('[data-local-conversation-final-assistant]')],link=turn.querySelector('a[data-file-reference]'),text=finals[0]?.textContent?.trim()||'';return{finalCount:finals.length,text,memoryVisible:/MEMORY\.md|oai-mem-citation|codex-file-citation/.test(text),link:link?{text:link.textContent,path:link.dataset.fileReference,download:link.getAttribute('download'),href:link.getAttribute('href')}:null}})(),
   };
 });
 result.citationClick=await page.evaluate(()=>new Promise(resolve=>{
   addEventListener('codex-webui:file-reference',event=>resolve({detail:event.detail,hash:location.hash}),{once:true});
   document.querySelector('.file-citation').click();
 }));
+await page.locator('#closeSidePanel').click();
+await page.locator('[data-turn-id=native-turn] .turn-work-toggle').click();
+const readIcon=await page.locator('[data-item-id=native-read] .activity-motion svg').boundingBox();
+result.completedToolIcon.svgWidth=readIcon?.width;
+result.completedToolIcon.svgHeight=readIcon?.height;
 await page.click('.activity-group:not(.single) .activity-summary');
 result.groupExpansion=await page.evaluate(()=>({
   itemsVisible:getComputedStyle(document.querySelector('.activity-group:not(.single) .activity-items')).display!=='none',
@@ -141,8 +146,8 @@ if(JSON.stringify(result.timelineOrder)!==JSON.stringify(["message:I’ll inspec
 const normalizedFinal=result.finalText?.replace(/\s+/g,' ').trim();
 if(normalizedFinal!=='Implemented the native conversation timeline. Contiguous tool activity is grouped. The final response is plain Markdown. Updated app.js and guide.')throw new Error(`Unexpected final response text: ${result.finalText}`);
 if((result.finalText?.match(/Implemented the native conversation timeline\./g)||[]).length!==1)throw new Error('Streaming completion replay duplicated the final response');
-if(result.fontSize!=='13px'||result.lineHeight!=='21px')throw new Error(`Expected native 13px/21px typography, got ${result.fontSize}/${result.lineHeight}`);
-if(result.userFontSize!=='13px'||result.userLineHeight!=='21px')throw new Error(`Expected native user 13px/21px typography, got ${result.userFontSize}/${result.userLineHeight}`);
+if(result.fontSize!=='15px'||result.lineHeight!=='25.8px')throw new Error(`Expected 15px/25.8px answer typography, got ${result.fontSize}/${result.lineHeight}`);
+if(result.userFontSize!=='15px'||result.userLineHeight!=='23px')throw new Error(`Expected 15px/23px user typography, got ${result.userFontSize}/${result.userLineHeight}`);
 if(!result.fontFamily?.includes('-apple-system')||result.fontFamily?.includes('Inter'))throw new Error(`Expected native system font stack, got ${result.fontFamily}`);
 if(!result.userFontFamily?.includes('-apple-system')||result.userFontFamily?.includes('Inter'))throw new Error(`Expected native user system font stack, got ${result.userFontFamily}`);
 if(result.userMessageCount!==1)throw new Error(`Optimistic and server user messages must reconcile to one bubble; got ${result.userMessageCount}`);
@@ -159,18 +164,18 @@ if(!result.groupExpansion?.itemsVisible||!result.groupExpansion?.outputHidden)th
 if(result.commandExpansion?.expanded!=='true'||result.commandExpansion.summary!=='Ran command'||result.commandExpansion.chevronGap>8||!result.commandExpansion.terminalIcon||result.commandExpansion.prompt!=='$'||result.commandExpansion.command!=='bun test'||result.commandExpansion.output!=='one test failed'||result.commandExpansion.footer!=='Exit code 1'||result.commandExpansion.borderRadius!=='8px'||result.commandExpansion.outputMaxHeight!=='144px')throw new Error(`Command shell must match the native expandable terminal surface: ${JSON.stringify(result.commandExpansion)}`);
 if(result.citation?.text!=='app.js'||result.citation.href!=='#file-reference'||result.citation.path!=='/tmp/example.ts'||result.citation.lineStart!=='12'||result.citation.lineEnd!=='14'||result.citation.title!=='Open /tmp/example.ts:12-14')throw new Error(`Unexpected file citation: ${JSON.stringify(result.citation)}`);
 if(result.externalLink?.target!=='_blank'||!result.externalLink.rel.includes('noopener')||!result.externalLink.rel.includes('noreferrer'))throw new Error(`External links must retain safe target metadata: ${JSON.stringify(result.externalLink)}`);
-if(result.protocol.finalCount!==1||result.protocol.text.replace(/\s+/g,' ')!=='Artifact ready. 旅行 计划.xlsx'||result.protocol.memoryVisible||result.protocol.link?.text!=='旅行 计划.xlsx'||result.protocol.link?.path!=='/tmp/旅行 计划.xlsx'||result.protocol.link?.download!=='旅行 计划.xlsx'||!result.protocol.link?.href.startsWith('/api/files/download?'))throw new Error(`Codex artifact citations and rollout aliases must render once without internal metadata: ${JSON.stringify(result.protocol)}`);
+if(result.protocol.finalCount!==1||result.protocol.text.replace(/\s+/g,' ')!=='Artifact ready. 旅行 计划.xlsx'||result.protocol.memoryVisible||result.protocol.link?.text!=='旅行 计划.xlsx'||result.protocol.link?.path!=='/tmp/旅行 计划.xlsx'||result.protocol.link?.download!==null||result.protocol.link?.href!=='#file-reference')throw new Error(`Codex artifact citations and rollout aliases must render once without internal metadata: ${JSON.stringify(result.protocol)}`);
 if(result.citationClick?.hash!==''||JSON.stringify(result.citationClick.detail)!==JSON.stringify({path:'/tmp/example.ts',lineStart:12,lineEnd:14}))throw new Error(`File citation must preserve the conversation route and dispatch its reference: ${JSON.stringify(result.citationClick)}`);
 if(result.workedForText!=='Worked for 4s'||!result.dividerBeforeFinal)throw new Error(`Unexpected worked-for divider: ${result.workedForText}`);
-if(result.workedForFlexDirection!=='column'||result.workedForLineCount!==1||JSON.stringify(result.workedForChildren)!==JSON.stringify(['span','div']))throw new Error(`Worked-for unit must render label then one rule; got ${result.workedForFlexDirection}/${result.workedForLineCount}/${JSON.stringify(result.workedForChildren)}`);
+if(result.workedForFlexDirection!=='column'||result.workedForLineCount!==1||JSON.stringify(result.workedForChildren)!==JSON.stringify(['button','div']))throw new Error(`Worked-for unit must render a disclosure then one rule; got ${result.workedForFlexDirection}/${result.workedForLineCount}/${JSON.stringify(result.workedForChildren)}`);
 const type=result.markdownTypography;
 if(type.paragraph.marginTop!=='0px'||type.paragraph.marginBottom!=='11px')throw new Error(`Unexpected paragraph rhythm: ${JSON.stringify(type.paragraph)}`);
 if(type.h1.fontSize!=='24px'||type.h1.lineHeight!=='30px'||type.h1.marginTop!=='0px'||type.h1.marginBottom!=='10px')throw new Error(`Unexpected H1 typography: ${JSON.stringify(type.h1)}`);
 if(type.h4.fontSize!=='17px'||type.h4.lineHeight!=='22px'||type.h4.marginTop!=='20px'||type.h4.marginBottom!=='10px')throw new Error(`Unexpected H4 typography: ${JSON.stringify(type.h4)}`);
 if(type.list.marginTop!=='0px'||type.list.marginBottom!=='0px'||type.list.paddingLeft!=='21px'||type.secondItem.marginTop!=='8px'||type.secondItem.paddingLeft!=='2px')throw new Error(`Unexpected list rhythm: ${JSON.stringify({list:type.list,item:type.secondItem})}`);
-if(type.inlineCode.fontSize!=='11.96px'||type.inlineCode.paddingLeft!=='6px'||type.inlineCode.paddingTop!=='1px'||type.inlineCode.borderRadius!=='6px')throw new Error(`Unexpected inline code typography: ${JSON.stringify(type.inlineCode)}`);
+if(type.inlineCode.fontSize!=='13.8px'||type.inlineCode.paddingLeft!=='6px'||type.inlineCode.paddingTop!=='1px'||type.inlineCode.borderRadius!=='6px')throw new Error(`Unexpected inline code typography: ${JSON.stringify(type.inlineCode)}`);
 if(type.blockquote.marginBottom!=='8px'||type.blockquote.paddingLeft!=='24px'||type.blockquote.paddingTop!=='8px'||type.blockquote.lineHeight!=='24px')throw new Error(`Unexpected blockquote rhythm: ${JSON.stringify(type.blockquote)}`);
-if(type.hr.marginTop!=='28px'||type.hr.marginBottom!=='28px'||type.pre.marginTop!=='14px'||type.pre.marginBottom!=='14px')throw new Error(`Unexpected block spacing: ${JSON.stringify({hr:type.hr,pre:type.pre})}`);
+if(type.hr.marginTop!=='28px'||type.hr.marginBottom!=='28px'||type.pre.marginTop!=='0px'||type.pre.marginBottom!=='0px')throw new Error(`Unexpected block spacing: ${JSON.stringify({hr:type.hr,pre:type.pre})}`);
 await page.setViewportSize({width:390,height:844});
 await page.evaluate(()=>document.querySelector('#sidebar')?.classList.remove('mobile-open'));
 await page.waitForTimeout(250);

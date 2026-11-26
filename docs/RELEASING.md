@@ -1,6 +1,6 @@
 # 预发布候选与发布流程
 
-目标版本为 `0.2.0-beta.2`（计划标签 `v0.2.0-beta.2`，仍为预发布）。本地脚本只准备候选或 CI Artifact，不自动推送、打标签、上传 GitHub Release 或重启服务。公开仓库为 `danvilig/codex-remote-web`，首次公开从独立快照开始，后续遵循 [Git 开发流程](GIT_WORKFLOW.md)：日常 PR 进入 `develop`，准备发版才创建 `release/<version>`，稳定后通过 PR 合入 `main`。标签指向已通过 Verify 的 `main` 提交，由维护者单独授权发布。
+目标版本为 `0.2.1-beta.1`（计划标签 `v0.2.1-beta.1`，仍为预发布）。本地脚本只准备候选或 CI Artifact，不自动推送、打标签、上传 GitHub Release 或重启服务。公开仓库为 `danvilig/codex-remote-web`，首次公开从独立快照开始，后续遵循 [Git 开发流程](GIT_WORKFLOW.md)：日常 PR 进入 `develop`，准备发版才创建 `release/<version>`，稳定后通过 PR 合入 `main`。标签指向已通过 Verify 的 `main` 提交，由维护者单独授权发布。
 
 ## 公开源码快照
 
@@ -90,7 +90,7 @@ bun run candidate:prepare
 
 ## 跨平台 GitHub Release
 
-Beta.2 目标为 Linux x64/arm64、macOS Apple Silicon（macOS 15+）和 Windows x64（Windows 11）。不构建 Intel Mac、Windows ARM64 或 musl 包；既有发布标签和附件保持不变。版本变更、发布说明与候选验证先通过稳定化 PR；发布准备不等于授权打标签或公开上传。
+0.2.1 Beta.1 目标为 Linux x64/arm64、macOS Apple Silicon（macOS 15+）和 Windows x64（Windows 11）。不构建 Intel Mac、Windows ARM64 或 musl 包；既有发布标签和附件保持不变。版本变更、发布说明与候选验证先通过稳定化 PR；发布准备不等于授权打标签或公开上传。
 
 `.github/workflows/platform-packages.yml` 使用原生 `ubuntu-24.04`、`ubuntu-24.04-arm`、`macos-15` 和 `windows-2025` runner 生成候选包。发布使用受保护 `main` 上同一提交的成功 push Verify、已有版本标签，以及同仓库同提交、`run_attempt=1` 的 **Native platform packages** 完成记录；失败需新启动一次工作流，不能使用重跑产物。仓库所有者在 `main` 手动运行 **Publish platform release**，输入 `tag` 与 `candidate_run`。推送标签不会自动发布；发布流程校验并原样上传该候选包。
 
@@ -102,7 +102,7 @@ macOS 在 `macos-15` 构建，`LSMinimumSystemVersion` 必须保持 `15.0`。mac
 
 桌面安装包使用已通过测试的便携网关。Windows/Linux 使用 Rust 1.95.0 与锁定 Cargo 依赖，分别链接系统 WebView2 和 WebKitGTK；macOS 仍使用 AppKit/WKWebView。Windows 以 WiX 5.0.2 构建 per-user MSI，实际安装、验证快捷方式和卸载；Linux 两种架构安装实际 DEB 并在 Xvfb 测试。两端使用系统无障碍接口操作安装后的窗口，报告安装包大小、逻辑字节和磁盘分配。发布验证安装报告的源提交和 SHA-256。TCC/Gatekeeper/SmartScreen 提示、真实注销/登录与公网邮箱验证仍需另行验收。
 
-Beta.2 共十个安装/归档文件：macOS DMG、Windows MSI、两种 Linux 架构的桌面 DEB、四个系统/架构的 CLI 便携包，以及两种 Linux 架构的原生部署包。Windows 便携包为 zip，其他归档为 tar.gz；每个文件附带同名 `.sha256`，汇总 `SHA256SUMS` 共十项。下载一个包时只核对它的校验文件，下载全部包时可用 `sha256sum -c SHA256SUMS`。GitHub 自动提供源码下载，无需重复上传源码包。
+0.2.1 Beta.1 共十个安装/归档文件：macOS DMG、Windows MSI、两种 Linux 架构的桌面 DEB、四个系统/架构的 CLI 便携包，以及两种 Linux 架构的原生部署包。Windows 便携包为 zip，其他归档为 tar.gz；每个文件附带同名 `.sha256`，汇总 `SHA256SUMS` 共十项。下载一个包时只核对它的校验文件，下载全部包时可用 `sha256sum -c SHA256SUMS`。GitHub 自动提供源码下载，无需重复上传源码包。
 
 本机便携构建使用 `bun run release:portable -- --output-dir <new-directory>`，必须与目标系统及架构一致。`CODEX_WEBUI_PORTABLE_ARCHIVE` 指定待验收的实际归档，`bun run test:portable` 验证网关不依赖宿主机 Bun/Node、安装器或编译器。归档包含原生网关及 Go 许可证，不包含 Codex、cloudflared 或凭据。
 

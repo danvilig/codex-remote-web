@@ -41,8 +41,42 @@ export function renderReasoningMenu({menu,modelName,effort,values,reasoningLabel
 export function renderModelOptions({menu,models,selected,t,icon,display,onSelect,onBack,prefix=''}) {
   const view=element('div','model-menu-view model-menu-view-models'),head=element('div','model-menu-title-row'),back=element('button','model-menu-back');
   back.type='button';back.id=prefix?prefix+'ModelMenuBack':'modelMenuBack';back.setAttribute('aria-label',t('Back'));back.innerHTML=icon('chevronLeft');back.onclick=onBack;
-  head.append(back,element('div','model-menu-title',t('Model')));const list=element('div','model-menu-list model-list');view.append(head,list);menu.replaceChildren(view);
-  for(const model of models){const button=element('button','model-option');button.type='button';button.role='menuitemradio';button.dataset.model=model.model;button.setAttribute('aria-checked',String(model.model===selected));const copy=element('span','model-option-copy');copy.append(element('strong','',display(model)));if(model.description)copy.append(element('small','',model.description));const check=element('span','model-check');if(model.model===selected)check.innerHTML=icon('check');button.append(copy,check);button.onclick=()=>onSelect(model.model);list.append(button);}
+  const title=element('h2','model-menu-title',t('Model'));
+  const searchBox=element('label','model-search'),search=element('input'),list=element('div','model-menu-list model-list');
+  const empty=element('p','model-search-empty',t('No matching models'));
+  search.type='search';search.placeholder=t('Search models');search.setAttribute('aria-label',search.placeholder);
+  searchBox.innerHTML=icon('search');searchBox.append(search);empty.role='status';empty.hidden=true;
+  head.append(back,title);view.append(head,searchBox,list,empty);menu.replaceChildren(view);
+  const options=models.map(model=>{
+    const name=display(model),button=element('button','model-option');
+    button.type='button';button.dataset.model=model.model;button.setAttribute('aria-pressed',String(model.model===selected));
+    const copy=element('span','model-option-copy');copy.dataset.i18nIgnore='';copy.append(element('strong','',name));
+    if(model.description)copy.append(element('small','',model.description));
+    const check=element('span','model-check');if(model.model===selected)check.innerHTML=icon('check');
+    button.append(copy,check);button.onclick=()=>onSelect(model.model);list.append(button);
+    return {button,terms:`${name} ${model.model} ${model.description||''}`.toLocaleLowerCase()};
+  });
+  const filter=()=>{
+    const query=search.value.trim().toLocaleLowerCase();
+    for(const {button,terms} of options)button.hidden=!terms.includes(query);
+    empty.hidden=options.some(({button})=>!button.hidden);
+  };
+  search.oninput=filter;filter();
+  view.onkeydown=event=>{
+    const visible=options.filter(({button})=>!button.hidden).map(({button})=>button);
+    const index=visible.indexOf(event.target);
+    if(event.target===search&&event.key==='Escape'&&search.value){
+      event.preventDefault();event.stopPropagation();search.value='';filter();return;
+    }
+    if(event.target===search&&event.key==='Enter'){
+      event.preventDefault();if(visible.length===1&&!event.isComposing)visible[0].click();return;
+    }
+    if(event.target!==search&&index<0)return;
+    const target=event.key==='ArrowDown'?visible[index+1]||visible[0]:event.key==='ArrowUp'?(index<0?visible.at(-1):visible[index-1]||search):index>=0&&event.key==='Home'?visible[0]:index>=0&&event.key==='End'?visible.at(-1):null;
+    if(target){event.preventDefault();target.focus({preventScroll:true});target.scrollIntoView({block:'nearest'});}
+  };
+  // On touchscreens, leave typing opt-in so opening the picker does not raise the keyboard.
+  return ()=> (matchMedia('(pointer:coarse)').matches ? list.querySelector('[aria-pressed=true]')||list.querySelector('button')||back : search).focus({preventScroll:true});
 }
 export function renderPermissionOptions({list,options,selected,t,icon,onSelect}) {
   list.replaceChildren();

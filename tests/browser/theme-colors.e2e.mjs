@@ -34,10 +34,10 @@ for(const scheme of ['light','dark']){
   });
   await page.click('#toggleSidePanel');
   await page.click('[data-side-panel-action="review"]');
-  await page.click('.approval-menu-toggle');
   await page.click('.activity-item');
   await page.hover('.activity-item');
   await page.hover('.approval-deny');
+  await page.click('.approval-menu-toggle');
   const result=await page.evaluate(()=>{
     const canvas=document.createElement('canvas');canvas.width=canvas.height=1;const context=canvas.getContext('2d',{willReadFrequently:true});
     const flatten=(value,backdrop)=>{context.clearRect(0,0,1,1);context.fillStyle=backdrop;context.fillRect(0,0,1,1);context.fillStyle=value;context.fillRect(0,0,1,1);const [r,g,b]=context.getImageData(0,0,1,1).data;return `rgb(${r}, ${g}, ${b})`};
@@ -67,8 +67,8 @@ for(const scheme of ['light','dark']){
       approval:style('.approval-card'),
       approvalDenyHover:style('.approval-deny'),
       command:style('.approval-command code'),
-      approvalMenu:style('.approval-menu'),
-      approvalMenuItem:style('.approval-menu button'),
+      approvalMenu:style('.workspace-popup'),
+      approvalMenuItem:style('.workspace-popup button'),
       reviewHead:style('.review-file-head'),
       reviewName:style('.review-file-name'),
       reviewChevron:style('.review-chevron svg'),

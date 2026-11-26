@@ -35,6 +35,7 @@ const PUBLIC_ASSETS = new Set([
   "/access-session.js",
   "/i18n.js",
   "/codex-brand.js",
+  "/codex-icons.js",
   "/app.bundle.js",
 ]);
 
